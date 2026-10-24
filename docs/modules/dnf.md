@@ -28,6 +28,19 @@ def remove_legacy_tools(ctx):
     dnf.packages(ctx, ["old-tool"], state="absent")
 ```
 
+## `swap(ctx, old, new, *, allowerasing=False)`
+
+Replace `old` with `new`, unless `new` is already installed.
+
+- `allowerasing` passes `--allowerasing` so dnf may remove conflicting packages.
+- The swap is verified afterward with `rpm -q new`.
+
+```python
+@bundle.task("Install full ffmpeg", tags={"packages"})
+def install_full_ffmpeg(ctx):
+    dnf.swap(ctx, "ffmpeg-free", "ffmpeg", allowerasing=True)
+```
+
 ## `autoremove(ctx)`
 
 Remove unused package dependencies if `dnf repoquery --unneeded` reports any.

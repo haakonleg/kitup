@@ -138,7 +138,7 @@ ctx.fail("reason")                   # fail the task
 All modules are idempotent and report changes through `ctx.changed()`. Modules
 are standalone and do not import each other.
 
-- `dnf` — packages, groups, release RPMs, repositories, and COPR.
+- `dnf` — packages, groups, swaps, release RPMs, repositories, and COPR.
 - `files` — files, copies, line/block edits, directories, and symlinks.
 - `commands` — one-off commands with `creates`/`unless` guards.
 - `systemd` — enable/disable and start/stop units.

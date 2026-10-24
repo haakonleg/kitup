@@ -36,6 +36,34 @@ def packages(
         raise TaskFailed(f"invalid package state: {state!r}")
 
 
+def swap(
+    ctx: TaskContext,
+    old: str,
+    new: str,
+    *,
+    allowerasing: bool = False,
+) -> None:
+    """Replace ``old`` with ``new`` unless ``new`` is already installed."""
+    require_text(old, "package to remove")
+    require_text(new, "package to install")
+    if _rpm_installed(ctx, new):
+        return
+
+    ctx.changed(
+        {"removed": old, "installed": new},
+        f"swap {old} -> {new}",
+    )
+    command = [_dnf_command(ctx), "swap", "-y", old, new]
+    if allowerasing:
+        command.append("--allowerasing")
+    ctx.run(command, sudo=True, record=False)
+
+    if ctx.dry_run:
+        return
+    if not _rpm_installed(ctx, new):
+        raise TaskFailed(f"package still missing after swap: {new}")
+
+
 def _ensure_absent(ctx: TaskContext, names: list[str], *, group: bool) -> None:
     installed = _installed(ctx, names, group)
     if not installed:

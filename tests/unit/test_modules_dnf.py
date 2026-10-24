@@ -123,6 +123,67 @@ def test_install_failure_is_reported(tmp_path):
         dnf.packages(ctx, ["git"])
 
 
+def test_swap_is_a_noop_when_replacement_is_installed(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(0)]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.swap(ctx, "ffmpeg-free", "ffmpeg")
+
+    assert [call[0] for call in command.calls] == [["rpm", "-q", "ffmpeg"]]
+    assert ctx.changes == []
+
+
+def test_swap_replaces_package_and_verifies_result(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1), response(0), response(0)]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.swap(ctx, "ffmpeg-free", "ffmpeg", allowerasing=True)
+
+    assert command.calls[1][0] == [
+        "dnf5",
+        "swap",
+        "-y",
+        "ffmpeg-free",
+        "ffmpeg",
+        "--allowerasing",
+    ]
+    assert command.calls[1][1]["sudo"] is True
+    assert command.calls[2][0] == ["rpm", "-q", "ffmpeg"]
+    assert ctx.changes[0].data == {"removed": "ffmpeg-free", "installed": "ffmpeg"}
+    assert ctx.changes[0].summary == "swap ffmpeg-free -> ffmpeg"
+
+
+def test_swap_dry_run_does_not_execute(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1)]
+    ctx = make_context(tmp_path, dry_run=True, command=command)
+
+    dnf.swap(ctx, "ffmpeg-free", "ffmpeg", allowerasing=True)
+
+    assert [call[0] for call in command.calls] == [["rpm", "-q", "ffmpeg"]]
+    assert len(ctx.changes) == 1
+
+
+def test_swap_failure_is_reported(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1), response(0), response(1)]
+    ctx = make_context(tmp_path, command=command)
+
+    with pytest.raises(TaskFailed, match="still missing after swap"):
+        dnf.swap(ctx, "ffmpeg-free", "ffmpeg")
+
+
+def test_swap_rejects_empty_names(tmp_path):
+    ctx = make_context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="package to remove must not be empty"):
+        dnf.swap(ctx, " ", "ffmpeg")
+    with pytest.raises(TaskFailed, match="package to install must not be empty"):
+        dnf.swap(ctx, "ffmpeg-free", " ")
+
+
 def test_invalid_states_are_errors(tmp_path):
     ctx = make_context(tmp_path)
 
