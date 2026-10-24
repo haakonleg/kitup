@@ -73,15 +73,21 @@ def remove_vendor_repository(ctx):
     dnf.repository(ctx, state="absent", name="tool.repo")
 ```
 
-## `rpm(ctx, source)`
+## `rpm(ctx, sources)`
 
-Install a release RPM from a URL or local path. `dnf install` handles an
-already-installed package.
+Install one or more release RPMs from URLs or local paths. `sources` may be a
+single value or an iterable. `dnf install` handles already-installed packages.
 
 ```python
-@bundle.task("Install example release RPM", needs_sudo=True, tags={"repos"})
-def install_example_release(ctx):
-    dnf.rpm(ctx, "https://example.test/tool-release-2-1.noarch.rpm")
+@bundle.task("Install example release RPMs", needs_sudo=True, tags={"repos"})
+def install_example_releases(ctx):
+    dnf.rpm(
+        ctx,
+        [
+            "https://example.test/tool-release-2-1.noarch.rpm",
+            "/var/tmp/extra-release-1-1.noarch.rpm",
+        ],
+    )
 ```
 
 ## Notes

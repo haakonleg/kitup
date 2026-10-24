@@ -88,22 +88,17 @@ def test_user_scope_refuses_root(tmp_path):
         systemd.unit(ctx, "app.service", state="started", scope="user")
 
 
-def test_invalid_scope_and_state_are_errors(tmp_path):
+def test_invalid_arguments_are_rejected(tmp_path):
     ctx = make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid systemd scope"):
         systemd.unit(ctx, "app.service", scope="session")
-
     with pytest.raises(TaskFailed, match="invalid systemd state"):
         systemd.unit(ctx, "app.service", state="sleeping")
-
     with pytest.raises(TaskFailed, match="invalid systemd state"):
         systemd.unit(ctx, "app.service", state="running")
-
-
-def test_unit_rejects_empty_name(tmp_path):
     with pytest.raises(TaskFailed, match="systemd unit must not be empty"):
-        systemd.unit(make_context(tmp_path), "  ")
+        systemd.unit(ctx, "  ")
 
 
 def test_daemon_reload_records_a_change(tmp_path):

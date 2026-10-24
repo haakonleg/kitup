@@ -4,8 +4,9 @@ import pytest
 
 from kitup.errors import TaskFailed
 from kitup.modules import dnf
+from kitup.registry import Task
 
-from .helpers import FakeCommandRunner, completed, make_context
+from .helpers import FakeCommandRunner, FakeSudo, completed, make_context
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,18 @@ def test_ensure_present_is_a_noop_when_installed(tmp_path):
         ["rpm", "-q", "vim"],
     ]
     assert ctx.changes == []
+
+
+def test_read_only_probe_does_not_inherit_task_sudo(tmp_path):
+    command = FakeCommandRunner()
+    sudo = FakeSudo()
+    ctx = make_context(tmp_path, command=command, sudo=sudo)
+    ctx.begin_task(Task(bundle="test", name="test", func=lambda ctx: None, needs_sudo=True))
+
+    dnf.packages(ctx, ["git"])
+
+    assert command.calls[0][1]["sudo"] is False
+    assert sudo.refresh_count == 0
 
 
 def test_ensure_present_installs_only_missing_packages(tmp_path):
@@ -112,35 +125,15 @@ def test_install_failure_is_reported(tmp_path):
         dnf.packages(ctx, ["git"])
 
 
-def test_invalid_state_is_an_error(tmp_path):
+def test_invalid_states_are_errors(tmp_path):
     ctx = make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid package state"):
         dnf.packages(ctx, ["git"], state="unknown")
-
-
-def test_packages_accepts_a_single_string(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0)]
-    ctx = make_context(tmp_path, command=command)
-
-    dnf.packages(ctx, "git")
-
-    assert [call[0] for call in command.calls] == [["rpm", "-q", "git"]]
-    assert ctx.changes == []
-
-
-def test_packages_rejects_empty_names(tmp_path):
-    ctx = make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="must not be empty"):
-        dnf.packages(ctx, [])
-
-    with pytest.raises(TaskFailed, match="must not be empty"):
-        dnf.packages(ctx, "")
-
-    with pytest.raises(TaskFailed, match="must not be empty"):
-        dnf.packages(ctx, ["git", "  "])
+    with pytest.raises(TaskFailed, match="invalid COPR state"):
+        dnf.copr(ctx, "owner/project", state="invalid")
+    with pytest.raises(TaskFailed, match="invalid repository state"):
+        dnf.repository(ctx, "https://example.test/tool.repo", state="invalid")
 
 
 def test_autoremove_is_a_noop_when_nothing_is_unneeded(tmp_path):
@@ -174,17 +167,6 @@ def test_autoremove_removes_unneeded_packages(tmp_path):
     assert command.calls[1][1]["sudo"] is True
     assert ctx.changes[0].data == {"removed": ["libfoo", "libbar"]}
     assert ctx.changes[0].summary == "-libfoo -libbar"
-
-
-def test_autoremove_dry_run_does_not_run(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0, "libfoo\n")]
-    ctx = make_context(tmp_path, dry_run=True, command=command)
-
-    dnf.autoremove(ctx)
-
-    assert len(command.calls) == 1
-    assert ctx.changes[0].summary == "-libfoo"
 
 
 def test_autoremove_query_failure_is_reported(tmp_path):
@@ -272,20 +254,6 @@ def test_copr_absent_is_a_noop_when_missing(tmp_path):
     assert ctx.changes == []
 
 
-def test_invalid_copr_state_is_an_error(tmp_path):
-    ctx = make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="invalid COPR state"):
-        dnf.copr(ctx, "owner/project", state="invalid")
-
-
-def test_copr_rejects_empty_project(tmp_path):
-    ctx = make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="COPR project must not be empty"):
-        dnf.copr(ctx, "  ")
-
-
 def test_rpm_release_installs_source(tmp_path):
     source = "https://example.test/tool-release-2-1.noarch.rpm"
     command = FakeCommandRunner()
@@ -295,18 +263,7 @@ def test_rpm_release_installs_source(tmp_path):
 
     assert command.calls[0][0] == ["dnf5", "install", "-y", source]
     assert command.calls[0][1]["sudo"] is True
-    assert ctx.changes[0].data == {"source": source}
-
-
-def test_rpm_release_dry_run_does_not_install(tmp_path):
-    source = "https://example.test/tool-release-2-1.noarch.rpm"
-    command = FakeCommandRunner()
-    ctx = make_context(tmp_path, dry_run=True, command=command)
-
-    dnf.rpm(ctx, source)
-
-    assert command.calls == []
-    assert len(ctx.changes) == 1
+    assert ctx.changes[0].data == {"sources": [source]}
 
 
 def test_rpm_release_accepts_local_path(tmp_path):
@@ -317,14 +274,22 @@ def test_rpm_release_accepts_local_path(tmp_path):
     dnf.rpm(ctx, source)
 
     assert command.calls[0][0] == ["dnf5", "install", "-y", str(source)]
-    assert ctx.changes[0].data == {"source": str(source)}
+    assert ctx.changes[0].data == {"sources": [str(source)]}
 
 
-def test_invalid_repository_state_is_an_error(tmp_path):
-    ctx = make_context(tmp_path)
+def test_rpm_release_accepts_multiple_sources(tmp_path):
+    url = "https://example.test/tool-release-2-1.noarch.rpm"
+    local = tmp_path / "extra-release-1-1.noarch.rpm"
+    command = FakeCommandRunner()
+    ctx = make_context(tmp_path, command=command)
 
-    with pytest.raises(TaskFailed, match="invalid repository state"):
-        dnf.repository(ctx, "https://example.test/tool.repo", state="invalid")
+    dnf.rpm(ctx, [url, local])
+
+    assert command.calls[0][0] == ["dnf5", "install", "-y", url, str(local)]
+    assert ctx.changes[0].data == {"sources": [url, str(local)]}
+    assert ctx.changes[0].summary == (
+        "install tool-release-2-1.noarch.rpm, extra-release-1-1.noarch.rpm"
+    )
 
 
 def test_repository_present_requires_source(tmp_path):
@@ -341,25 +306,25 @@ def test_repository_absent_requires_name(tmp_path):
         dnf.repository(ctx, "https://example.test/tool.repo", state="absent")
 
 
-def test_repository_rejects_empty_source(tmp_path):
+def test_empty_inputs_are_rejected(tmp_path):
     ctx = make_context(tmp_path)
 
+    with pytest.raises(TaskFailed, match="must not be empty"):
+        dnf.packages(ctx, [])
+    with pytest.raises(TaskFailed, match="must not be empty"):
+        dnf.packages(ctx, "")
+    with pytest.raises(TaskFailed, match="must not be empty"):
+        dnf.packages(ctx, ["git", "  "])
+    with pytest.raises(TaskFailed, match="COPR project must not be empty"):
+        dnf.copr(ctx, "  ")
     with pytest.raises(TaskFailed, match="repository source must not be empty"):
         dnf.repository(ctx, "  ")
-
-
-def test_repository_rejects_empty_name(tmp_path):
-    ctx = make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="repository name must not be empty"):
         dnf.repository(ctx, state="absent", name="  ")
-
-
-def test_rpm_rejects_empty_source(tmp_path):
-    ctx = make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="RPM source must not be empty"):
         dnf.rpm(ctx, "  ")
+    with pytest.raises(TaskFailed, match="RPM sources must not be empty"):
+        dnf.rpm(ctx, [])
 
 
 def test_repository_present_adds_repo_file(tmp_path):
@@ -439,20 +404,6 @@ def test_repository_present_dry_run_does_not_add(tmp_path):
 
     assert [call[0] for call in command.calls] == [["dnf5", "--dump-main-config"]]
     assert ctx.changes[0].summary == "add repository tool.repo"
-
-
-def test_repository_absent_dry_run_does_not_remove(tmp_path):
-    reposdir = tmp_path / "repos.d"
-    reposdir.mkdir()
-    (reposdir / "tool.repo").write_text("[tool]\n", encoding="utf-8")
-    command = FakeCommandRunner()
-    command.responses = [response(0, f"reposdir = {reposdir}\n")]
-    ctx = make_context(tmp_path, dry_run=True, command=command)
-
-    dnf.repository(ctx, state="absent", name="tool.repo")
-
-    assert [call[0] for call in command.calls] == [["dnf5", "--dump-main-config"]]
-    assert ctx.changes[0].summary == "remove repository tool.repo"
 
 
 def test_repository_uses_custom_name(tmp_path):

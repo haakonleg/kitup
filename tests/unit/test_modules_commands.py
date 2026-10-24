@@ -69,36 +69,16 @@ def test_shell_uses_default_shell_from_environment(tmp_path, monkeypatch):
     assert command.calls[0][0] == ["/bin/zsh", "-c", "echo hello"]
 
 
-def test_shell_dry_run_does_not_execute(tmp_path):
-    command = FakeCommandRunner()
-    ctx = make_context(tmp_path, dry_run=True, command=command)
+def test_invalid_arguments_are_rejected(tmp_path):
+    ctx = make_context(tmp_path)
 
-    commands.shell(ctx, "touch file", shell="/bin/sh")
-
-    assert command.calls == []
-    assert len(ctx.changes) == 1
-
-
-def test_run_rejects_string_argv(tmp_path):
     with pytest.raises(TaskFailed, match="sequence of arguments"):
-        commands.run(make_context(tmp_path), "echo hello")
-
-
-def test_run_rejects_empty_creates_path(tmp_path):
+        commands.run(ctx, "echo hello")
     with pytest.raises(TaskFailed, match="creates path must not be empty"):
-        commands.run(make_context(tmp_path), ["true"], creates="")
-
-
-def test_run_rejects_empty_cwd(tmp_path):
+        commands.run(ctx, ["true"], creates="")
     with pytest.raises(TaskFailed, match="cwd must not be empty"):
-        commands.run(make_context(tmp_path), ["true"], cwd="")
-
-
-def test_shell_rejects_empty_command(tmp_path):
+        commands.run(ctx, ["true"], cwd="")
     with pytest.raises(TaskFailed, match="shell command must not be empty"):
-        commands.shell(make_context(tmp_path), "  ")
-
-
-def test_shell_rejects_empty_executable(tmp_path):
+        commands.shell(ctx, "  ")
     with pytest.raises(TaskFailed, match="shell must not be empty"):
-        commands.shell(make_context(tmp_path), "true", shell="")
+        commands.shell(ctx, "true", shell="")

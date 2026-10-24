@@ -66,7 +66,8 @@ def autoremove(ctx: TaskContext) -> None:
             "--quiet",
             "--queryformat",
             "%{name}\n",
-        ]
+        ],
+        sudo=False,
     )
     if result.returncode != 0:
         raise TaskFailed(
@@ -91,7 +92,7 @@ def copr(ctx: TaskContext, project: str, *, state: str = "present") -> None:
         raise TaskFailed(f"invalid COPR state: {state!r}")
     require_text(project, "COPR project")
 
-    result = ctx.probe([_dnf_command(ctx), "copr", "list"])
+    result = ctx.probe([_dnf_command(ctx), "copr", "list"], sudo=False)
     if result.returncode != 0:
         raise TaskFailed(
             "could not list COPR repositories",
@@ -175,12 +176,18 @@ def repository(
     ctx.run(["rm", "-f", str(path)], sudo=True, record=False)
 
 
-def rpm(ctx: TaskContext, source: str | Path) -> None:
-    """Install a release RPM from a URL or local path."""
-    require_path(source, "RPM source")
-    label = Path(urlparse(str(source)).path).name or str(source)
-    ctx.changed({"source": str(source)}, f"install {label}")
-    ctx.run([_dnf_command(ctx), "install", "-y", str(source)], sudo=True, record=False)
+def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> None:
+    """Install release RPMs from URLs or local paths."""
+    if isinstance(sources, (str, Path)):
+        sources = [sources]
+    wanted = _dedupe(sources)
+    require_collection(wanted, "RPM sources")
+    for source in wanted:
+        require_path(source, "RPM source")
+
+    labels = [Path(urlparse(source).path).name or source for source in wanted]
+    ctx.changed({"sources": wanted}, f"install {', '.join(labels)}")
+    ctx.run([_dnf_command(ctx), "install", "-y", *wanted], sudo=True, record=False)
 
 
 def _ensure_present(
@@ -227,7 +234,7 @@ def _repository_path(ctx: TaskContext, filename: str) -> Path:
 
 
 def _reposdir(ctx: TaskContext) -> Path:
-    result = ctx.probe([_dnf_command(ctx), "--dump-main-config"])
+    result = ctx.probe([_dnf_command(ctx), "--dump-main-config"], sudo=False)
     if result.returncode == 0:
         for line in result.stdout.splitlines():
             key, separator, value = line.partition("=")
@@ -256,7 +263,7 @@ def _installed(ctx: TaskContext, names: list[str], group: bool) -> list[str]:
 
 
 def _installed_groups(ctx: TaskContext, names: list[str]) -> list[str]:
-    result = ctx.probe([_dnf_command(ctx), "group", "list", "--installed"])
+    result = ctx.probe([_dnf_command(ctx), "group", "list", "--installed"], sudo=False)
     if result.returncode != 0:
         raise TaskFailed(
             "could not list installed package groups",
@@ -283,7 +290,7 @@ def _parse_installed_groups(output: str) -> set[str]:
     return groups
 
 
-def _dedupe(names: Iterable[str]) -> list[str]:
+def _dedupe(names: Iterable[str | Path]) -> list[str]:
     return list(dict.fromkeys(str(name) for name in names))
 
 
@@ -297,4 +304,4 @@ def _dnf_command(ctx: TaskContext) -> str:
 
 def _rpm_installed(ctx: TaskContext, name: str) -> bool:
     """Return whether an RPM package is installed."""
-    return ctx.probe(["rpm", "-q", name]).returncode == 0
+    return ctx.probe(["rpm", "-q", name], sudo=False).returncode == 0

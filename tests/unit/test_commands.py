@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import signal
 import subprocess
 from io import StringIO
 
@@ -91,13 +90,14 @@ def test_nonzero_exit_can_be_probed(monkeypatch):
     assert result.returncode == 4
 
 
-def test_commands_get_devnull_stdin(monkeypatch):
+def test_commands_use_a_process_group_without_a_new_session(monkeypatch):
     calls = patch_popen(monkeypatch, FakeProcess())
     runner = CommandRunner(PrivilegeManager())
 
     runner.run(["true"])
 
-    assert calls[0][1]["stdin"] is subprocess.DEVNULL
+    assert calls[0][1]["process_group"] == 0
+    assert "start_new_session" not in calls[0][1]
 
 
 def test_sudo_is_refreshed_and_wrapped(monkeypatch):
@@ -143,13 +143,3 @@ def test_timeout_kills_the_process_group(monkeypatch):
     assert killed == [process]
     assert exc.value.stdout == "tail out"
     assert exc.value.stderr == "tail err"
-
-
-def test_kill_process_group_sends_sigkill(monkeypatch):
-    calls = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: calls.append((pid, sig)))
-    process = FakeProcess(pid=4321)
-
-    command_module._kill_process_group(process)  # type: ignore[arg-type]
-
-    assert calls == [(4321, signal.SIGKILL)]

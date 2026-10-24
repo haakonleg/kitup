@@ -16,7 +16,7 @@ def test_root_runs_without_sudo(monkeypatch):
     assert manager.wrap(["dnf5"]) == ["dnf5"]
 
 
-def test_cached_credentials_are_used(monkeypatch):
+def test_cached_credentials_are_used_without_output(monkeypatch, capsys):
     monkeypatch.setattr("os.geteuid", lambda: 1000)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")
     calls = []
@@ -27,9 +27,10 @@ def test_cached_credentials_are_used(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    PrivilegeManager().refresh()
+    PrivilegeManager().refresh('Task "Install packages" requires sudo privileges.')
 
     assert calls == [["sudo", "-n", "-v"]]
+    assert capsys.readouterr().err == ""
 
 
 def test_missing_credentials_without_tty_fail(monkeypatch):
@@ -61,6 +62,24 @@ def test_tty_prompts_when_cache_is_missing(monkeypatch):
     PrivilegeManager().refresh()
 
     assert calls == [["sudo", "-n", "-v"], ["sudo", "-v"]]
+
+
+def test_tty_prompt_prints_reason(monkeypatch, capsys):
+    monkeypatch.setattr("os.geteuid", lambda: 1000)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 1 if argv == ["sudo", "-n", "-v"] else 0
+        ),
+    )
+
+    reason = 'Task "Install packages" requires sudo privileges.'
+    PrivilegeManager().refresh(reason)
+
+    assert capsys.readouterr().err == f"{reason}\n"
 
 
 def test_failed_prompt_is_an_error(monkeypatch):

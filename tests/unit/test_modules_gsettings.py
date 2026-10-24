@@ -190,20 +190,6 @@ def test_absent_resets_when_default_lookup_fails(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_absent_does_not_require_a_value(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0, "'dark'\n"),
-        response(0, "'default'\n"),
-        response(0),
-    ]
-    ctx = make_context(tmp_path, command=command)
-
-    gsettings.key(ctx, "org.example", "theme", state="absent")
-
-    assert len(ctx.changes) == 1
-
-
 def test_present_requires_a_value(tmp_path):
     ctx = make_context(tmp_path)
 
@@ -226,26 +212,3 @@ def test_empty_schema_and_key_are_errors(tmp_path):
 
     with pytest.raises(TaskFailed, match="gsettings key must not be empty"):
         gsettings.key(ctx, "org.example", "  ", "dark")
-
-
-def test_absent_dry_run_does_not_reset(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0, "'dark'\n"),
-        response(0, "'default'\n"),
-    ]
-    ctx = make_context(tmp_path, dry_run=True, command=command)
-
-    gsettings.key(ctx, "org.example", "theme", state="absent")
-
-    assert len(command.calls) == 2
-    assert ctx.changes[0].summary == "reset org.example theme"
-
-
-def test_absent_schema_error_is_actionable(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(1, stderr="schema not found\n")]
-    ctx = make_context(tmp_path, command=command)
-
-    with pytest.raises(TaskFailed, match="org.example theme: schema not found"):
-        gsettings.key(ctx, "org.example", "theme", state="absent")

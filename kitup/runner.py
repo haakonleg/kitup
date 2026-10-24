@@ -89,7 +89,10 @@ class Runner:
         try:
             # Root tasks refresh credentials just before they start, not once per run.
             if task.needs_sudo:
-                self.context.ensure_sudo()
+                self.context.ensure_sudo(
+                    f'Task "{task.name}" requires sudo privileges; '
+                    "you may be prompted for your password."
+                )
             task.func(self.context)
         except SkipTask as exc:
             status = Status.SKIPPED

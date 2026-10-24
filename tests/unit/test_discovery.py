@@ -39,27 +39,21 @@ def test_discovers_packages_in_folder_name_order(tmp_path):
     assert bundles[0].path == tmp_path / "bundles" / "alpha"
 
 
-def test_missing_bundles_directory_is_an_error(tmp_path):
+def test_missing_or_empty_bundles_directory_is_an_error(tmp_path):
     with pytest.raises(DiscoveryError, match="no bundles found"):
         discover_bundles(tmp_path)
 
-
-def test_empty_bundles_directory_is_an_error(tmp_path):
     (tmp_path / "bundles").mkdir()
     with pytest.raises(DiscoveryError, match="no bundles found"):
         discover_bundles(tmp_path)
 
 
-def test_bundle_must_define_bundle_object(tmp_path):
+def test_bundle_object_is_required_and_must_be_a_bundle(tmp_path):
     write(tmp_path / "bundles" / "bad" / "__init__.py", "x = 1\n")
-
     with pytest.raises(DiscoveryError, match="does not define a 'bundle'"):
         discover_bundles(tmp_path)
 
-
-def test_bundle_object_must_be_a_bundle(tmp_path):
     write(tmp_path / "bundles" / "bad" / "__init__.py", "bundle = object()\n")
-
     with pytest.raises(DiscoveryError, match="non-Bundle"):
         discover_bundles(tmp_path)
 

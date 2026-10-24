@@ -12,19 +12,18 @@ from kitup.runner import Runner
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
 
 
-def make_output(*, verbose: bool = False) -> Output:
-    return Output(StringIO(), no_color=True, verbose=verbose)
+def make_output() -> Output:
+    return Output(StringIO(), no_color=True)
 
 
-def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False, verbose=False):
+def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False):
     context = make_context(
         tmp_path,
         dry_run=dry_run,
-        verbose=verbose,
         command=FakeCommandRunner(),
         sudo=FakeSudo(),
     )
-    output = make_output(verbose=verbose)
+    output = make_output()
     runner = Runner(
         resolve(None, bundles),
         context,
@@ -70,6 +69,17 @@ def test_status_inference_and_summary(tmp_path):
     assert "changed  +x" in text
     assert "skipped  not needed" in text
     assert "Summary: 1 changed, 1 ok, 1 skipped, 0 failed, 0 not run" in text
+
+
+def test_fail_uses_given_reason(tmp_path):
+    bundle = Bundle("base")
+    add_task(bundle, lambda ctx: ctx.fail("unsupported host"))
+
+    code, text, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 1
+    assert "failed" in text
+    assert "error: unsupported host" in text
 
 
 def test_fail_fast_and_remaining_count(tmp_path):
@@ -163,12 +173,18 @@ def test_fully_filtered_bundle_has_no_header(tmp_path):
 
 def test_root_task_refreshes_sudo_before_running(tmp_path):
     bundle = Bundle("base")
-    add_task(bundle, lambda ctx: None, needs_sudo=True)
+    add_task(bundle, lambda ctx: None, name="Install packages", needs_sudo=True)
 
     code, _, context = run_plan(tmp_path, [bundle])
 
     assert code == 0
     assert context.sudo.refresh_count == 1
+    assert context.sudo.reasons == [
+        (
+            'Task "Install packages" requires sudo privileges; '
+            "you may be prompted for your password."
+        )
+    ]
 
 
 def test_root_task_refreshes_sudo_in_dry_run(tmp_path):
@@ -179,13 +195,3 @@ def test_root_task_refreshes_sudo_in_dry_run(tmp_path):
 
     assert code == 0
     assert context.sudo.refresh_count == 1
-
-
-def test_verbose_output_prints_change_dicts(tmp_path):
-    bundle = Bundle("base")
-    add_task(bundle, lambda ctx: ctx.changed({"added": ["git"]}, "+git"))
-
-    _, text, _ = run_plan(tmp_path, [bundle], verbose=True)
-
-    assert "{'added': ['git']}" in text
-    assert "+git" not in text

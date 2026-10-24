@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import builtins
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, NoReturn, TypeVar
+from typing import Any, NoReturn, TypeVar, overload
 
 from .commands import CommandRunner
 from .errors import SkipTask, TaskFailed
@@ -14,8 +15,11 @@ from .output import Output
 from .privileges import PrivilegeManager
 from .registry import Task
 from .results import Change
+from .validation import require_text
 
 T = TypeVar("T")
+
+_MISSING = object()
 
 
 class TaskContext:
@@ -73,11 +77,11 @@ class TaskContext:
         self._default_sudo = task.needs_sudo
         self._sudo_ready = False
 
-    def ensure_sudo(self) -> None:
+    def ensure_sudo(self, reason: str | None = None) -> None:
         """Validate sudo once per task, before the first command that needs it."""
         if self._sudo_ready:
             return
-        self.sudo.refresh()
+        self.sudo.refresh(reason)
         self._sudo_ready = True
 
     def run(
@@ -138,16 +142,22 @@ class TaskContext:
                 self._changes.append(Change({"argv": command}, " ".join(command)))
             return result
 
-        return self.command.run(command, **run_options)
+        # Probes are queries: a nonzero exit is data for the caller, not a
+        # task failure.
+        return self.command.run(command, check=False, **run_options)
 
     def probe(self, argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         """Run a query command without recording a change."""
         kwargs.pop("mutates", None)
         return self.run(argv, mutates=False, **kwargs)
 
-    def skip(self, reason: str) -> NoReturn:
+    def skip(self, reason: str = "skipped by task") -> NoReturn:
         """Skip the current task before making any changes."""
         raise SkipTask(reason)
+
+    def fail(self, reason: str) -> NoReturn:
+        """Fail the current task with the given reason."""
+        raise TaskFailed(reason)
 
     def changed(self, data: dict[str, Any], summary: str) -> None:
         """Record one module-level change for the current task."""
@@ -162,6 +172,41 @@ class TaskContext:
         if key not in self._memo:
             self._memo[key] = loader()
         return self._memo[key]
+
+    def input(self, key: str | None = None, prompt: str = "") -> str:
+        """Prompt for a line of input and return it.
+
+        When ``key`` is supplied, the value is stored in the same per-run store
+        as :meth:`memo`. Without a key, the value is only returned.
+        """
+        if key is not None:
+            require_text(key, "input key")
+        try:
+            value = builtins.input(prompt)
+        except EOFError as exc:
+            label = f" for key: {key}" if key is not None else ""
+            raise TaskFailed(f"no input received{label}") from exc
+        if key is not None:
+            self._memo[key] = value
+        return value
+
+    @overload
+    def get(self, key: str) -> Any: ...
+
+    @overload
+    def get(self, key: str, default: T) -> T: ...
+
+    def get(self, key: str, default: Any = _MISSING) -> Any:
+        """Return a value stored by :meth:`input` or :meth:`memo`.
+
+        Raises ``TaskFailed`` when the key is missing and no default is given.
+        """
+        require_text(key, "input key")
+        if key in self._memo:
+            return self._memo[key]
+        if default is _MISSING:
+            raise TaskFailed(f"no stored value for key: {key}")
+        return default
 
 
 def _skipped(argv: list[str]) -> subprocess.CompletedProcess[str]:

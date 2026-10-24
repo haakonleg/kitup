@@ -1,0 +1,68 @@
+FROM registry.fedoraproject.org/fedora:44
+
+RUN dnf5 install -y \
+        createrepo_c \
+        dbus-daemon \
+        dbus-tools \
+        dconf \
+        dnf5 \
+        glib2 \
+        gsettings-desktop-schemas \
+        python3 \
+        python3-pytest \
+        rpm-build \
+        sudo \
+        systemd \
+        util-linux \
+    && dnf5 clean all
+
+# Build a local, unsigned package repository. Tests run with no network, so
+# this fixture is the only package source available at runtime.
+COPY tests/integration/fixtures/kitup-test.spec /tmp/kitup-test.spec
+COPY tests/integration/fixtures/comps.xml /tmp/comps.xml
+RUN mkdir -p /srv/kitup-repo \
+    && rpmbuild -bb /tmp/kitup-test.spec \
+    && cp /root/rpmbuild/RPMS/noarch/kitup-test-*.rpm /srv/kitup-repo/ \
+    && createrepo_c --groupfile /tmp/comps.xml /srv/kitup-repo \
+    && rm -rf /root/rpmbuild /tmp/kitup-test.spec /tmp/comps.xml
+
+RUN rm -f /etc/yum.repos.d/*.repo \
+    && printf '%s\n' \
+        '[kitup-test]' \
+        'name=kitup integration fixture' \
+        'baseurl=file:///srv/kitup-repo' \
+        'enabled=1' \
+        'gpgcheck=0' \
+        > /etc/yum.repos.d/kitup-test.repo \
+    && printf '%s\n' \
+        '[main]' \
+        'gpgcheck=0' \
+        'localpkg_gpgcheck=0' \
+        > /etc/dnf/dnf.conf
+
+# Use a disposable schema so gsettings tests do not depend on desktop defaults.
+COPY tests/integration/fixtures/org.kitup.IntegrationTest.gschema.xml \
+    /usr/share/glib-2.0/schemas/
+RUN glib-compile-schemas /usr/share/glib-2.0/schemas
+
+RUN useradd --create-home --shell /bin/bash kitup \
+    && install -d -o kitup -g kitup -m 0700 /home/kitup/.runtime \
+    && printf '%s\n' 'kitup ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/kitup \
+    && chmod 0440 /etc/sudoers.d/kitup
+
+# Mask units that cannot work in this container (no udev devices, no network,
+# no memory-pressure daemon) so it boots cleanly instead of waiting on them.
+RUN systemctl mask \
+        systemd-udevd.service \
+        systemd-udevd-control.socket \
+        systemd-udevd-kernel.socket \
+        systemd-modules-load.service \
+        systemd-sysctl.service \
+        systemd-resolved.service \
+        systemd-resolved-varlink.socket \
+        systemd-resolved-monitor.socket \
+        systemd-oomd.service \
+        systemd-oomd.socket \
+    && systemd-machine-id-setup
+
+CMD ["/sbin/init"]

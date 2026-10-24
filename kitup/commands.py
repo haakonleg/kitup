@@ -59,7 +59,10 @@ class CommandRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                start_new_session=True,
+                # A new process group lets timeouts kill the whole command tree,
+                # while staying in the parent session so sudo can use its
+                # controlling-terminal credential cache.
+                process_group=0,
             )
         except OSError as exc:
             raise TaskFailed(

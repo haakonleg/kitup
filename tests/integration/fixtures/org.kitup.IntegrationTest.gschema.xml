@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.kitup.IntegrationTest" path="/org/kitup/IntegrationTest/">
+    <key name="example-string" type="s">
+      <default>'default-value'</default>
+      <summary>Fixture value for kitup integration tests</summary>
+    </key>
+  </schema>
+</schemalist>

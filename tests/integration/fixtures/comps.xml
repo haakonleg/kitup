@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<comps>
+  <group>
+    <id>kitup-test-group</id>
+    <name>Kitup Test Group</name>
+    <description>Fixture group for kitup integration tests</description>
+    <default>false</default>
+    <uservisible>true</uservisible>
+    <packagelist>
+      <packagereq type="mandatory">kitup-test</packagereq>
+    </packagelist>
+  </group>
+</comps>

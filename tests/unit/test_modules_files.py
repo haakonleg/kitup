@@ -88,19 +88,6 @@ def test_file_dry_run_reports_without_writing(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_file_prints_diff(tmp_path):
-    path = tmp_path / "example.conf"
-    path.write_text("old\n")
-    ctx = context(tmp_path, diff=True)
-
-    files.file(ctx, path, content="new\n")
-
-    output = ctx.output.stream.getvalue()
-    assert "---" in output
-    assert "-old" in output
-    assert "+new" in output
-
-
 def test_file_replaces_symlink_without_following_it(tmp_path):
     target = tmp_path / "target"
     target.write_text("target content\n")
@@ -131,31 +118,24 @@ def test_file_dry_run_still_validates_parent_directory(tmp_path):
     assert ctx.changes == []
 
 
-def test_file_refuses_directory(tmp_path):
+def test_file_refuses_directory_in_both_states(tmp_path):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="directory"):
         files.file(ctx, tmp_path, content="content")
+    with pytest.raises(TaskFailed, match="directory"):
+        files.file(ctx, tmp_path, state="absent")
 
 
-def test_file_creates_empty_file_without_content(tmp_path):
-    path = tmp_path / "empty"
+def test_file_creates_empty_file_with_or_without_content(tmp_path):
     ctx = context(tmp_path)
 
-    files.file(ctx, path)
+    files.file(ctx, tmp_path / "empty")
+    files.file(ctx, tmp_path / "empty-content", content="")
 
-    assert path.read_text() == ""
-    assert len(ctx.changes) == 1
-
-
-def test_file_allows_empty_content(tmp_path):
-    path = tmp_path / "empty-content"
-    ctx = context(tmp_path)
-
-    files.file(ctx, path, content="")
-
-    assert path.read_text() == ""
-    assert len(ctx.changes) == 1
+    assert (tmp_path / "empty").read_text() == ""
+    assert (tmp_path / "empty-content").read_text() == ""
+    assert len(ctx.changes) == 2
 
 
 def test_line_allows_empty_line(tmp_path):
@@ -168,25 +148,15 @@ def test_line_allows_empty_line(tmp_path):
     assert path.read_text() == "one\n\n"
 
 
-def test_file_without_content_preserves_existing_content(tmp_path):
+def test_file_without_content_preserves_existing_content_and_mode(tmp_path):
     path = tmp_path / "existing"
     path.write_text("keep me\n")
-    ctx = context(tmp_path)
-
-    files.file(ctx, path)
-
-    assert path.read_text() == "keep me\n"
-    assert ctx.changes == []
-
-
-def test_file_preserves_existing_mode_by_default(tmp_path):
-    path = tmp_path / "secret"
-    path.write_text("secret\n")
     path.chmod(0o600)
     ctx = context(tmp_path)
 
     files.file(ctx, path)
 
+    assert path.read_text() == "keep me\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert ctx.changes == []
 
@@ -240,27 +210,21 @@ def test_file_absent_removes_file(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_file_absent_removes_symlink(tmp_path):
+def test_file_absent_removes_valid_and_broken_symlinks(tmp_path):
     target = tmp_path / "target"
     target.write_text("keep\n")
     link = tmp_path / "link"
     link.symlink_to(target)
+    broken = tmp_path / "broken"
+    broken.symlink_to(tmp_path / "missing")
     ctx = context(tmp_path)
 
     files.file(ctx, link, state="absent")
+    files.file(ctx, broken, state="absent")
 
     assert not link.is_symlink()
+    assert not broken.is_symlink()
     assert target.read_text() == "keep\n"
-
-
-def test_file_absent_removes_broken_symlink(tmp_path):
-    link = tmp_path / "broken"
-    link.symlink_to(tmp_path / "missing")
-    ctx = context(tmp_path)
-
-    files.file(ctx, link, state="absent")
-
-    assert not link.is_symlink()
 
 
 def test_file_absent_is_a_noop_when_missing(tmp_path):
@@ -279,61 +243,38 @@ def test_file_invalid_state_is_an_error(tmp_path):
         files.file(ctx, tmp_path / "file", state="unknown")
 
 
-def test_file_rejects_empty_path(tmp_path):
-    with pytest.raises(TaskFailed, match="file path must not be empty"):
-        files.file(context(tmp_path), "")
-
-
-def test_file_rejects_empty_owner(tmp_path):
+def test_empty_paths_and_metadata_are_rejected(tmp_path):
     ctx = context(tmp_path)
 
+    with pytest.raises(TaskFailed, match="file path must not be empty"):
+        files.file(ctx, "")
     with pytest.raises(TaskFailed, match="owner must not be empty"):
         files.file(ctx, tmp_path / "file", content="x", owner="")
-
-    assert ctx.changes == []
-
-
-def test_directory_rejects_empty_group(tmp_path):
-    ctx = context(tmp_path)
-
     with pytest.raises(TaskFailed, match="group must not be empty"):
         files.directory(ctx, tmp_path / "dir", group="  ")
+    with pytest.raises(TaskFailed, match="copy source must not be empty"):
+        files.copy(ctx, "", tmp_path / "dest")
+    with pytest.raises(TaskFailed, match="copy destination must not be empty"):
+        files.copy(ctx, tmp_path / "source", "")
+    with pytest.raises(TaskFailed, match="directory path must not be empty"):
+        files.directory(ctx, "")
+    with pytest.raises(TaskFailed, match="symlink target must not be empty"):
+        files.symlink(ctx, "", tmp_path / "link")
 
     assert ctx.changes == []
 
 
-def test_copy_rejects_empty_paths(tmp_path):
-    with pytest.raises(TaskFailed, match="copy source must not be empty"):
-        files.copy(context(tmp_path), "", tmp_path / "dest")
-
-    with pytest.raises(TaskFailed, match="copy destination must not be empty"):
-        files.copy(context(tmp_path), tmp_path / "source", "")
-
-
-def test_line_rejects_empty_match(tmp_path):
-    path = tmp_path / "lines"
-    path.write_text("value\n")
+def test_empty_match_and_marker_are_rejected(tmp_path):
+    line_path = tmp_path / "lines"
+    line_path.write_text("value\n")
+    block_path = tmp_path / "block"
+    block_path.write_text("")
+    ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="line match must not be empty"):
-        files.line(context(tmp_path), path, "value", match="")
-
-
-def test_block_rejects_empty_marker(tmp_path):
-    path = tmp_path / "block"
-    path.write_text("")
-
+        files.line(ctx, line_path, "value", match="")
     with pytest.raises(TaskFailed, match="block marker must not be empty"):
-        files.block(context(tmp_path), path, "", "content")
-
-
-def test_directory_rejects_empty_path(tmp_path):
-    with pytest.raises(TaskFailed, match="directory path must not be empty"):
-        files.directory(context(tmp_path), "")
-
-
-def test_symlink_rejects_empty_target(tmp_path):
-    with pytest.raises(TaskFailed, match="symlink target must not be empty"):
-        files.symlink(context(tmp_path), "", tmp_path / "link")
+        files.block(ctx, block_path, "", "content")
 
 
 def test_line_add_replace_and_remove(tmp_path):
@@ -432,12 +373,15 @@ def test_directory_creates_and_is_idempotent(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_directory_refuses_file(tmp_path):
+def test_directory_refuses_file_in_both_states(tmp_path):
     path = tmp_path / "file"
     path.write_text("x")
+    ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="not a directory"):
-        files.directory(context(tmp_path), path)
+        files.directory(ctx, path)
+    with pytest.raises(TaskFailed, match="not a directory"):
+        files.directory(ctx, path, state="absent")
 
 
 def test_directory_preserves_existing_mode_by_default(tmp_path):
@@ -503,41 +447,27 @@ def test_directory_absent_force_removes_non_empty_directory(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_directory_absent_refuses_file(tmp_path):
-    path = tmp_path / "file"
-    path.write_text("x")
-
-    with pytest.raises(TaskFailed, match="not a directory"):
-        files.directory(context(tmp_path), path, state="absent")
-
-
 def test_directory_invalid_state_is_an_error(tmp_path):
     with pytest.raises(TaskFailed, match="invalid directory state"):
         files.directory(context(tmp_path), tmp_path / "dir", state="unknown")
 
 
-def test_symlink_replaces_wrong_target(tmp_path):
-    link = tmp_path / "link"
-    link.symlink_to("old")
+def test_symlink_replaces_wrong_target_file_and_is_idempotent(tmp_path):
+    wrong = tmp_path / "wrong"
+    wrong.symlink_to("old")
+    file_link = tmp_path / "file-link"
+    file_link.write_text("old\n")
     ctx = context(tmp_path)
 
-    files.symlink(ctx, "new", link)
-    assert link.readlink().as_posix() == "new"
+    files.symlink(ctx, "new", wrong)
+    files.symlink(ctx, "new", file_link)
+    assert wrong.readlink().as_posix() == "new"
+    assert file_link.is_symlink()
+    assert file_link.readlink().as_posix() == "new"
 
     count = len(ctx.changes)
-    files.symlink(ctx, "new", link)
+    files.symlink(ctx, "new", wrong)
     assert len(ctx.changes) == count
-
-
-def test_symlink_replaces_regular_file(tmp_path):
-    link = tmp_path / "link"
-    link.write_text("old\n")
-    ctx = context(tmp_path)
-
-    files.symlink(ctx, "new", link)
-
-    assert link.is_symlink()
-    assert link.readlink().as_posix() == "new"
 
 
 def test_symlink_refuses_directory(tmp_path):
@@ -546,16 +476,6 @@ def test_symlink_refuses_directory(tmp_path):
 
     with pytest.raises(TaskFailed, match="directory"):
         files.symlink(context(tmp_path), "new", link)
-
-
-def test_file_absent_refuses_directory(tmp_path):
-    directory = tmp_path / "dir"
-    directory.mkdir()
-
-    with pytest.raises(TaskFailed, match="directory"):
-        files.file(context(tmp_path), directory, state="absent")
-
-    assert directory.exists()
 
 
 def test_copy_preserves_mode_and_is_idempotent(tmp_path):

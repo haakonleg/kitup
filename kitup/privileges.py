@@ -21,11 +21,12 @@ class PrivilegeManager:
         """Validate credentials up front (used by ``--sudo``)."""
         self.refresh()
 
-    def refresh(self) -> None:
+    def refresh(self, reason: str | None = None) -> None:
         """Ensure cached sudo credentials are valid, prompting when needed.
 
-        Outside a TTY, an expired cache is a hard error instead of hanging on
-        an invisible password prompt.
+        ``reason`` is shown before an interactive password prompt. Outside a
+        TTY, an expired cache is a hard error instead of hanging on an
+        invisible password prompt.
         """
         if self.is_root:
             return
@@ -41,6 +42,9 @@ class PrivilegeManager:
                 "sudo credentials are required but stdin is not a TTY; "
                 "run kitup from a terminal"
             )
+
+        if reason:
+            print(reason, file=sys.stderr, flush=True)
 
         try:
             result = subprocess.run(["sudo", "-v"], check=False)

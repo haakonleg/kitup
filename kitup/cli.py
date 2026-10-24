@@ -13,7 +13,7 @@ from . import __version__
 from .commands import CommandRunner
 from .config import load_config
 from .context import TaskContext
-from .discovery import discover_bundles
+from .discovery import bundles_dir, discover_bundles
 from .errors import KitupError, PrivilegeError, UsageError
 from .facts import collect_facts
 from .output import Output
@@ -72,12 +72,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         config_dir = _resolve_config_dir(args.dir)
-        config = load_config(config_dir, _resolve_override(args.config))
+        override = _resolve_override(args.config)
+        config = load_config(config_dir, override)
         bundles = discover_bundles(config_dir)
         plan = resolve(args.bundles or None, bundles)
 
         facts = collect_facts()
         output.banner(facts)
+        if args.verbose:
+            _print_environment(config_dir, override, output)
 
         if args.command == "list":
             _print_plan(plan, output, verbose=args.verbose)
@@ -129,6 +132,16 @@ def _apply(
     return runner.run()
 
 
+def _print_environment(config_dir: Path, override: Path | None, output: Output) -> None:
+    output.write()
+    output.write(f"using bundle dir: {bundles_dir(config_dir)}")
+    config = config_dir / "config.py"
+    if config.is_file():
+        output.write(f"using config: {config}")
+    if override is not None:
+        output.write(f"using config: {override}")
+
+
 def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
     for bundle in plan.bundles:
         output.write()
@@ -136,18 +149,21 @@ def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
         if bundle.description:
             output.write(f"  {bundle.description}")
         if verbose:
-            dependencies = ", ".join(bundle.depends_on) or "-"
-            output.write(f"  depends: {dependencies}")
+            dependencies = ", ".join(bundle.depends_on)
+            output.write(f"  depends:{f' {dependencies}' if dependencies else ''}")
+            output.write("  tasks:")
         for task in bundle.tasks:
             if verbose:
-                parts = ["[sudo]"] if task.needs_sudo else []
-                parts.append(f"tags: {', '.join(sorted(task.tags)) or '-'}")
-                output.write(f"  {task.name}  {' '.join(parts)}")
-                output.write(f"    id: {task.id}")
+                sudo = "  [sudo]" if task.needs_sudo else ""
+                output.write(f"    - {task.name}{sudo}")
+                output.write(f"      id: {task.id}")
+                tags = ", ".join(sorted(task.tags))
+                output.write(f"      tags:{f' {tags}' if tags else ''}")
                 if task.description:
-                    output.write(f"    description: {task.description}")
+                    output.write(f"      description: {task.description}")
             else:
-                output.write(f"  {task.name}")
+                tags = ", ".join(sorted(task.tags))
+                output.write(f"    - {task.name}{f' [{tags}]' if tags else ''}")
 
 
 def _tag_filter(values: Sequence[str]) -> frozenset[str] | None:

@@ -66,7 +66,8 @@ An override passed with `-C` replaces same-named fields and adds new ones.
 
 System facts are collected once per run and exposed read-only as `ctx.facts`,
 including `hostname`, `os_release`, `distro_id`, `version_id`, `arch`, and
-`kernel`. Tasks needing live state should query it directly.
+`kernel`. Tasks needing live state should query it directly. See
+[docs/facts.md](docs/facts.md) for details.
 
 ## Bundle layout
 
@@ -88,6 +89,9 @@ bundle = Bundle("base", "Base system packages", depends_on=())
 
 from . import packages, dnf_config  # noqa: F401
 ```
+
+Every task module must be imported from `__init__.py`, directly or through
+another imported module. Files in the bundle folder are not auto-discovered.
 
 Task files register tasks with `@bundle.task`:
 
@@ -119,7 +123,11 @@ ctx.probe(["query", "--flag"])       # read-only query
 ctx.changed({"detail": "data"}, "+change")
 ctx.note("extra context")
 ctx.memo("key", compute_once)        # per-run cache
-ctx.skip("reason")                   # skip before mutating
+ctx.input("key", "Prompt: ")         # prompt and store a value
+ctx.input(prompt="Continue? ")       # prompt and return only
+ctx.get("key")                       # retrieve a stored value
+ctx.skip("optional reason")          # skip before mutating
+ctx.fail("reason")                   # fail the task
 ```
 
 ## Built-in modules
@@ -127,7 +135,7 @@ ctx.skip("reason")                   # skip before mutating
 All modules are idempotent and report changes through `ctx.changed()`. Modules
 are standalone and do not import each other.
 
-- `dnf` — packages, groups, repositories, and COPR.
+- `dnf` — packages, groups, release RPMs, repositories, and COPR.
 - `files` — files, copies, line/block edits, directories, and symlinks.
 - `commands` — one-off commands with `creates`/`unless` guards.
 - `systemd` — enable/disable and start/stop units.
@@ -154,6 +162,19 @@ python3 -m venv .venv
 
 Tests use scripted command runners and never invoke real package, service, or
 settings-management commands.
+
+Integration tests exercise real Fedora tooling in a disposable, locked-down
+container:
+
+```bash
+./tools/integration.sh
+```
+
+The suite needs Podman. The container runs without network access, drops all
+capabilities except the documented minimum, applies CPU/memory/PID limits, and
+mounts the repository read-only at `/kitup-integration-test`. A normal
+`pytest` run only covers `tests/unit`; set `KITUP_INTEGRATION=1` to run
+`tests/integration` directly inside the container.
 
 ## License
 

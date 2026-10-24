@@ -49,9 +49,11 @@ class FakeSudo:
         self.is_root = is_root
         self.refresh_count = 0
         self.validations = 0
+        self.reasons: list[str | None] = []
 
-    def refresh(self) -> None:
+    def refresh(self, reason: str | None = None) -> None:
         self.refresh_count += 1
+        self.reasons.append(reason)
 
     def validate(self) -> None:
         self.validations += 1
