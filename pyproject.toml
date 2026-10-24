@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kitup"
-version = "0.1.0"
+version = "1.0.0"
 description = "The simple python-driven system configuration tool"
 readme = "README.md"
 requires-python = ">=3.14"
