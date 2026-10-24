@@ -89,7 +89,7 @@ def test_install_and_remove_group_and_package(
     )
     assert run_kitup("apply", install_root) == 0
     assert rpm_installed()
-    assert TEST_GROUP in run(["dnf5", "group", "list", "--installed"]).stdout
+    assert TEST_GROUP in run(["dnf5", "group", "list", "--installed", "--hidden"]).stdout
 
     remove_root = write_bundle(
         tmp_path / "remove",
@@ -105,7 +105,7 @@ def test_install_and_remove_group_and_package(
     )
     assert run_kitup("apply", remove_root) == 0
     assert not rpm_installed()
-    assert TEST_GROUP not in run(["dnf5", "group", "list", "--installed"]).stdout
+    assert TEST_GROUP not in run(["dnf5", "group", "list", "--installed", "--hidden"]).stdout
 
 
 def test_install_and_remove_explicit_group(
@@ -126,7 +126,7 @@ def test_install_and_remove_explicit_group(
     )
     assert run_kitup("apply", install_root) == 0
     assert rpm_installed()
-    assert TEST_GROUP in run(["dnf5", "group", "list", "--installed"]).stdout
+    assert TEST_GROUP in run(["dnf5", "group", "list", "--installed", "--hidden"]).stdout
 
     remove_root = write_bundle(
         tmp_path / "remove",
@@ -142,7 +142,7 @@ def test_install_and_remove_explicit_group(
     )
     assert run_kitup("apply", remove_root) == 0
     assert not rpm_installed()
-    assert TEST_GROUP not in run(["dnf5", "group", "list", "--installed"]).stdout
+    assert TEST_GROUP not in run(["dnf5", "group", "list", "--installed", "--hidden"]).stdout
 
 
 def test_install_local_rpm(tmp_path: Path) -> None:

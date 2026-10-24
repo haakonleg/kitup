@@ -252,6 +252,19 @@ def test_exclude_is_rejected_for_absent(tmp_path):
         dnf.packages(ctx, ["git"], state="absent", exclude=["foo"])
 
 
+def test_hidden_group_is_detected_as_installed(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(0, "ID Name Installed\nmultimedia Multimedia yes\n")]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.packages(ctx, ["@multimedia"])
+
+    assert [call[0] for call in command.calls] == [
+        ["dnf5", "group", "list", "--installed", "--hidden"]
+    ]
+    assert ctx.changes == []
+
+
 def test_remove_removes_installed_packages(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0), response(0), response(1)]

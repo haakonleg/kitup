@@ -5,7 +5,7 @@
     <name>Kitup Test Group</name>
     <description>Fixture group for kitup integration tests</description>
     <default>false</default>
-    <uservisible>true</uservisible>
+    <uservisible>false</uservisible>
     <packagelist>
       <packagereq type="mandatory">kitup-test</packagereq>
     </packagelist>

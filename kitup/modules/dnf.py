@@ -402,7 +402,10 @@ def _installed_group_names(ctx: TaskContext, names: list[str]) -> list[str]:
 
 
 def _installed_groups(ctx: TaskContext, names: list[str]) -> list[str]:
-    result = ctx.probe([_dnf_command(ctx), "group", "list", "--installed"], sudo=False)
+    result = ctx.probe(
+        [_dnf_command(ctx), "group", "list", "--installed", "--hidden"],
+        sudo=False,
+    )
     if result.returncode != 0:
         raise TaskFailed(
             "could not list installed package groups",
