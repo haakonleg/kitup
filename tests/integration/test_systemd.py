@@ -46,7 +46,7 @@ def test_enable_start_and_disable_stop(tmp_path: Path, unit: str) -> None:
         from . import bundle
         from kitup.modules import systemd
 
-        @bundle.task("reload, enable, and start unit", needs_sudo=True)
+        @bundle.task("reload, enable, and start unit")
         def enable_and_start(ctx):
             systemd.daemon_reload(ctx)
             systemd.unit(ctx, {unit!r}, enabled=True, state="started")
@@ -63,7 +63,7 @@ def test_enable_start_and_disable_stop(tmp_path: Path, unit: str) -> None:
         from . import bundle
         from kitup.modules import systemd
 
-        @bundle.task("disable and stop unit", needs_sudo=True)
+        @bundle.task("disable and stop unit")
         def disable_and_stop(ctx):
             systemd.unit(ctx, {unit!r}, enabled=False, state="stopped")
         """,

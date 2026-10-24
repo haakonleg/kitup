@@ -171,9 +171,13 @@ def test_fully_filtered_bundle_has_no_header(tmp_path):
     assert "Summary: 0 changed, 0 ok, 0 failed, 0 not run" in text
 
 
-def test_root_task_refreshes_sudo_before_running(tmp_path):
+def test_sudo_is_requested_at_first_sudo_operation(tmp_path):
     bundle = Bundle("base")
-    add_task(bundle, lambda ctx: None, name="Install packages", needs_sudo=True)
+
+    def install(ctx):
+        ctx.run(["install"], sudo=True)
+
+    add_task(bundle, install, name="Install packages")
 
     code, _, context = run_plan(tmp_path, [bundle])
 
@@ -187,9 +191,27 @@ def test_root_task_refreshes_sudo_before_running(tmp_path):
     ]
 
 
-def test_root_task_refreshes_sudo_in_dry_run(tmp_path):
+def test_task_without_sudo_operations_does_not_request_sudo(tmp_path):
     bundle = Bundle("base")
-    add_task(bundle, lambda ctx: None, needs_sudo=True)
+
+    def plain(ctx):
+        ctx.run(["true"])
+
+    add_task(bundle, plain, name="No privileges")
+
+    code, _, context = run_plan(tmp_path, [bundle])
+
+    assert code == 0
+    assert context.sudo.refresh_count == 0
+
+
+def test_sudo_is_requested_in_dry_run(tmp_path):
+    bundle = Bundle("base")
+
+    def install(ctx):
+        ctx.run(["install"], sudo=True)
+
+    add_task(bundle, install)
 
     code, _, context = run_plan(tmp_path, [bundle], dry_run=True)
 

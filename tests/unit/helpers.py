@@ -50,10 +50,15 @@ class FakeSudo:
         self.refresh_count = 0
         self.validations = 0
         self.reasons: list[str | None] = []
+        self.valid = False
 
     def refresh(self, reason: str | None = None) -> None:
         self.refresh_count += 1
         self.reasons.append(reason)
+        self.valid = True
+
+    def credentials_valid(self) -> bool:
+        return self.valid
 
     def validate(self) -> None:
         self.validations += 1
@@ -99,7 +104,6 @@ def add_task(
     func: Callable[[TaskContext], None],
     *,
     name: str | None = None,
-    needs_sudo: bool = False,
     tags: Sequence[str] = (),
 ) -> Callable[[TaskContext], None]:
-    return bundle.task(name, needs_sudo=needs_sudo, tags=tags)(func)
+    return bundle.task(name, tags=tags)(func)

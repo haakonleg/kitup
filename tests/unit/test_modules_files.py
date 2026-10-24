@@ -10,9 +10,8 @@ from kitup.commands import CommandRunner
 from kitup.errors import TaskFailed
 from kitup.modules import files
 from kitup.output import Output
-from kitup.registry import Task
 
-from .helpers import PassthroughSudo, make_context
+from .helpers import FakeSudo, PassthroughSudo, make_context
 
 
 def context(tmp_path, *, dry_run=False, diff=False):
@@ -26,14 +25,12 @@ def context(tmp_path, *, dry_run=False, diff=False):
 
 def privileged_context(tmp_path):
     sudo = PassthroughSudo()
-    ctx = make_context(
+    return make_context(
         tmp_path,
         command=CommandRunner(sudo),
         sudo=sudo,
         output=Output(StringIO(), no_color=True),
     )
-    ctx.begin_task(Task("test", "test", lambda ctx: None, needs_sudo=True))
-    return ctx
 
 
 def test_file_creates_file_and_is_idempotent(tmp_path):
@@ -189,14 +186,26 @@ def test_privileged_file_operations_use_helper(tmp_path):
     directory = tmp_path / "root-owned-dir"
     ctx = privileged_context(tmp_path)
 
-    files.file(ctx, path, content="one\n", mode=0o600)
-    files.line(ctx, path, "two")
-    files.directory(ctx, directory, mode=0o700)
-    files.directory(ctx, directory, state="absent")
-    files.file(ctx, path, state="absent")
+    files.file(ctx, path, content="one\n", mode=0o600, sudo=True)
+    files.line(ctx, path, "two", sudo=True)
+    files.directory(ctx, directory, mode=0o700, sudo=True)
+    files.directory(ctx, directory, state="absent", sudo=True)
+    files.file(ctx, path, state="absent", sudo=True)
 
+    assert ctx.sudo.refresh_count > 0
     assert not path.exists()
     assert not directory.exists()
+
+
+def test_unprivileged_file_operations_do_not_request_credentials(tmp_path):
+    path = tmp_path / "user-owned.conf"
+    sudo = FakeSudo()
+    ctx = make_context(tmp_path, sudo=sudo)
+
+    files.file(ctx, path, content="value\n")
+
+    assert path.read_text() == "value\n"
+    assert sudo.refresh_count == 0
 
 
 def test_file_absent_removes_file(tmp_path):

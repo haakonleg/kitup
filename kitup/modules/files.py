@@ -43,8 +43,12 @@ def file(
     mode: int | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
+    sudo: bool = False,
 ) -> None:
-    """Ensure a text file exists with optional content, or is absent."""
+    """Ensure a text file exists with optional content, or is absent.
+
+    ``sudo=True`` performs the operation through the privileged helper.
+    """
     if state not in {"present", "absent"}:
         raise TaskFailed(f"invalid file state: {state!r}")
     require_path(path, "file path")
@@ -52,13 +56,13 @@ def file(
 
     target = Path(path)
     if state == "absent":
-        info = _lstat(ctx, target)
+        info = _lstat(ctx, target, sudo=sudo)
         if info is not None and info.is_dir and not info.is_symlink:
             raise TaskFailed(f"path is a directory: {target}")
-        _remove_path(ctx, target, force=False)
+        _remove_path(ctx, target, force=False, sudo=sudo)
         return
 
-    info = _lstat(ctx, target)
+    info = _lstat(ctx, target, sudo=sudo)
     if content is None:
         if info is not None and info.is_symlink:
             raise TaskFailed(f"refusing to manage symlink as file: {target}")
@@ -66,7 +70,7 @@ def file(
             raise TaskFailed(f"path is a directory: {target}")
         if info is not None and not info.is_file:
             raise TaskFailed(f"path is not a regular file: {target}")
-        data = _read_bytes(ctx, target, info) if info is not None else b""
+        data = _read_bytes(ctx, target, info, sudo=sudo) if info is not None else b""
         action = "ensure"
         summary = f"ensure file {target}"
     else:
@@ -83,6 +87,7 @@ def file(
         group=group,
         summary=summary,
         data={"path": str(target), "action": action},
+        sudo=sudo,
     )
 
 
@@ -94,6 +99,7 @@ def copy(
     mode: int | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
+    sudo: bool = False,
 ) -> None:
     """Copy one regular file, preserving its mode unless overridden."""
     require_path(src, "copy source")
@@ -101,22 +107,23 @@ def copy(
     _validate_metadata(owner, group)
     source = Path(src)
     target = Path(dest)
-    source_info = _lstat(ctx, source)
+    source_info = _lstat(ctx, source, sudo=sudo)
     if source_info is None or source_info.is_symlink or not source_info.is_file:
         raise TaskFailed(f"copy source is not a regular file: {source}")
-    target_info = _lstat(ctx, target)
+    target_info = _lstat(ctx, target, sudo=sudo)
     if target_info is not None and target_info.is_dir:
         raise TaskFailed(f"destination is a directory: {target}")
 
     _apply_bytes(
         ctx,
         target,
-        _read_bytes(ctx, source, source_info),
+        _read_bytes(ctx, source, source_info, sudo=sudo),
         mode=source_info.mode & 0o777 if mode is None else mode,
         owner=owner,
         group=group,
         summary=f"copy {source} -> {target}",
         data={"path": str(target), "source": str(source), "action": "copy"},
+        sudo=sudo,
     )
 
 
@@ -127,6 +134,7 @@ def line(
     *,
     match: str | None = None,
     state: str = "present",
+    sudo: bool = False,
 ) -> None:
     """Add, replace, or remove a line selected by an exact value or regex."""
     if state not in {"present", "absent"}:
@@ -136,7 +144,7 @@ def line(
         require_regex(match, "line match")
 
     target = Path(path)
-    text = _read_text(ctx, target)
+    text = _read_text(ctx, target, sudo=sudo)
     lines = text.splitlines(keepends=True)
     desired = line.rstrip("\n")
 
@@ -163,7 +171,7 @@ def line(
 
     new_text = "".join(new_lines)
     if new_text != text:
-        _rewrite_text(ctx, target, new_text, summary)
+        _rewrite_text(ctx, target, new_text, summary, sudo=sudo)
 
 
 def block(
@@ -173,6 +181,7 @@ def block(
     content: str,
     *,
     state: str = "present",
+    sudo: bool = False,
 ) -> None:
     """Create, update, or remove a marked block in a file."""
     if state not in {"present", "absent"}:
@@ -181,7 +190,7 @@ def block(
     require_text(marker, "block marker")
 
     target = Path(path)
-    text = _read_text(ctx, target)
+    text = _read_text(ctx, target, sudo=sudo)
     lines = text.splitlines(keepends=True)
     begin = f"# BEGIN {marker}\n"
     end = f"# END {marker}\n"
@@ -208,7 +217,7 @@ def block(
 
     new_text = "".join(new_lines)
     if new_text != text:
-        _rewrite_text(ctx, target, new_text, summary)
+        _rewrite_text(ctx, target, new_text, summary, sudo=sudo)
 
 
 def directory(
@@ -220,6 +229,7 @@ def directory(
     mode: int | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
+    sudo: bool = False,
 ) -> None:
     """Ensure a directory exists or is absent."""
     if state not in {"present", "absent"}:
@@ -229,55 +239,73 @@ def directory(
 
     target = Path(path)
     if state == "absent":
-        info = _lstat(ctx, target)
+        info = _lstat(ctx, target, sudo=sudo)
         if info is None:
             return
         if info.is_symlink or not info.is_dir:
             raise TaskFailed(f"path is not a directory: {target}")
-        _remove_path(ctx, target, force=force)
+        _remove_path(ctx, target, force=force, sudo=sudo)
         return
 
-    info = _lstat(ctx, target)
+    info = _lstat(ctx, target, sudo=sudo)
     if info is not None and info.is_symlink:
         raise TaskFailed(f"refusing to manage symlink as directory: {target}")
     if info is not None and not info.is_dir:
         raise TaskFailed(f"path exists and is not a directory: {target}")
 
     if info is None:
-        _require_parent(ctx, target)
+        _require_parent(ctx, target, sudo=sudo)
         ctx.changed({"path": str(target), "action": "mkdir"}, f"mkdir {target}")
         if not ctx.dry_run:
-            _mkdir(ctx, target, 0o755 if mode is None else mode, owner, group)
+            _mkdir(
+                ctx,
+                target,
+                0o755 if mode is None else mode,
+                owner,
+                group,
+                sudo=sudo,
+            )
         return
 
     resolved = info.mode if mode is None else mode
     if _metadata_differs(info, resolved, owner, group):
         ctx.changed({"path": str(target), "action": "chmod"}, f"chmod {target}")
         if not ctx.dry_run:
-            _apply_metadata_ctx(ctx, target, resolved, owner, group, info)
+            _apply_metadata_ctx(ctx, target, resolved, owner, group, info, sudo=sudo)
 
 
-def symlink(ctx: TaskContext, target: str | Path, path: str | Path) -> None:
+def symlink(
+    ctx: TaskContext,
+    target: str | Path,
+    path: str | Path,
+    *,
+    sudo: bool = False,
+) -> None:
     """Create a symlink, replacing an existing file or symlink."""
     require_text(str(target), "symlink target")
     require_path(path, "symlink path")
     link = Path(path)
     desired = str(target)
-    info = _lstat(ctx, link)
+    info = _lstat(ctx, link, sudo=sudo)
     if info is not None and info.is_symlink and info.link == desired:
         return
     if info is not None and info.is_dir and not info.is_symlink:
         raise TaskFailed(f"refusing to replace a directory with a symlink: {link}")
 
-    _require_parent(ctx, link)
+    _require_parent(ctx, link, sudo=sudo)
     ctx.changed(
         {"path": str(link), "target": desired, "action": "symlink"},
         f"symlink {link} -> {desired}",
     )
     if ctx.dry_run:
         return
-    if _privileged(ctx):
-        _helper(ctx, {"action": "symlink", "path": str(link), "target": desired}, mutates=True)
+    if _privileged(ctx, sudo):
+        _helper(
+            ctx,
+            {"action": "symlink", "path": str(link), "target": desired},
+            mutates=True,
+            sudo=sudo,
+        )
         return
     if os.path.lexists(link):
         link.unlink()
@@ -294,15 +322,16 @@ def _apply_bytes(
     group: str | int | None,
     summary: str,
     data: dict[str, object],
+    sudo: bool,
 ) -> None:
-    info = _lstat(ctx, path)
+    info = _lstat(ctx, path, sudo=sudo)
     is_link = info.is_symlink if info is not None else False
     if info is not None and info.is_dir and not is_link:
         raise TaskFailed(f"path is a directory: {path}")
     if info is not None and not is_link and not info.is_file:
         raise TaskFailed(f"path is not a regular file: {path}")
 
-    old = _read_bytes(ctx, path, info) if info is not None and not is_link else None
+    old = _read_bytes(ctx, path, info, sudo=sudo) if info is not None and not is_link else None
     content_differs = is_link or old != content
     resolved = mode
     if resolved is None:
@@ -311,7 +340,7 @@ def _apply_bytes(
     if not content_differs and not metadata_differs:
         return
 
-    _require_parent(ctx, path)
+    _require_parent(ctx, path, sudo=sudo)
     if content_differs:
         _emit_diff(ctx, path, old, content)
     ctx.changed(data, summary)
@@ -319,13 +348,20 @@ def _apply_bytes(
         return
 
     if content_differs:
-        _write_bytes(ctx, path, content, resolved, owner, group, info)
+        _write_bytes(ctx, path, content, resolved, owner, group, info, sudo=sudo)
     else:
-        _apply_metadata_ctx(ctx, path, resolved, owner, group, info)
+        _apply_metadata_ctx(ctx, path, resolved, owner, group, info, sudo=sudo)
 
 
-def _rewrite_text(ctx: TaskContext, path: Path, text: str, summary: str) -> None:
-    info = _lstat(ctx, path)
+def _rewrite_text(
+    ctx: TaskContext,
+    path: Path,
+    text: str,
+    summary: str,
+    *,
+    sudo: bool,
+) -> None:
+    info = _lstat(ctx, path, sudo=sudo)
     mode = info.mode if info is not None and info.is_file and not info.is_symlink else 0o644
     _apply_bytes(
         ctx,
@@ -336,11 +372,12 @@ def _rewrite_text(ctx: TaskContext, path: Path, text: str, summary: str) -> None
         group=None,
         summary=summary,
         data={"path": str(path), "action": "edit"},
+        sudo=sudo,
     )
 
 
-def _read_text(ctx: TaskContext, path: Path) -> str:
-    info = _lstat(ctx, path)
+def _read_text(ctx: TaskContext, path: Path, *, sudo: bool) -> str:
+    info = _lstat(ctx, path, sudo=sudo)
     if info is None:
         return ""
     if info.is_dir:
@@ -350,14 +387,19 @@ def _read_text(ctx: TaskContext, path: Path) -> str:
     if not info.is_file:
         raise TaskFailed(f"path is not a regular file: {path}")
     try:
-        return _read_bytes(ctx, path, info).decode("utf-8")
+        return _read_bytes(ctx, path, info, sudo=sudo).decode("utf-8")
     except UnicodeDecodeError as exc:
         raise TaskFailed(f"not a UTF-8 text file: {path}") from exc
 
 
-def _lstat(ctx: TaskContext, path: Path) -> _FileInfo | None:
-    if _privileged(ctx):
-        result = _helper(ctx, {"action": "stat", "path": str(path)}, mutates=False)
+def _lstat(ctx: TaskContext, path: Path, *, sudo: bool) -> _FileInfo | None:
+    if _privileged(ctx, sudo):
+        result = _helper(
+            ctx,
+            {"action": "stat", "path": str(path)},
+            mutates=False,
+            sudo=sudo,
+        )
         if not result.get("exists"):
             return None
         return _FileInfo(
@@ -387,11 +429,16 @@ def _lstat(ctx: TaskContext, path: Path) -> _FileInfo | None:
     )
 
 
-def _read_bytes(ctx: TaskContext, path: Path, info: _FileInfo | None) -> bytes:
+def _read_bytes(ctx: TaskContext, path: Path, info: _FileInfo | None, *, sudo: bool) -> bytes:
     if info is None:
         return b""
-    if _privileged(ctx):
-        result = _helper(ctx, {"action": "read", "path": str(path)}, mutates=False)
+    if _privileged(ctx, sudo):
+        result = _helper(
+            ctx,
+            {"action": "read", "path": str(path)},
+            mutates=False,
+            sudo=sudo,
+        )
         if not result.get("exists"):
             return b""
         return base64.b64decode(result.get("content", ""))
@@ -409,8 +456,10 @@ def _write_bytes(
     owner: str | int | None,
     group: str | int | None,
     info: _FileInfo | None,
+    *,
+    sudo: bool,
 ) -> None:
-    if _privileged(ctx):
+    if _privileged(ctx, sudo):
         _helper(
             ctx,
             {
@@ -422,6 +471,7 @@ def _write_bytes(
                 "group": group,
             },
             mutates=True,
+            sudo=sudo,
         )
         return
 
@@ -437,7 +487,7 @@ def _atomic_write(
     group: str | int | None,
     info: _FileInfo | None,
 ) -> None:
-    _require_parent(ctx, path)
+    _require_parent(ctx, path, sudo=False)
     handle, temp_name = tempfile.mkstemp(
         dir=path.parent,
         prefix=f".{path.name}.",
@@ -467,8 +517,10 @@ def _mkdir(
     mode: int,
     owner: str | int | None,
     group: str | int | None,
+    *,
+    sudo: bool,
 ) -> None:
-    if _privileged(ctx):
+    if _privileged(ctx, sudo):
         _helper(
             ctx,
             {
@@ -479,14 +531,15 @@ def _mkdir(
                 "group": group,
             },
             mutates=True,
+            sudo=sudo,
         )
         return
     path.mkdir()
     _apply_metadata(path, mode, owner, group, None, preserve=False)
 
 
-def _remove_path(ctx: TaskContext, path: Path, *, force: bool) -> None:
-    info = _lstat(ctx, path)
+def _remove_path(ctx: TaskContext, path: Path, *, force: bool, sudo: bool) -> None:
+    info = _lstat(ctx, path, sudo=sudo)
     if info is None:
         return
     if info.is_dir and not info.is_symlink and not force:
@@ -496,11 +549,12 @@ def _remove_path(ctx: TaskContext, path: Path, *, force: bool) -> None:
     ctx.changed({"path": str(path), "action": action}, f"{action} {path}")
     if ctx.dry_run:
         return
-    if _privileged(ctx):
+    if _privileged(ctx, sudo):
         _helper(
             ctx,
             {"action": "remove", "path": str(path), "force": force},
             mutates=True,
+            sudo=sudo,
         )
         return
     if info.is_dir and not info.is_symlink:
@@ -522,8 +576,10 @@ def _apply_metadata_ctx(
     owner: str | int | None,
     group: str | int | None,
     info: _FileInfo | None,
+    *,
+    sudo: bool,
 ) -> None:
-    if _privileged(ctx):
+    if _privileged(ctx, sudo):
         _helper(
             ctx,
             {
@@ -534,6 +590,7 @@ def _apply_metadata_ctx(
                 "group": group,
             },
             mutates=True,
+            sudo=sudo,
         )
         return
     _apply_metadata(path, mode, owner, group, info, preserve=False)
@@ -655,12 +712,13 @@ def _content_lines(content: str) -> list[str]:
     return normalized.splitlines(keepends=True)
 
 
-def _require_parent(ctx: TaskContext, path: Path) -> None:
-    if _privileged(ctx):
+def _require_parent(ctx: TaskContext, path: Path, *, sudo: bool) -> None:
+    if _privileged(ctx, sudo):
         result = _helper(
             ctx,
             {"action": "stat", "path": str(path.parent), "follow": True},
             mutates=False,
+            sudo=sudo,
         )
         if not result.get("exists") or not result.get("is_dir"):
             raise TaskFailed(f"parent directory does not exist: {path.parent}")
@@ -669,11 +727,17 @@ def _require_parent(ctx: TaskContext, path: Path) -> None:
         raise TaskFailed(f"parent directory does not exist: {path.parent}")
 
 
-def _privileged(ctx: TaskContext) -> bool:
-    return ctx.needs_sudo and not ctx.sudo.is_root
+def _privileged(ctx: TaskContext, sudo: bool) -> bool:
+    return sudo and not ctx.sudo.is_root
 
 
-def _helper(ctx: TaskContext, request: dict[str, object], *, mutates: bool) -> dict[str, Any]:
+def _helper(
+    ctx: TaskContext,
+    request: dict[str, object],
+    *,
+    mutates: bool,
+    sudo: bool,
+) -> dict[str, Any]:
     handle, request_name = tempfile.mkstemp(prefix="kitup-file-", suffix=".json")
     request_path = Path(request_name)
     try:
@@ -681,9 +745,9 @@ def _helper(ctx: TaskContext, request: dict[str, object], *, mutates: bool) -> d
             json.dump(request, stream)
         command = [sys.executable, "-c", _helper_source(), str(request_path)]
         if mutates:
-            result = ctx.run(command, record=False)
+            result = ctx.run(command, record=False, sudo=sudo)
         else:
-            result = ctx.probe(command)
+            result = ctx.probe(command, sudo=sudo)
         if not result.stdout.strip():
             return {}
         return json.loads(result.stdout)

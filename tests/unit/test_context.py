@@ -8,9 +8,9 @@ from kitup.registry import Bundle
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
 
 
-def task_for(needs_sudo: bool = False):
+def task_for(name: str = "test"):
     bundle = Bundle("test")
-    add_task(bundle, lambda ctx: None, needs_sudo=needs_sudo)
+    add_task(bundle, lambda ctx: None, name=name)
     return bundle.tasks[0]
 
 
@@ -212,54 +212,100 @@ def test_probe_returns_nonzero_result_instead_of_failing(tmp_path):
     assert command.calls[0][1]["check"] is False
 
 
-def test_sudo_is_refreshed_once_per_task(tmp_path):
+def test_sudo_is_refreshed_once_per_run(tmp_path):
     command = FakeCommandRunner()
     sudo = FakeSudo()
     context = make_context(tmp_path, command=command, sudo=sudo)
-    context.begin_task(task_for(needs_sudo=True))
+    context.begin_task(task_for("Install packages"))
 
-    context.run(["first"])
-    context.run(["second"])
+    context.run(["first"], sudo=True)
+    context.run(["second"], sudo=True)
 
     assert sudo.refresh_count == 1
+    assert sudo.reasons == [
+        (
+            'Task "Install packages" requires sudo privileges; '
+            "you may be prompted for your password."
+        )
+    ]
+    assert command.calls[0][1]["sudo"] is True
+    assert command.calls[1][1]["sudo"] is True
+
+
+def test_sudo_validation_survives_task_boundaries(tmp_path):
+    command = FakeCommandRunner()
+    sudo = FakeSudo()
+    context = make_context(tmp_path, command=command, sudo=sudo)
+
+    context.begin_task(task_for("First"))
+    context.run(["first"], sudo=True)
+
+    context.begin_task(task_for("Second"))
+    context.run(["second"], sudo=True)
+
+    assert sudo.refresh_count == 1
+    assert sudo.reasons == [
+        (
+            'Task "First" requires sudo privileges; '
+            "you may be prompted for your password."
+        )
+    ]
+
+
+def test_sudo_is_revalidated_when_credentials_expire(tmp_path):
+    command = FakeCommandRunner()
+    sudo = FakeSudo()
+    context = make_context(tmp_path, command=command, sudo=sudo)
+    context.begin_task(task_for("Install packages"))
+
+    context.run(["first"], sudo=True)
+    sudo.valid = False
+    context.run(["second"], sudo=True)
+
+    expected = (
+        'Task "Install packages" requires sudo privileges; '
+        "you may be prompted for your password."
+    )
+    assert sudo.refresh_count == 2
+    assert sudo.reasons == [expected, expected]
 
 
 def test_dry_run_mutating_command_requests_sudo_but_does_not_execute(tmp_path):
     command = FakeCommandRunner()
     sudo = FakeSudo()
     context = make_context(tmp_path, dry_run=True, command=command, sudo=sudo)
-    context.begin_task(task_for(needs_sudo=True))
+    context.begin_task(task_for())
 
-    context.run(["install"])
+    context.run(["install"], sudo=True)
 
     assert sudo.refresh_count == 1
     assert command.calls == []
     assert len(context.changes) == 1
 
 
-def test_dry_run_probe_requests_sudo_when_needed(tmp_path):
+def test_dry_run_probe_requests_sudo_when_requested(tmp_path):
     command = FakeCommandRunner()
     sudo = FakeSudo()
     context = make_context(tmp_path, dry_run=True, command=command, sudo=sudo)
-    context.begin_task(task_for(needs_sudo=True))
+    context.begin_task(task_for())
 
-    context.run(["rpm", "-q", "git"], mutates=False)
+    context.run(["rpm", "-q", "git"], mutates=False, sudo=True)
 
     assert sudo.refresh_count == 1
     assert command.calls[0][1]["sudo"] is True
     assert context.changes == []
 
 
-def test_task_sudo_default_and_explicit_override(tmp_path):
+def test_sudo_defaults_to_false(tmp_path):
     command = FakeCommandRunner()
     context = make_context(tmp_path, command=command)
-    context.begin_task(task_for(needs_sudo=True))
+    context.begin_task(task_for())
 
     context.run(["first"])
-    context.run(["second"], sudo=False)
+    context.run(["second"], sudo=True)
 
-    assert command.calls[0][1]["sudo"] is True
-    assert command.calls[1][1]["sudo"] is False
+    assert command.calls[0][1]["sudo"] is False
+    assert command.calls[1][1]["sudo"] is True
 
 
 def test_guard_can_run_against_nonzero_result(tmp_path):

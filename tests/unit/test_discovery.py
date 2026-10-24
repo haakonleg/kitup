@@ -113,7 +113,7 @@ def test_multi_file_task_order(tmp_path):
         """
         from . import bundle
 
-        @bundle.task("Second", needs_sudo=True, tags={"one", "two"})
+        @bundle.task("Second", tags={"one", "two"})
         def second(ctx):
             pass
         """,
@@ -122,7 +122,6 @@ def test_multi_file_task_order(tmp_path):
     (bundle,) = discover_bundles(tmp_path)
 
     assert [task.name for task in bundle.tasks] == ["Second", "First"]
-    assert bundle.tasks[0].needs_sudo is True
     assert bundle.tasks[0].tags == frozenset({"one", "two"})
 
 

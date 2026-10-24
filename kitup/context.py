@@ -55,7 +55,7 @@ class TaskContext:
         self._changes: list[Change] = []
         self._notes: list[str] = []
         self._memo: dict[str, Any] = {}
-        self._default_sudo = False
+        self._task_name = ""
         self._sudo_ready = False
 
     @property
@@ -63,26 +63,29 @@ class TaskContext:
         return list(self._changes)
 
     @property
-    def needs_sudo(self) -> bool:
-        return self._default_sudo
-
-    @property
     def notes(self) -> list[str]:
         return list(self._notes)
 
     def begin_task(self, task: Task) -> None:
-        """Reset task-scoped state while retaining the per-run memo cache."""
+        """Reset task-scoped state while retaining per-run state."""
         self._changes.clear()
         self._notes.clear()
-        self._default_sudo = task.needs_sudo
-        self._sudo_ready = False
+        self._task_name = task.name
 
     def ensure_sudo(self, reason: str | None = None) -> None:
-        """Validate sudo once per task, before the first command that needs it."""
-        if self._sudo_ready:
+        """Revalidate sudo, prompting only when cached credentials expired."""
+        if self._sudo_ready and self.sudo.credentials_valid():
             return
         self.sudo.refresh(reason)
         self._sudo_ready = True
+
+    def _sudo_reason(self) -> str:
+        if not self._task_name:
+            return "sudo privileges are required; you may be prompted for your password."
+        return (
+            f'Task "{self._task_name}" requires sudo privileges; '
+            "you may be prompted for your password."
+        )
 
     def run(
         self,
@@ -93,15 +96,18 @@ class TaskContext:
         unless: Sequence[str] | None = None,
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
-        sudo: bool | None = None,
+        sudo: bool = False,
         timeout: float = 600,
         record: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        """Run a command, honoring guards, dry-run, and task sudo defaults."""
+        """Run a command, honoring guards and dry-run.
+
+        Only commands run with ``sudo=True`` request sudo credentials. Cached
+        credentials are checked again before every privileged operation.
+        """
         command = [str(part) for part in argv]
         if not command:
             raise TaskFailed("empty command")
-        use_sudo = self._default_sudo if sudo is None else sudo
 
         if creates is not None:
             marker = Path(creates)
@@ -110,13 +116,13 @@ class TaskContext:
             if marker.exists():
                 return _skipped(command)
 
-        if use_sudo:
-            self.ensure_sudo()
+        if sudo:
+            self.ensure_sudo(self._sudo_reason())
 
         run_options: dict[str, Any] = {
             "cwd": cwd,
             "env": env,
-            "sudo": use_sudo,
+            "sudo": sudo,
             "timeout": timeout,
             "refresh_sudo": False,
         }

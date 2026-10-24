@@ -33,6 +33,33 @@ def test_cached_credentials_are_used_without_output(monkeypatch, capsys):
     assert capsys.readouterr().err == ""
 
 
+def test_credentials_valid_checks_the_sudo_cache(monkeypatch):
+    monkeypatch.setattr("os.geteuid", lambda: 1000)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert PrivilegeManager().credentials_valid() is True
+    assert calls == [["sudo", "-n", "-v"]]
+
+
+def test_credentials_valid_reports_an_expired_cache(monkeypatch):
+    monkeypatch.setattr("os.geteuid", lambda: 1000)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1),
+    )
+
+    assert PrivilegeManager().credentials_valid() is False
+
+
 def test_missing_credentials_without_tty_fail(monkeypatch):
     monkeypatch.setattr("os.geteuid", lambda: 1000)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")

@@ -31,11 +31,11 @@ class PrivilegeManager:
         if self.is_root:
             return
 
-        if shutil.which("sudo") is None:
-            raise PrivilegeError("sudo is required for this task but was not found")
-
-        if self._cached_credentials_valid():
+        if self.credentials_valid():
             return
+
+        if shutil.which("sudo") is None:
+            raise PrivilegeError("sudo is required by this operation but was not found")
 
         if not sys.stdin.isatty():
             raise PrivilegeError(
@@ -52,6 +52,14 @@ class PrivilegeManager:
             raise PrivilegeError(f"could not run sudo: {exc}") from exc
         if result.returncode != 0:
             raise PrivilegeError("sudo authentication failed")
+
+    def credentials_valid(self) -> bool:
+        """Return whether cached sudo credentials can be used without a prompt."""
+        if self.is_root:
+            return True
+        if shutil.which("sudo") is None:
+            return False
+        return self._cached_credentials_valid()
 
     def wrap(self, argv: list[str]) -> list[str]:
         """Return argv prefixed with non-interactive sudo when needed."""

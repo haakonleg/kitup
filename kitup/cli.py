@@ -154,8 +154,7 @@ def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
             output.write("  tasks:")
         for task in bundle.tasks:
             if verbose:
-                sudo = "  [sudo]" if task.needs_sudo else ""
-                output.write(f"    - {task.name}{sudo}")
+                output.write(f"    - {task.name}")
                 output.write(f"      id: {task.id}")
                 tags = ", ".join(sorted(task.tags))
                 output.write(f"      tags:{f' {tags}' if tags else ''}")

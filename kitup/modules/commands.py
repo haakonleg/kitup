@@ -22,7 +22,7 @@ def run(
     cwd: str | Path | None = None,
     env: Mapping[str, str] | None = None,
     changed: bool = True,
-    sudo: bool | None = None,
+    sudo: bool = False,
     timeout: float = 600,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command unless a guard says it is already satisfied."""
@@ -59,7 +59,7 @@ def shell(
     cwd: str | Path | None = None,
     env: Mapping[str, str] | None = None,
     changed: bool = True,
-    sudo: bool | None = None,
+    sudo: bool = False,
     timeout: float = 600,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command string through a shell.

@@ -30,7 +30,7 @@ def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
         from . import bundle
         from kitup.modules import files
 
-        @bundle.task("write privileged file", needs_sudo=True)
+        @bundle.task("write privileged file")
         def write_file(ctx):
             files.file(
                 ctx,
@@ -39,6 +39,7 @@ def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
                 mode=0o640,
                 owner="root",
                 group="root",
+                sudo=True,
             )
         """,
     )
@@ -55,9 +56,9 @@ def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
         from . import bundle
         from kitup.modules import files
 
-        @bundle.task("remove privileged file", needs_sudo=True)
+        @bundle.task("remove privileged file")
         def remove_file(ctx):
-            files.file(ctx, {str(MANAGED_PATH)!r}, state="absent")
+            files.file(ctx, {str(MANAGED_PATH)!r}, state="absent", sudo=True)
         """,
     )
     assert run_kitup("apply", remove_root) == 0

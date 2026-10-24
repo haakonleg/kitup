@@ -4,7 +4,6 @@ import pytest
 
 from kitup.errors import TaskFailed
 from kitup.modules import dnf
-from kitup.registry import Task
 
 from .helpers import FakeCommandRunner, FakeSudo, completed, make_context
 
@@ -35,11 +34,10 @@ def test_ensure_present_is_a_noop_when_installed(tmp_path):
     assert ctx.changes == []
 
 
-def test_read_only_probe_does_not_inherit_task_sudo(tmp_path):
+def test_read_only_probes_do_not_request_sudo(tmp_path):
     command = FakeCommandRunner()
     sudo = FakeSudo()
     ctx = make_context(tmp_path, command=command, sudo=sudo)
-    ctx.begin_task(Task(bundle="test", name="test", func=lambda ctx: None, needs_sudo=True))
 
     dnf.packages(ctx, ["git"])
 

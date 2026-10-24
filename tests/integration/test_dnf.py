@@ -47,7 +47,7 @@ def test_install_and_remove_package(tmp_path: Path) -> None:
         from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("install fixture package", needs_sudo=True)
+        @bundle.task("install fixture package")
         def install_fixture(ctx):
             dnf.packages(ctx, ["kitup-test"])
         """,
@@ -62,7 +62,7 @@ def test_install_and_remove_package(tmp_path: Path) -> None:
         from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("remove fixture package", needs_sudo=True)
+        @bundle.task("remove fixture package")
         def remove_fixture(ctx):
             dnf.packages(ctx, ["kitup-test"], state="absent")
         """,
@@ -79,7 +79,7 @@ def test_install_and_remove_group(tmp_path: Path, group_absent: None) -> None:
         from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("install fixture group", needs_sudo=True)
+        @bundle.task("install fixture group")
         def install_group(ctx):
             dnf.packages(ctx, [{TEST_GROUP!r}], group=True)
         """,
@@ -95,7 +95,7 @@ def test_install_and_remove_group(tmp_path: Path, group_absent: None) -> None:
         from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("remove fixture group", needs_sudo=True)
+        @bundle.task("remove fixture group")
         def remove_group(ctx):
             dnf.packages(ctx, [{TEST_GROUP!r}], group=True, state="absent")
         """,
@@ -113,7 +113,7 @@ def test_install_local_rpm(tmp_path: Path) -> None:
         from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("install local RPM", needs_sudo=True)
+        @bundle.task("install local RPM")
         def install_rpm(ctx):
             dnf.rpm(ctx, {str(TEST_RPM)!r})
         """,
@@ -143,7 +143,7 @@ def test_repository_add_and_remove(tmp_path: Path) -> None:
         from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("add repository", needs_sudo=True)
+        @bundle.task("add repository")
         def add_repository(ctx):
             dnf.repository(ctx, {str(repository_file)!r})
         """,
@@ -158,7 +158,7 @@ def test_repository_add_and_remove(tmp_path: Path) -> None:
         from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("remove repository", needs_sudo=True)
+        @bundle.task("remove repository")
         def remove_repository(ctx):
             dnf.repository(ctx, state="absent", name={repository_name!r})
         """,

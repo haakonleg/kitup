@@ -18,12 +18,12 @@ Ensure packages or groups are present or absent.
 Changes are reported with `added` or `removed` lists.
 
 ```python
-@bundle.task("Install base packages", needs_sudo=True, tags={"packages"})
+@bundle.task("Install base packages", tags={"packages"})
 def install_base_packages(ctx):
     dnf.packages(ctx, ctx.config.PACKAGES)
 
 
-@bundle.task("Remove legacy tools", needs_sudo=True)
+@bundle.task("Remove legacy tools")
 def remove_legacy_tools(ctx):
     dnf.packages(ctx, ["old-tool"], state="absent")
 ```
@@ -33,7 +33,7 @@ def remove_legacy_tools(ctx):
 Remove unused package dependencies if `dnf repoquery --unneeded` reports any.
 
 ```python
-@bundle.task("Remove unused packages", needs_sudo=True, tags={"packages"})
+@bundle.task("Remove unused packages", tags={"packages"})
 def remove_unused_packages(ctx):
     dnf.autoremove(ctx)
 ```
@@ -46,7 +46,7 @@ Enable or remove a COPR project.
 - `state="absent"` removes its repository file if configured.
 
 ```python
-@bundle.task("Enable example COPR", needs_sudo=True, tags={"repos"})
+@bundle.task("Enable example COPR", tags={"repos"})
 def enable_example_copr(ctx):
     dnf.copr(ctx, "owner/project")
 ```
@@ -63,12 +63,12 @@ Manage a repository from a `.repo` file.
 `"absent"` removes the installed file from dnf's repository directory.
 
 ```python
-@bundle.task("Add vendor repository", needs_sudo=True, tags={"repos"})
+@bundle.task("Add vendor repository", tags={"repos"})
 def add_vendor_repository(ctx):
     dnf.repository(ctx, "https://example.test/tool.repo")
 
 
-@bundle.task("Remove vendor repository", needs_sudo=True, tags={"repos"})
+@bundle.task("Remove vendor repository", tags={"repos"})
 def remove_vendor_repository(ctx):
     dnf.repository(ctx, state="absent", name="tool.repo")
 ```
@@ -79,7 +79,7 @@ Install one or more release RPMs from URLs or local paths. `sources` may be a
 single value or an iterable. `dnf install` handles already-installed packages.
 
 ```python
-@bundle.task("Install example release RPMs", needs_sudo=True, tags={"repos"})
+@bundle.task("Install example release RPMs", tags={"repos"})
 def install_example_releases(ctx):
     dnf.rpm(
         ctx,
@@ -96,5 +96,5 @@ def install_example_releases(ctx):
   name.
 - Empty names, COPR projects, repository sources/names, and RPM sources are
   rejected.
-- Mutating operations use sudo; mark tasks `needs_sudo=True`.
+- Mutating operations request sudo themselves.
 - Dry-run reports the would-be change without mutating anything.

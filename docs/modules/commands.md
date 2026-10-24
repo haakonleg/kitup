@@ -6,7 +6,7 @@ Run guarded one-off commands.
 from kitup.modules import commands
 ```
 
-## `run(ctx, argv, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=None, timeout=600)`
+## `run(ctx, argv, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600)`
 
 Run `argv` unless a guard is already satisfied.
 
@@ -17,7 +17,7 @@ Run `argv` unless a guard is already satisfied.
 - `cwd` — working directory for the command and guards.
 - `env` — additional environment variables.
 - `changed` — when `False`, execute without recording a change.
-- `sudo` — override the task's sudo default.
+- `sudo` — run through sudo; cached credentials are revalidated on use.
 - `timeout` — command timeout in seconds.
 
 ```python
@@ -30,7 +30,7 @@ def create_marker(ctx):
     )
 ```
 
-## `shell(ctx, command, *, shell=None, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=None, timeout=600)`
+## `shell(ctx, command, *, shell=None, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600)`
 
 Run a command string through a shell. Other arguments match `run()`.
 

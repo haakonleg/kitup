@@ -15,7 +15,6 @@ class Task:
     bundle: str
     name: str
     func: Callable[[Any], None]
-    needs_sudo: bool = False
     tags: frozenset[str] = frozenset()
     description: str = ""
 
@@ -51,7 +50,6 @@ class Bundle:
         self,
         name: str | None = None,
         *,
-        needs_sudo: bool = False,
         tags: Iterable[str] = (),
         description: str = "",
     ) -> Callable[[Callable[[Any], None]], Callable[[Any], None]]:
@@ -67,7 +65,6 @@ class Bundle:
                     bundle=self.name,
                     name=name or func.__name__,
                     func=func,
-                    needs_sudo=needs_sudo,
                     tags=frozenset(tags),
                     description=description,
                 )

@@ -5,7 +5,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import commands
 
-from .helpers import FakeCommandRunner, make_context
+from .helpers import FakeCommandRunner, FakeSudo, make_context
 
 
 def test_guarded_command_is_skipped(tmp_path):
@@ -38,6 +38,19 @@ def test_changed_false_suppresses_change_record(tmp_path):
 
     assert command.calls[0][0] == ["true"]
     assert ctx.changes == []
+
+
+def test_sudo_is_forwarded_and_requested_only_when_set(tmp_path):
+    command = FakeCommandRunner()
+    sudo = FakeSudo()
+    ctx = make_context(tmp_path, command=command, sudo=sudo)
+
+    commands.run(ctx, ["first"])
+    commands.run(ctx, ["second"], sudo=True)
+
+    assert command.calls[0][1]["sudo"] is False
+    assert command.calls[1][1]["sudo"] is True
+    assert sudo.refresh_count == 1
 
 
 def test_dry_run_does_not_execute_mutating_command(tmp_path):

@@ -99,13 +99,14 @@ Task files register tasks with `@bundle.task`:
 from . import bundle
 from kitup.modules import files
 
-@bundle.task("Configure DNF", needs_sudo=True, tags={"config"})
+@bundle.task("Configure DNF", tags={"config"})
 def configure_dnf(ctx):
     files.file(
         ctx,
         ctx.config.DNF_CONF,
         content=bundle.read_resource("resources/dnf.conf"),
         mode=0o644,
+        sudo=True,
     )
 ```
 
@@ -119,7 +120,9 @@ Task code can use the context helpers:
 
 ```python
 ctx.run(["command", "arg"])          # guarded, dry-run aware command
+ctx.run(["command", "arg"], sudo=True)
 ctx.probe(["query", "--flag"])       # read-only query
+ctx.probe(["query", "--flag"], sudo=True)
 ctx.changed({"detail": "data"}, "+change")
 ctx.note("extra context")
 ctx.memo("key", compute_once)        # per-run cache
@@ -145,10 +148,14 @@ Full API documentation is in [docs/modules/index.md](docs/modules/index.md).
 
 ## Privileges
 
-Tasks that need root declare `needs_sudo=True`. Root commands run as
-`sudo -n -- <argv>`; file operations in root tasks use a privileged helper.
-Running kitup as root is supported, but user-scoped modules (`gsettings`,
-`systemctl --user`) and home-directory dotfiles must run as the target user.
+Operations request sudo explicitly with `sudo=True`, for example
+`ctx.run(..., sudo=True)`, `commands.run(..., sudo=True)`, or
+`files.file(..., sudo=True)`. Inherently privileged operations, such as `dnf`
+and system-scoped `systemd`, request sudo themselves.
+
+Cached credentials are reused, and kitup prompts only when they expire. Running
+as root is supported, but user-scoped modules and home-directory dotfiles must
+run as the target user.
 
 ## Development
 
