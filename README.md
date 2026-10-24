@@ -47,6 +47,12 @@ kitup list -D examples -v
 the `kitup` package. Bundles stay external: run the zipapp from a directory
 containing `bundles/`, or pass `-D`.
 
+To build and install to `~/.local/bin`:
+
+```bash
+./install.sh
+```
+
 ## Configuration
 
 Public values in `config.py` are exposed as `ctx.config`:
