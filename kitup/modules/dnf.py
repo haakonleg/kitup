@@ -6,6 +6,7 @@ import re
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from ..context import TaskContext
@@ -20,18 +21,39 @@ def packages(
     state: str = "present",
     group: bool = False,
     weak_deps: bool = False,
+    exclude: Iterable[str] | str | None = None,
 ) -> None:
-    """Ensure packages or package groups are present or absent."""
+    """Ensure packages or package groups are present or absent.
+
+    Names beginning with ``@`` are treated as package groups.
+    """
     if isinstance(names, str):
         names = [names]
     wanted = _dedupe(names)
     require_collection(wanted, "package names")
     for name in wanted:
         require_text(name, "package name")
+
+    excluded = _normalize_excludes(exclude)
+    group_names, package_names = _split_names(wanted, group=group)
     if state == "present":
-        _ensure_present(ctx, wanted, group=group, weak_deps=weak_deps)
+        _ensure_present(
+            ctx,
+            group_names=group_names,
+            package_names=package_names,
+            weak_deps=weak_deps,
+            exclude=excluded,
+            explicit_group=group,
+        )
     elif state == "absent":
-        _ensure_absent(ctx, wanted, group=group)
+        if excluded:
+            raise TaskFailed("exclude is only supported when state is 'present'")
+        _ensure_absent(
+            ctx,
+            group_names=group_names,
+            package_names=package_names,
+            explicit_group=group,
+        )
     else:
         raise TaskFailed(f"invalid package state: {state!r}")
 
@@ -64,22 +86,47 @@ def swap(
         raise TaskFailed(f"package still missing after swap: {new}")
 
 
-def _ensure_absent(ctx: TaskContext, names: list[str], *, group: bool) -> None:
-    installed = _installed(ctx, names, group)
-    if not installed:
+def _ensure_absent(
+    ctx: TaskContext,
+    *,
+    group_names: list[str],
+    package_names: list[str],
+    explicit_group: bool,
+) -> None:
+    installed_groups = _installed_group_names(ctx, group_names)
+    installed_packages = [name for name in package_names if _rpm_installed(ctx, name)]
+    if not installed_groups and not installed_packages:
         return
 
-    summary = " ".join(f"-{name}" for name in installed)
-    ctx.changed({"removed": installed, "group": group}, summary)
-    if group:
-        command = [_dnf_command(ctx), "group", "remove", "-y", *installed]
+    if installed_groups and installed_packages:
+        removed = _display_names(installed_groups, installed_packages)
+        data: dict[str, Any] = {
+            "removed": removed,
+            "group": False,
+            "groups": installed_groups,
+            "packages": installed_packages,
+        }
+    elif installed_groups:
+        removed = installed_groups
+        data = {"removed": removed, "group": True}
     else:
-        command = [_dnf_command(ctx), "remove", "-y", *installed]
+        removed = installed_packages
+        data = {"removed": removed, "group": False}
+    ctx.changed(data, " ".join(f"-{name}" for name in removed))
+
+    specs = _display_names(installed_groups, installed_packages)
+    command: list[str]
+    if explicit_group:
+        command = [_dnf_command(ctx), "group", "remove", "-y", *installed_groups]
+    else:
+        command = [_dnf_command(ctx), "remove", "-y", *specs]
     ctx.run(command, sudo=True, record=False)
 
     if ctx.dry_run:
         return
-    remaining = _installed(ctx, installed, group)
+    remaining_groups = _installed_group_names(ctx, installed_groups)
+    remaining_packages = [name for name in installed_packages if _rpm_installed(ctx, name)]
+    remaining = _display_names(remaining_groups, remaining_packages)
     if remaining:
         raise TaskFailed(f"packages still installed after removal: {', '.join(remaining)}")
 
@@ -220,32 +267,60 @@ def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> None:
 
 def _ensure_present(
     ctx: TaskContext,
-    names: list[str],
     *,
-    group: bool,
+    group_names: list[str],
+    package_names: list[str],
     weak_deps: bool,
+    exclude: list[str],
+    explicit_group: bool,
 ) -> None:
-    installed = set(_installed(ctx, names, group))
-    missing = [name for name in names if name not in installed]
-    if not missing:
+    missing_groups = _missing_group_names(ctx, group_names)
+    missing_packages = [name for name in package_names if not _rpm_installed(ctx, name)]
+    if not missing_groups and not missing_packages:
         return
 
-    summary = " ".join(f"+{name}" for name in missing)
-    ctx.changed({"added": missing, "group": group}, summary)
-
-    if group:
-        command = [_dnf_command(ctx), "group", "install", "-y", *missing]
+    if missing_groups and missing_packages:
+        added = _display_names(missing_groups, missing_packages)
+        data: dict[str, Any] = {
+            "added": added,
+            "group": False,
+            "groups": missing_groups,
+            "packages": missing_packages,
+        }
+    elif missing_groups:
+        added = missing_groups
+        data = {"added": added, "group": True}
     else:
-        command = [_dnf_command(ctx), "install", "-y"]
-        if not weak_deps:
-            command.append("--setopt=install_weak_deps=False")
-        command.extend(missing)
+        added = missing_packages
+        data = {"added": added, "group": False}
+
+    options: list[str] = []
+    if not weak_deps:
+        options.append("--setopt=install_weak_deps=False")
+    options.extend(f"--exclude={item}" for item in exclude)
+
+    specs = _display_names(missing_groups, missing_packages)
+    command: list[str]
+    if explicit_group:
+        command = [
+            _dnf_command(ctx),
+            "group",
+            "install",
+            "-y",
+            *options,
+            *missing_groups,
+        ]
+    else:
+        command = [_dnf_command(ctx), "install", "-y", *options, *specs]
+
+    ctx.changed(data, " ".join(f"+{name}" for name in added))
     ctx.run(command, sudo=True, record=False)
 
     if ctx.dry_run:
         return
-    installed = set(_installed(ctx, missing, group))
-    remaining = [name for name in missing if name not in installed]
+    remaining_groups = _missing_group_names(ctx, missing_groups)
+    remaining_packages = [name for name in missing_packages if not _rpm_installed(ctx, name)]
+    remaining = _display_names(remaining_groups, remaining_packages)
     if remaining:
         raise TaskFailed(f"packages still missing after install: {', '.join(remaining)}")
 
@@ -284,10 +359,46 @@ def _add_repository_command(ctx: TaskContext, source: str | Path, filename: str)
     ]
 
 
-def _installed(ctx: TaskContext, names: list[str], group: bool) -> list[str]:
-    if group:
-        return _installed_groups(ctx, names)
-    return [name for name in names if _rpm_installed(ctx, name)]
+def _normalize_excludes(exclude: Iterable[str] | str | None) -> list[str]:
+    if exclude is None:
+        return []
+    if isinstance(exclude, str):
+        exclude = [exclude]
+    values = _dedupe(exclude)
+    for value in values:
+        require_text(value, "excluded package")
+    return values
+
+
+def _split_names(names: list[str], *, group: bool) -> tuple[list[str], list[str]]:
+    group_names: list[str] = []
+    package_names: list[str] = []
+    for name in names:
+        if group or name.startswith("@"):
+            candidate = name.removeprefix("@")
+            require_text(candidate, "group name")
+            group_names.append(candidate)
+        else:
+            package_names.append(name)
+    return _dedupe(group_names), _dedupe(package_names)
+
+
+def _display_names(groups: list[str], packages: list[str]) -> list[str]:
+    return [f"@{name}" for name in groups] + list(packages)
+
+
+def _missing_group_names(ctx: TaskContext, names: list[str]) -> list[str]:
+    if not names:
+        return []
+    installed = set(_installed_groups(ctx, names))
+    return [name for name in names if name not in installed]
+
+
+def _installed_group_names(ctx: TaskContext, names: list[str]) -> list[str]:
+    if not names:
+        return []
+    installed = set(_installed_groups(ctx, names))
+    return [name for name in names if name in installed]
 
 
 def _installed_groups(ctx: TaskContext, names: list[str]) -> list[str]:

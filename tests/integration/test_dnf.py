@@ -71,10 +71,50 @@ def test_install_and_remove_package(tmp_path: Path) -> None:
     assert not rpm_installed()
 
 
-def test_install_and_remove_group(tmp_path: Path, group_absent: None) -> None:
+def test_install_and_remove_group_and_package(
+    tmp_path: Path,
+    group_absent: None,
+) -> None:
     install_root = write_bundle(
         tmp_path / "install",
         "dnf_group_install",
+        f"""
+        from . import bundle
+        from kitup.modules import dnf
+
+        @bundle.task("install fixture group and package")
+        def install_group(ctx):
+            dnf.packages(ctx, ["@{TEST_GROUP}", {TEST_PACKAGE!r}])
+        """,
+    )
+    assert run_kitup("apply", install_root) == 0
+    assert rpm_installed()
+    assert TEST_GROUP in run(["dnf5", "group", "list", "--installed"]).stdout
+
+    remove_root = write_bundle(
+        tmp_path / "remove",
+        "dnf_group_remove",
+        f"""
+        from . import bundle
+        from kitup.modules import dnf
+
+        @bundle.task("remove fixture group and package")
+        def remove_group(ctx):
+            dnf.packages(ctx, ["@{TEST_GROUP}", {TEST_PACKAGE!r}], state="absent")
+        """,
+    )
+    assert run_kitup("apply", remove_root) == 0
+    assert not rpm_installed()
+    assert TEST_GROUP not in run(["dnf5", "group", "list", "--installed"]).stdout
+
+
+def test_install_and_remove_explicit_group(
+    tmp_path: Path,
+    group_absent: None,
+) -> None:
+    install_root = write_bundle(
+        tmp_path / "install",
+        "dnf_group_only_install",
         f"""
         from . import bundle
         from kitup.modules import dnf
@@ -90,7 +130,7 @@ def test_install_and_remove_group(tmp_path: Path, group_absent: None) -> None:
 
     remove_root = write_bundle(
         tmp_path / "remove",
-        "dnf_group_remove",
+        "dnf_group_only_remove",
         f"""
         from . import bundle
         from kitup.modules import dnf

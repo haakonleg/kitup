@@ -6,21 +6,28 @@ RPM package, package-group, and repository management using `dnf5` (Fedora 44+).
 from kitup.modules import dnf
 ```
 
-## `packages(ctx, names, *, state="present", group=False, weak_deps=False)`
+## `packages(ctx, names, *, state="present", group=False, weak_deps=False, exclude=None)`
 
 Ensure packages or groups are present or absent.
 
 - `names` — a name or an iterable of names.
 - `state` — `"present"` or `"absent"`.
-- `group` — treat names as package groups.
-- `weak_deps` — install with `--setopt=install_weak_deps=False` when `False`.
+- `group` — treat every name as a group.
+- `weak_deps` — when `False`, pass `--setopt=install_weak_deps=False` for package
+  and group installs.
+- `exclude` — package name or iterable of names/globs to pass as `--exclude`
+  during installation.
 
 Changes are reported with `added` or `removed` lists.
 
 ```python
-@bundle.task("Install base packages", tags={"packages"})
-def install_base_packages(ctx):
-    dnf.packages(ctx, ctx.config.PACKAGES)
+@bundle.task("Install multimedia tools", tags={"packages"})
+def install_multimedia_tools(ctx):
+    dnf.packages(
+        ctx,
+        ["@multimedia", "ripgrep"],
+        exclude=["PackageKit-gstreamer-plugin"],
+    )
 
 
 @bundle.task("Remove legacy tools")
@@ -107,6 +114,7 @@ def install_example_releases(ctx):
 
 - Package installs are verified with `rpm -q`; groups are matched by exact ID or
   name.
+- `exclude` is only valid with `state="present"`.
 - Empty names, COPR projects, repository sources/names, and RPM sources are
   rejected.
 - Mutating operations request sudo themselves.

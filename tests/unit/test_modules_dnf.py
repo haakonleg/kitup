@@ -85,7 +85,14 @@ def test_ensure_group_installs_missing_group(tmp_path):
 
     dnf.packages(ctx, ["desktop"], group=True)
 
-    assert command.calls[1][0] == ["dnf5", "group", "install", "-y", "desktop"]
+    assert command.calls[1][0] == [
+        "dnf5",
+        "group",
+        "install",
+        "-y",
+        "--setopt=install_weak_deps=False",
+        "desktop",
+    ]
     assert ctx.changes[0].data == {"added": ["desktop"], "group": True}
 
 
@@ -100,7 +107,149 @@ def test_group_substring_is_not_treated_as_installed(tmp_path):
 
     dnf.packages(ctx, ["base"], group=True)
 
-    assert command.calls[1][0] == ["dnf5", "group", "install", "-y", "base"]
+    assert command.calls[1][0] == [
+        "dnf5",
+        "group",
+        "install",
+        "-y",
+        "--setopt=install_weak_deps=False",
+        "base",
+    ]
+
+
+def test_at_prefixed_group_and_package_install_together(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, "Installed groups:\n base\n"),
+        response(1),
+        response(0),
+        response(0, "Installed groups:\n base\n multimedia\n"),
+        response(0),
+    ]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.packages(ctx, ["@multimedia", "ripgrep"])
+
+    assert command.calls[1][0] == ["rpm", "-q", "ripgrep"]
+    assert command.calls[2][0] == [
+        "dnf5",
+        "install",
+        "-y",
+        "--setopt=install_weak_deps=False",
+        "@multimedia",
+        "ripgrep",
+    ]
+    assert command.calls[2][1]["sudo"] is True
+    assert ctx.changes[0].data == {
+        "added": ["@multimedia", "ripgrep"],
+        "group": False,
+        "groups": ["multimedia"],
+        "packages": ["ripgrep"],
+    }
+    assert ctx.changes[0].summary == "+@multimedia +ripgrep"
+
+
+def test_at_prefixed_group_install_uses_install(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, "Installed groups:\n base\n"),
+        response(0),
+        response(0, "Installed groups:\n base\n multimedia\n"),
+    ]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.packages(ctx, ["@multimedia"])
+
+    assert command.calls[1][0] == [
+        "dnf5",
+        "install",
+        "-y",
+        "--setopt=install_weak_deps=False",
+        "@multimedia",
+    ]
+    assert ctx.changes[0].data == {"added": ["multimedia"], "group": True}
+
+
+def test_group_install_passes_weak_deps_and_excludes(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, "Installed groups:\n base\n"),
+        response(0),
+        response(0, "Installed groups:\n base\n multimedia\n"),
+    ]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.packages(
+        ctx,
+        ["multimedia"],
+        group=True,
+        exclude=["PackageKit-gstreamer-plugin"],
+    )
+
+    assert command.calls[1][0] == [
+        "dnf5",
+        "group",
+        "install",
+        "-y",
+        "--setopt=install_weak_deps=False",
+        "--exclude=PackageKit-gstreamer-plugin",
+        "multimedia",
+    ]
+
+
+def test_package_install_passes_excludes(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1), response(0), response(0)]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.packages(ctx, ["git"], exclude=["foo", "bar"])
+
+    assert command.calls[1][0] == [
+        "dnf5",
+        "install",
+        "-y",
+        "--setopt=install_weak_deps=False",
+        "--exclude=foo",
+        "--exclude=bar",
+        "git",
+    ]
+
+
+def test_at_prefixed_group_removal_uses_remove(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, "Installed groups:\n multimedia\n"),
+        response(0),
+        response(0, "Installed groups:\n"),
+    ]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.packages(ctx, ["@multimedia"], state="absent")
+
+    assert command.calls[1][0] == ["dnf5", "remove", "-y", "@multimedia"]
+    assert ctx.changes[0].data == {"removed": ["multimedia"], "group": True}
+
+
+def test_group_true_removal_uses_group_remove(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, "Installed groups:\n multimedia\n"),
+        response(0),
+        response(0, "Installed groups:\n"),
+    ]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.packages(ctx, ["multimedia"], group=True, state="absent")
+
+    assert command.calls[1][0] == ["dnf5", "group", "remove", "-y", "multimedia"]
+    assert ctx.changes[0].data == {"removed": ["multimedia"], "group": True}
+
+
+def test_exclude_is_rejected_for_absent(tmp_path):
+    ctx = make_context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="only supported"):
+        dnf.packages(ctx, ["git"], state="absent", exclude=["foo"])
 
 
 def test_remove_removes_installed_packages(tmp_path):
@@ -374,6 +523,10 @@ def test_empty_inputs_are_rejected(tmp_path):
         dnf.packages(ctx, "")
     with pytest.raises(TaskFailed, match="must not be empty"):
         dnf.packages(ctx, ["git", "  "])
+    with pytest.raises(TaskFailed, match="group name must not be empty"):
+        dnf.packages(ctx, ["@"])
+    with pytest.raises(TaskFailed, match="excluded package must not be empty"):
+        dnf.packages(ctx, ["git"], exclude=["  "])
     with pytest.raises(TaskFailed, match="COPR project must not be empty"):
         dnf.copr(ctx, "  ")
     with pytest.raises(TaskFailed, match="repository source must not be empty"):
