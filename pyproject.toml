@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kitup"
+version = "0.1.0"
+description = "The simple python-driven system configuration tool"
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "mypy"]
+
+[project.scripts]
+kitup = "kitup.cli:main"
+
+[tool.setuptools]
+packages = ["kitup", "kitup.modules"]
+
+[tool.setuptools.package-data]
+kitup = ["py.typed"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+extend-select = ["E501"]
