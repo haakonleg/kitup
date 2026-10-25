@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 from .errors import PrivilegeError
+from .output.terminal import clear_lines, terminal_columns
 
 _SUDO_PROMPT = "sudo password: "
 
@@ -75,32 +76,18 @@ class PrivilegeManager:
             password = getpass.getpass(_SUDO_PROMPT)
         except EOFError as exc:
             raise PrivilegeError("no sudo password received") from exc
-        self._clear_prompt(show_reason)
+        # getpass leaves the cursor on the line after the prompt.
+        clear_lines(sys.stderr, 2 if show_reason else 1)
         return password
 
     @staticmethod
     def _fit_reason(reason: str) -> str:
         if not sys.stderr.isatty():
             return reason
-        try:
-            columns = os.get_terminal_size(sys.stderr.fileno()).columns
-        except OSError:
-            columns = 80
-        if columns < 20:
-            columns = 80
+        columns = terminal_columns(sys.stderr)
         if len(reason) <= columns:
             return reason
         return f"{reason[: columns - 3]}..."
-
-    @staticmethod
-    def _clear_prompt(show_reason: bool) -> None:
-        if not sys.stderr.isatty():
-            return
-        # getpass leaves the cursor on the line after the prompt.
-        sys.stderr.write("\033[1A\r\033[K")
-        if show_reason:
-            sys.stderr.write("\033[1A\r\033[K")
-        sys.stderr.flush()
 
     def credentials_valid(self) -> bool:
         """Return whether cached sudo credentials can be used without a prompt."""

@@ -11,6 +11,11 @@ from kitup.cli import main
 TEST_PACKAGE = "kitup-test"
 TEST_REPO = Path("/srv/kitup-repo")
 TEST_RPM = TEST_REPO / "kitup-test-1.0-1.noarch.rpm"
+FLATPAK_REPO = Path("/srv/flatpak-repo")
+FLATPAK_REMOTE = "kitup-test"
+FLATPAK_USER_REMOTE = "kitup-test-user"
+FLATPAK_APP = "org.kitup.TestApp"
+FLATPAK_RUNTIME = "org.kitup.TestPlatform"
 SCHEMA = "org.kitup.IntegrationTest"
 SCHEMA_KEY = "example-string"
 SCHEMA_DEFAULT = "'default-value'"
@@ -72,3 +77,19 @@ def dnf_reposdir() -> Path:
 
 def systemctl(*args: str) -> subprocess.CompletedProcess[str]:
     return run(["systemctl", *args], check=False)
+
+
+def flatpak_remotes(scope: str = "system") -> list[str]:
+    result = run(
+        ["flatpak", "remotes", f"--{scope}", "--columns=name"],
+        check=False,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def flatpak_installed(scope: str = "system") -> list[str]:
+    result = run(
+        ["flatpak", "list", f"--{scope}", "--columns=application"],
+        check=False,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]

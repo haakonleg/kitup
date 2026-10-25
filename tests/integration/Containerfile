@@ -6,6 +6,7 @@ RUN dnf5 install -y \
         dbus-tools \
         dconf \
         dnf5 \
+        flatpak \
         glib2 \
         gsettings-desktop-schemas \
         python3 \
@@ -25,6 +26,16 @@ RUN mkdir -p /srv/kitup-repo \
     && cp /root/rpmbuild/RPMS/noarch/kitup-test-*.rpm /srv/kitup-repo/ \
     && createrepo_c --groupfile /tmp/comps.xml /srv/kitup-repo \
     && rm -rf /root/rpmbuild /tmp/kitup-test.spec /tmp/comps.xml
+
+# Build a local, unsigned Flatpak repository. Tests run with no network, so
+# this fixture is the only Flatpak source available at runtime.
+COPY tests/integration/fixtures/flatpak /tmp/flatpak-fixture
+RUN mkdir -p /srv/flatpak-repo \
+    && flatpak build-finish /tmp/flatpak-fixture/app \
+    && flatpak build-export --arch=x86_64 /srv/flatpak-repo /tmp/flatpak-fixture/app stable \
+    && flatpak build-export --arch=x86_64 --runtime /srv/flatpak-repo /tmp/flatpak-fixture/runtime stable \
+    && flatpak build-update-repo /srv/flatpak-repo \
+    && rm -rf /tmp/flatpak-fixture
 
 RUN rm -f /etc/yum.repos.d/*.repo \
     && printf '%s\n' \

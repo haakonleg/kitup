@@ -14,6 +14,7 @@ in the bundle's `__init__.py` and imported in task files with `from . import
 bundle`.
 
 - [dnf](dnf.md) — RPM packages, groups, repositories, and COPR
+- [flatpak](flatpak.md) — Flatpak remotes, applications, and runtimes
 - [files](files.md) — files, directories, and symlinks
 - [commands](commands.md) — guarded one-off commands
 - [systemd](systemd.md) — systemd units

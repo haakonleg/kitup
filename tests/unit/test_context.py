@@ -72,6 +72,36 @@ def test_input_shares_store_with_memo_and_survives_tasks(tmp_path, monkeypatch):
     assert calls == []
 
 
+def test_input_enters_interactive_output_and_clears_prompt(tmp_path, monkeypatch):
+    calls = []
+    prompts = []
+    cleared = []
+
+    @contextmanager
+    def interactive():
+        calls.append("begin")
+        try:
+            yield
+        finally:
+            calls.append("end")
+
+    def fake_input(prompt):
+        prompts.append(prompt)
+        return "provided"
+
+    def clear_input(prompt, value):
+        cleared.append((prompt, value))
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    output = SimpleNamespace(interactive=interactive, clear_input=clear_input)
+    context = make_context(tmp_path, output=output)
+
+    assert context.input(prompt="Value: ") == "provided"
+    assert prompts == ["Value: "]
+    assert cleared == [("Value: ", "provided")]
+    assert calls == ["begin", "end"]
+
+
 def test_get_returns_default_and_raises_for_missing_key(tmp_path):
     context = make_context(tmp_path)
 
@@ -190,7 +220,7 @@ def test_sudo_is_refreshed_once_per_run(tmp_path):
     context.run(["second"], sudo=True)
 
     assert sudo.refresh_count == 1
-    assert sudo.reasons == ['Task "Install packages" requires sudo privileges']
+    assert sudo.reasons == ['task "Install packages" requires sudo privileges']
     assert command.calls[0][1]["sudo"] is True
     assert command.calls[1][1]["sudo"] is True
 
@@ -223,7 +253,7 @@ def test_sudo_is_revalidated_when_credentials_expire(tmp_path):
     sudo.valid = False
     context.run(["second"], sudo=True)
 
-    expected = 'Task "Install packages" requires sudo privileges'
+    expected = 'task "Install packages" requires sudo privileges'
     assert sudo.refresh_count == 2
     assert sudo.reasons == [expected, expected]
 

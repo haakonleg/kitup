@@ -125,6 +125,6 @@ class Runner:
             changes=changes,
             notes=notes,
             detail=detail,
-            duration=time.monotonic() - started,
+            duration=self.output.elapsed_since(started),
             error=error,
         )

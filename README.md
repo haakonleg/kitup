@@ -140,6 +140,7 @@ All modules are idempotent and report changes through `ctx.changed()`. Modules
 are standalone and do not import each other.
 
 - `dnf` — packages, groups, swaps, release RPMs, repositories, and COPR.
+- `flatpak` — remotes, applications, and runtimes.
 - `files` — files, copies, line/block edits, directories, and symlinks.
 - `commands` — one-off commands with `creates`/`unless` guards.
 - `systemd` — enable/disable and start/stop units.
@@ -151,8 +152,8 @@ Full API documentation is in [docs/modules/index.md](docs/modules/index.md).
 
 Operations request sudo explicitly with `sudo=True`, for example
 `ctx.run(..., sudo=True)`, `commands.run(..., sudo=True)`, or
-`files.file(..., sudo=True)`. Inherently privileged operations, such as `dnf`
-and system-scoped `systemd`, request sudo themselves.
+`files.file(..., sudo=True)`. Inherently privileged operations, such as `dnf`,
+system-scoped `systemd`, and system-scoped `flatpak`, request sudo themselves.
 
 Cached credentials are reused, and kitup prompts only when they expire. The
 password prompt is handled by kitup and passed to sudo on stdin, so sudo never

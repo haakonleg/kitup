@@ -1,0 +1,3 @@
+[Application]
+name=org.kitup.TestApp
+runtime=org.kitup.TestPlatform/x86_64/stable

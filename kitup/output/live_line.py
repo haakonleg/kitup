@@ -4,28 +4,41 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from typing import TextIO
 
 from .animation import Animation
+from .timer import Stopwatch
 
 
 class LiveLine:
     """Render one animation line on a reusable worker thread."""
 
-    def __init__(self, stream: TextIO) -> None:
+    def __init__(
+        self,
+        stream: TextIO,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.stream = stream
         self._condition = threading.Condition()
         self._thread: threading.Thread | None = None
         self._animation: Animation | None = None
-        self._started = 0.0
+        self._timer = Stopwatch(clock)
         self._tick = 0
         self._drawn = False
         self._suspended = 0
 
+    @property
+    def elapsed(self) -> float:
+        """Return animation time, excluding suspended intervals."""
+        with self._condition:
+            return self._timer.elapsed()
+
     def start(self, animation: Animation) -> None:
         with self._condition:
             self._animation = animation
-            self._started = time.monotonic()
+            self._timer.reset()
             self._tick = 0
             self._drawn = False
             self._ensure_thread()
@@ -47,6 +60,7 @@ class LiveLine:
             self._suspended += 1
             if self._suspended > 1:
                 return
+            self._timer.pause()
             if self._drawn:
                 self._clear()
                 self.stream.flush()
@@ -59,6 +73,7 @@ class LiveLine:
                 return
             self._suspended -= 1
             if self._suspended == 0:
+                self._timer.resume()
                 self._condition.notify()
 
     def write(self, text: str = "") -> None:
@@ -107,7 +122,7 @@ class LiveLine:
         animation = self._animation
         if animation is None:
             return
-        elapsed = time.monotonic() - self._started
+        elapsed = self._timer.elapsed()
         self.stream.write(f"\r{animation.render(elapsed, self._tick)}\033[K")
         self.stream.flush()
         self._drawn = True

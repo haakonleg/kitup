@@ -216,7 +216,12 @@ class TaskContext:
         if key is not None:
             require_text(key, "input key")
         try:
-            value = builtins.input(prompt)
+            if self.output is not None:
+                with self.output.interactive():
+                    value = builtins.input(prompt)
+                    self.output.clear_input(prompt, value)
+            else:
+                value = builtins.input(prompt)
         except EOFError as exc:
             label = f" for key: {key}" if key is not None else ""
             raise TaskFailed(f"no input received{label}") from exc

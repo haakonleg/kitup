@@ -171,7 +171,7 @@ def test_sudo_is_requested_at_first_sudo_operation(tmp_path):
 
     assert code == 0
     assert context.sudo.refresh_count == 1
-    assert context.sudo.reasons == ['Task "Install packages" requires sudo privileges']
+    assert context.sudo.reasons == ['task "Install packages" requires sudo privileges']
 
 
 

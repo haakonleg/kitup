@@ -27,7 +27,7 @@ def test_cached_credentials_are_used_without_output(monkeypatch, capsys):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    PrivilegeManager().refresh('Task "Install packages" requires sudo privileges.')
+    PrivilegeManager().refresh('task "Install packages" requires sudo privileges')
 
     assert calls == [["sudo", "-n", "-v"]]
     assert capsys.readouterr().err == ""
