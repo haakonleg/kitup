@@ -12,6 +12,19 @@ their source is unavailable.
 | `version_id` | `str` | `os_release["VERSION_ID"]` |
 | `arch` | `str` | `platform.machine()` |
 | `kernel` | `str` | `platform.release()` |
+| `mounts` | `tuple[Mapping[str, Any], ...]` | `/proc/self/mountinfo`, `os.statvfs()` |
+
+Each mount contains:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `device` | `str` | Source device or filesystem, e.g. `/dev/nvme0n1p1` |
+| `fstype` | `str` | Filesystem type, e.g. `ext4` or `btrfs` |
+| `mount` | `str` | Mount path |
+| `options` | `tuple[str, ...]` | Mount options |
+| `bytes_free` | `int` | Free bytes |
+| `bytes_used` | `int` | Used bytes |
+| `bytes_total` | `int` | Total bytes |
 
 ## Details
 
@@ -22,7 +35,11 @@ their source is unavailable.
 - `distro_id` and `version_id` are present only when the corresponding
   `os_release` field exists.
 - `arch` and `kernel` are omitted when the platform reports an empty value.
-- The mapping and nested `os_release` mapping are immutable.
+- `mounts` is omitted when `/proc/self/mountinfo` is unavailable. Mounts whose
+  capacity cannot be read are skipped.
+- `bytes_free` is the filesystem's free space, so
+  `bytes_used + bytes_free == bytes_total`.
+- The mapping, nested `os_release` mapping, and mount mappings are immutable.
 - Values are snapshots, not live state. Tasks needing current information should
   query it directly.
 
@@ -34,4 +51,12 @@ os_release = ctx.facts.get("os_release", {})
 
 if ctx.facts.get("distro_id") == "fedora":
     ctx.note(f"Fedora {ctx.facts.get('version_id', '')}".strip())
+
+for mount in ctx.facts.get("mounts", ()):
+    if mount["mount"] == "/":
+        ctx.note(
+            f"root is {mount['bytes_used']} of {mount['bytes_total']} bytes used"
+        )
 ```
+
+Bytes are raw values suitable for calculations; format them for display as needed.
