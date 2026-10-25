@@ -76,7 +76,7 @@ bundles/
 └── base/
     ├── __init__.py
     ├── packages.py
-    └── resources/
+    └── files/
         └── dnf.conf
 ```
 
@@ -104,7 +104,7 @@ def configure_dnf(ctx):
     files.file(
         ctx,
         ctx.config.DNF_CONF,
-        content=bundle.read_resource("resources/dnf.conf"),
+        content=bundle.read_resource("files/dnf.conf"),
         mode=0o644,
         sudo=True,
     )
@@ -128,6 +128,7 @@ ctx.note("extra context")
 ctx.memo("key", compute_once)        # per-run cache
 ctx.input("key", "Prompt: ")         # prompt and store a value
 ctx.input(prompt="Continue? ")       # prompt and return only
+ctx.set("key", value)                # store a value for later tasks
 ctx.get("key")                       # retrieve a stored value
 ctx.skip("optional reason")          # skip before mutating
 ctx.fail("reason")                   # fail the task

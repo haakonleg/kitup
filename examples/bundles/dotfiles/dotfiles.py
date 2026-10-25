@@ -7,7 +7,7 @@ from . import bundle
 
 @bundle.task("Install dotfiles", tags={"dotfiles"})
 def install_dotfiles(ctx):
-    _copy_dotfiles(ctx, bundle.resource_path("resources/dotfiles"), Path.home())
+    _copy_dotfiles(ctx, bundle.resource_path("files/dotfiles"), Path.home())
 
 
 def _copy_dotfiles(ctx, source: Path, target: Path) -> None:

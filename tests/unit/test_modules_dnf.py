@@ -4,6 +4,7 @@ import pytest
 
 from kitup.errors import TaskFailed
 from kitup.modules import dnf
+from kitup.registry import Bundle
 
 from .helpers import FakeCommandRunner, FakeSudo, completed, make_context
 
@@ -18,6 +19,14 @@ def dnf5(monkeypatch):
 
 def response(returncode: int = 0, stdout: str = "", stderr: str = ""):
     return lambda argv: completed(argv, returncode, stdout, stderr)
+
+
+def bundle_context(tmp_path, bundle_dir, command):
+    bundle = Bundle("base", path=bundle_dir)
+    bundle.task("Task")(lambda ctx: None)
+    ctx = make_context(tmp_path, command=command)
+    ctx.begin_task(bundle.tasks[0])
+    return ctx
 
 
 def test_ensure_present_is_a_noop_when_installed(tmp_path):
@@ -455,6 +464,23 @@ def test_rpm_release_installs_source(tmp_path):
     assert ctx.changes[0].data == {"sources": [source]}
 
 
+def test_rpm_release_resolves_bundle_relative_source(tmp_path):
+    bundle_dir = tmp_path / "bundles" / "base"
+    (bundle_dir / "files").mkdir(parents=True)
+    (bundle_dir / "files" / "tool-release.rpm").write_text("rpm")
+    command = FakeCommandRunner()
+    ctx = bundle_context(tmp_path, bundle_dir, command)
+
+    dnf.rpm(ctx, "tool-release.rpm")
+
+    assert command.calls[0][0] == [
+        "dnf5",
+        "install",
+        "-y",
+        str(bundle_dir / "files" / "tool-release.rpm"),
+    ]
+
+
 def test_rpm_release_accepts_local_path(tmp_path):
     source = tmp_path / "tool-release-2-1.noarch.rpm"
     command = FakeCommandRunner()
@@ -544,6 +570,28 @@ def test_repository_present_adds_repo_file(tmp_path):
     }
 
 
+def test_repository_resolves_bundle_relative_source(tmp_path):
+    reposdir = tmp_path / "repos.d"
+    reposdir.mkdir()
+    bundle_dir = tmp_path / "bundles" / "base"
+    (bundle_dir / "files").mkdir(parents=True)
+    (bundle_dir / "files" / "tool.repo").write_text("[tool]\n")
+    command = FakeCommandRunner()
+    command.responses = [response(0, f"reposdir = {reposdir}\n"), response(0)]
+    ctx = bundle_context(tmp_path, bundle_dir, command)
+
+    dnf.repository(ctx, "tool.repo")
+
+    source = bundle_dir / "files" / "tool.repo"
+    assert command.calls[1][0] == [
+        "dnf5",
+        "config-manager",
+        "addrepo",
+        f"--from-repofile={source}",
+        "--save-filename=tool.repo",
+    ]
+
+
 def test_repository_present_is_a_noop_when_file_exists(tmp_path):
     reposdir = tmp_path / "repos.d"
     reposdir.mkdir()
@@ -604,4 +652,4 @@ def test_missing_dnf5_is_an_error(monkeypatch, tmp_path):
     ctx = make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="dnf5 is required"):
-        dnf.rpm(ctx, "tool.rpm")
+        dnf.rpm(ctx, tmp_path / "tool.rpm")

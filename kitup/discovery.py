@@ -41,7 +41,7 @@ def discover_bundles(config_dir: Path) -> list[Bundle]:
                 f"in {seen[bundle.name]} and {folder}"
             )
         seen[bundle.name] = folder
-        bundle.path = folder
+        bundle.set_path(folder)
         bundles.append(bundle)
 
     return bundles

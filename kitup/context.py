@@ -56,6 +56,7 @@ class TaskContext:
         self._notes: list[str] = []
         self._memo: dict[str, Any] = {}
         self._task_name = ""
+        self._bundle_path: Path | None = None
         self._sudo_ready = False
 
     @property
@@ -66,11 +67,33 @@ class TaskContext:
     def notes(self) -> list[str]:
         return list(self._notes)
 
+    @property
+    def bundle_path(self) -> Path | None:
+        """Directory of the bundle owning the current task."""
+        return self._bundle_path
+
+    def resolve_source(self, path: str | Path) -> Path:
+        """Resolve a source path against the current bundle.
+
+        Absolute paths are returned unchanged. A bare filename resolves under
+        the bundle's ``files`` directory, while other relative paths resolve
+        against the bundle directory.
+        """
+        source = Path(path)
+        if source.is_absolute():
+            return source
+        if self._bundle_path is None:
+            raise TaskFailed(f"cannot resolve relative source path: {source}")
+        if len(source.parts) == 1:
+            return self._bundle_path / "files" / source
+        return self._bundle_path / source
+
     def begin_task(self, task: Task) -> None:
         """Reset task-scoped state while retaining per-run state."""
         self._changes.clear()
         self._notes.clear()
         self._task_name = task.name
+        self._bundle_path = task.bundle_path
 
     def ensure_sudo(self, reason: str | None = None) -> None:
         """Revalidate sudo, prompting only when cached credentials expired."""
@@ -161,7 +184,7 @@ class TaskContext:
         kwargs.pop("mutates", None)
         return self.run(argv, mutates=False, **kwargs)
 
-    def skip(self, reason: str = "skipped by task") -> NoReturn:
+    def skip(self, reason: str = "") -> NoReturn:
         """Skip the current task before making any changes."""
         raise SkipTask(reason)
 
@@ -200,6 +223,11 @@ class TaskContext:
             self._memo[key] = value
         return value
 
+    def set(self, key: str, value: Any) -> None:
+        """Store a value that later tasks can retrieve with :meth:`get`."""
+        require_text(key, "input key")
+        self._memo[key] = value
+
     @overload
     def get(self, key: str) -> Any: ...
 
@@ -207,7 +235,7 @@ class TaskContext:
     def get(self, key: str, default: T) -> T: ...
 
     def get(self, key: str, default: Any = _MISSING) -> Any:
-        """Return a value stored by :meth:`input` or :meth:`memo`.
+        """Return a value stored by :meth:`set`, :meth:`input`, or :meth:`memo`.
 
         Raises ``TaskFailed`` when the key is missing and no default is given.
         """

@@ -41,6 +41,17 @@ def test_memo_is_cached_across_tasks(tmp_path):
     assert len(calls) == 1
 
 
+def test_set_stores_values_for_later_tasks(tmp_path):
+    context = make_context(tmp_path)
+    context.set("key", {"value": 1})
+    context.begin_task(task_for())
+
+    assert context.get("key") == {"value": 1}
+
+    with pytest.raises(TaskFailed, match="input key must not be empty"):
+        context.set("  ", "value")
+
+
 def test_input_shares_store_with_memo_and_survives_tasks(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt: "provided")
     context = make_context(tmp_path)
@@ -67,12 +78,13 @@ def test_get_returns_default_and_raises_for_missing_key(tmp_path):
         context.get("missing")
 
 
-def test_skip_uses_reason_or_default(tmp_path):
+def test_skip_uses_reason_or_none(tmp_path):
     context = make_context(tmp_path)
     with pytest.raises(SkipTask, match="not this machine"):
         context.skip("not this machine")
-    with pytest.raises(SkipTask, match="skipped by task"):
+    with pytest.raises(SkipTask) as exc:
         context.skip()
+    assert exc.value.reason == ""
 
 
 def test_creates_guard_skips_command_and_resolves_cwd(tmp_path):

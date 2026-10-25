@@ -103,14 +103,15 @@ def test_multi_file_task_order(tmp_path):
 
     assert [task.name for task in bundle.tasks] == ["Second", "First"]
     assert bundle.tasks[0].tags == frozenset({"one", "two"})
+    assert all(task.bundle_path == tmp_path / "bundles" / "base" for task in bundle.tasks)
 
 
-def test_bundle_resources_resolve_relative_to_bundle_folder(tmp_path):
+def test_bundle_files_resolve_relative_to_bundle_folder(tmp_path):
     make_bundle(tmp_path, "base")
-    resource = tmp_path / "bundles" / "base" / "resources" / "example.conf"
+    resource = tmp_path / "bundles" / "base" / "files" / "example.conf"
     write(resource, "value = 1\n")
 
     (bundle,) = discover_bundles(tmp_path)
 
-    assert bundle.resource_path("resources", "example.conf") == resource
-    assert bundle.read_resource("resources", "example.conf") == "value = 1\n"
+    assert bundle.resource_path("files", "example.conf") == resource
+    assert bundle.read_resource("files", "example.conf") == "value = 1\n"

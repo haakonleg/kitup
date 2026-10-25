@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ class Task:
     func: Callable[[Any], None]
     tags: frozenset[str] = frozenset()
     description: str = ""
+    bundle_path: Path | None = None
 
     @property
     def id(self) -> str:
@@ -46,6 +47,11 @@ class Bundle:
     def __repr__(self) -> str:
         return f"Bundle({self.name!r}, tasks={len(self.tasks)})"
 
+    def set_path(self, path: Path) -> None:
+        """Attach the bundle folder and update already-registered tasks."""
+        self.path = path
+        self.tasks = [replace(task, bundle_path=path) for task in self.tasks]
+
     def task(
         self,
         name: str | None = None,
@@ -67,6 +73,7 @@ class Bundle:
                     func=func,
                     tags=frozenset(tags),
                     description=description,
+                    bundle_path=self.path,
                 )
             )
             return func

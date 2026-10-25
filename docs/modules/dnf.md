@@ -76,6 +76,9 @@ def enable_example_copr(ctx):
 Manage a repository from a `.repo` file.
 
 - `source` — local path or URL of a `.repo` file; required for `"present"`.
+  Relative paths resolve like `files.copy()`: a bare filename comes from the
+  bundle's `files/` directory, other relative paths from the bundle directory,
+  and absolute paths or URLs are used as-is.
 - `name` — installed filename. Required for `"absent"`; for `"present"` it
   defaults to the source filename.
 
@@ -96,7 +99,9 @@ def remove_vendor_repository(ctx):
 ## `rpm(ctx, sources)`
 
 Install one or more release RPMs from URLs or local paths. `sources` may be a
-single value or an iterable. `dnf install` handles already-installed packages.
+single value or an iterable. Local paths follow the same bundle-relative rules
+as `files.copy()`; URLs and absolute paths are used as-is. `dnf install` handles
+already-installed packages.
 
 ```python
 @bundle.task("Install example release RPMs", tags={"repos"})

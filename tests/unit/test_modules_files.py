@@ -10,6 +10,7 @@ from kitup.commands import CommandRunner
 from kitup.errors import TaskFailed
 from kitup.modules import files
 from kitup.output import Output
+from kitup.registry import Bundle
 
 from .helpers import FakeSudo, PassthroughSudo, make_context
 
@@ -467,4 +468,37 @@ def test_copy_replaces_destination_symlink(tmp_path):
     assert not dest.is_symlink()
     assert dest.read_text() == "new\n"
     assert target.read_text() == "old\n"
+
+
+def test_copy_into_directory_with_trailing_slash(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("value\n")
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+    ctx = context(tmp_path)
+
+    files.copy(ctx, source, f"{dest_dir}/")
+
+    assert (dest_dir / source.name).read_text() == "value\n"
+
+
+def test_copy_resolves_sources_relative_to_the_bundle(tmp_path):
+    bundle_dir = tmp_path / "bundles" / "base"
+    (bundle_dir / "files").mkdir(parents=True)
+    (bundle_dir / "files" / "bare.conf").write_text("bare\n")
+    (bundle_dir / "nested").mkdir()
+    (bundle_dir / "nested" / "relative.conf").write_text("relative\n")
+
+    bundle = Bundle("base", path=bundle_dir)
+    bundle.task("Task")(lambda ctx: None)
+    ctx = context(tmp_path)
+    ctx.begin_task(bundle.tasks[0])
+
+    files.copy(ctx, "bare.conf", tmp_path / "bare.out")
+    files.copy(ctx, "nested/relative.conf", tmp_path / "relative.out")
+    files.copy(ctx, bundle_dir / "nested" / "relative.conf", tmp_path / "absolute.out")
+
+    assert (tmp_path / "bare.out").read_text() == "bare\n"
+    assert (tmp_path / "relative.out").read_text() == "relative\n"
+    assert (tmp_path / "absolute.out").read_text() == "relative\n"
 

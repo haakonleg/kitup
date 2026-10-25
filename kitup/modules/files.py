@@ -101,12 +101,20 @@ def copy(
     group: str | int | None = None,
     sudo: bool = False,
 ) -> None:
-    """Copy one regular file, preserving its mode unless overridden."""
+    """Copy one regular file, preserving its mode unless overridden.
+
+    A bare filename in ``src`` resolves under the bundle's ``files`` directory.
+    Other relative paths resolve against the bundle directory, while absolute
+    paths are used as-is. When ``dest`` ends with a slash it is treated as a
+    directory and the source filename is appended.
+    """
     require_path(src, "copy source")
     require_path(dest, "copy destination")
     _validate_metadata(owner, group)
-    source = Path(src)
+    source = ctx.resolve_source(src)
     target = Path(dest)
+    if str(dest).endswith("/"):
+        target /= source.name
     source_info = _lstat(ctx, source, sudo=sudo)
     if source_info is None or source_info.is_symlink or not source_info.is_file:
         raise TaskFailed(f"copy source is not a regular file: {source}")

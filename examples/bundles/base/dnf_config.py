@@ -8,7 +8,7 @@ def configure_dnf(ctx):
     files.file(
         ctx,
         ctx.config.DNF_CONF,
-        content=bundle.read_resource("resources/dnf.conf"),
+        content=bundle.read_resource("files/dnf.conf"),
         mode=0o644,
         sudo=True,
     )

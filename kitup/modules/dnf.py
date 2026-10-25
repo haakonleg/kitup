@@ -226,15 +226,20 @@ def repository(
         require_path(source, "repository source")
         if name is not None:
             require_text(name, "repository name")
-        filename = _repo_filename(source, name)
+        resolved_source = _resolve_dnf_source(ctx, source)
+        filename = _repo_filename(resolved_source, name)
         path = _repository_path(ctx, filename)
         if path.exists():
             return
         ctx.changed(
-            {"repository": str(source), "path": str(path)},
+            {"repository": resolved_source, "path": str(path)},
             f"add repository {filename}",
         )
-        ctx.run(_add_repository_command(ctx, source, filename), sudo=True, record=False)
+        ctx.run(
+            _add_repository_command(ctx, resolved_source, filename),
+            sudo=True,
+            record=False,
+        )
         return
 
     if name is None:
@@ -255,11 +260,12 @@ def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> None:
     """Install release RPMs from URLs or local paths."""
     if isinstance(sources, (str, Path)):
         sources = [sources]
-    wanted = _dedupe(sources)
-    require_collection(wanted, "RPM sources")
-    for source in wanted:
+    validated = _dedupe(sources)
+    require_collection(validated, "RPM sources")
+    for source in validated:
         require_path(source, "RPM source")
 
+    wanted = _dedupe(_resolve_dnf_source(ctx, source) for source in validated)
     labels = [Path(urlparse(source).path).name or source for source in wanted]
     ctx.changed({"sources": wanted}, f"install {', '.join(labels)}")
     ctx.run([_dnf_command(ctx), "install", "-y", *wanted], sudo=True, record=False)
@@ -323,6 +329,13 @@ def _ensure_present(
     remaining = _display_names(remaining_groups, remaining_packages)
     if remaining:
         raise TaskFailed(f"packages still missing after install: {', '.join(remaining)}")
+
+
+def _resolve_dnf_source(ctx: TaskContext, source: str | Path) -> str:
+    text = str(source)
+    if urlparse(text).scheme:
+        return text
+    return str(ctx.resolve_source(text))
 
 
 def _repo_filename(source: str | Path | None, name: str | None) -> str:

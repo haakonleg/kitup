@@ -32,6 +32,19 @@ files.file(ctx, "/etc/example.conf", state="absent", sudo=True)
 Copy one regular file. `mode=None` preserves the source mode. Source symlinks are
 refused.
 
+- A bare filename in `src`, such as `"example.conf"`, resolves to the bundle's
+  `files/example.conf`.
+- Other relative paths resolve against the bundle directory.
+- Absolute paths are used as-is.
+- If `dest` ends with `/`, it is treated as a directory and the source filename
+  is appended.
+
+```python
+files.copy(ctx, "example.conf", "/etc/example.conf", sudo=True)
+files.copy(ctx, "dotfiles/.zshrc", Path.home() / ".zshrc")
+files.copy(ctx, "example.conf", "/etc/example.d/", sudo=True)
+```
+
 ## `line(ctx, path, line, *, match=None, state="present", sudo=False)`
 
 Add, replace, or remove a line.

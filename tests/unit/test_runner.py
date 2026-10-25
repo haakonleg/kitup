@@ -70,6 +70,17 @@ def test_status_inference_and_summary(tmp_path):
     assert "Summary: 1 changed, 1 ok, 1 skipped, 0 failed, 0 not run" in text
 
 
+def test_skip_without_reason_has_no_detail(tmp_path):
+    bundle = Bundle("base")
+    add_task(bundle, lambda ctx: ctx.skip(), name="Optional")
+
+    code, text, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 0
+    assert "skipped" in text
+    assert "skipped by task" not in text
+
+
 def test_fail_fast_and_remaining_count(tmp_path):
     bundle = Bundle("base")
     add_task(bundle, lambda ctx: None, name="First")
