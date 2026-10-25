@@ -10,7 +10,7 @@ from kitup.modules import commands
 
 Run `argv` unless a guard is already satisfied.
 
-- `argv` — command and arguments as a sequence; no shell is used.
+- `argv` — command and arguments; no shell is used.
 - `creates` — path that, if it exists, skips the command. Relative paths resolve
   against `cwd`.
 - `unless` — command that, if it exits successfully, skips the command.
@@ -37,6 +37,7 @@ Run a command string through a shell. Other arguments match `run()`.
 - `shell` — shell executable. Defaults to `$SHELL`, then the current user's
   passwd shell, then `/bin/sh`.
 - The shell is invoked as `<shell> -c <command>`.
+- `unless` is a shell command string, evaluated with the same shell.
 
 `env["SHELL"]` sets the variable inside the command but does not select the shell.
 
@@ -54,8 +55,8 @@ def install_with_pipeline(ctx):
 ## Notes
 
 - Guards are evaluated in dry-run mode; mutating commands are not executed.
-- Pass an argument sequence, not a string. Commands never receive interactive
-  stdin.
+- Arguments may be a sequence or a single string; a single string is one
+  argument and is not split. Commands never receive interactive stdin.
 - A nonzero exit raises `TaskFailed` with captured stdout and stderr.
 - Commands run in their own process group; timeouts terminate the whole group.
 - Prefer a dedicated module when one exists.

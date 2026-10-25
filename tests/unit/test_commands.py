@@ -69,6 +69,15 @@ def test_command_captures_output(monkeypatch):
     assert result.stdout == "hello"
 
 
+def test_single_string_is_one_argument(monkeypatch):
+    calls = patch_popen(monkeypatch, FakeProcess())
+    runner = CommandRunner(PrivilegeManager())
+
+    runner.run("tool --flag")
+
+    assert calls[0][0] == ["tool --flag"]
+
+
 def test_nonzero_exit_raises_task_failed(monkeypatch):
     patch_popen(monkeypatch, FakeProcess(returncode=3, stderr="oops"))
     runner = CommandRunner(PrivilegeManager())

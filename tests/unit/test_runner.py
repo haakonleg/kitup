@@ -71,6 +71,30 @@ def test_status_inference_and_summary(tmp_path):
     assert "Summary: 1 changed, 1 ok, 1 skipped, 0 failed, 0 not run" in text
 
 
+def test_long_task_name_keeps_status_column_aligned(tmp_path):
+    bundle = Bundle("base")
+    add_task(bundle, lambda ctx: None, name="Short")
+    add_task(
+        bundle,
+        lambda ctx: None,
+        name="A much longer task name that exceeds the default column width",
+    )
+
+    code, text, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 0
+    lines = [
+        line
+        for line in text.splitlines()
+        if line.strip().startswith(("Short", "A much longer"))
+    ]
+    assert len(lines) == 2
+    assert len({line.index("ok") for line in lines}) == 1
+    for line in lines:
+        status = line.index("ok")
+        assert line[status - 2 : status] == "  "
+
+
 def test_fail_uses_given_reason(tmp_path):
     bundle = Bundle("base")
     add_task(bundle, lambda ctx: ctx.fail("unsupported host"))

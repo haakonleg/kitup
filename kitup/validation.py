@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from pathlib import Path
 
 from .errors import TaskFailed
+
+
+def normalize_strings(values: str | Iterable[str]) -> list[str]:
+    """Return a list, treating a single string as a one-element sequence."""
+    if isinstance(values, str):
+        return [values]
+    return list(values)
 
 
 def require_collection(values: Collection[object], label: str) -> None:

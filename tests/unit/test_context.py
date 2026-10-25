@@ -192,6 +192,19 @@ def test_command_runs_and_records_change(tmp_path):
     assert context.changes[0].data == {"argv": ["dnf5", "install", "-y", "git"]}
 
 
+def test_single_string_is_one_argument(tmp_path):
+    command = FakeCommandRunner()
+    context = make_context(tmp_path, command=command)
+
+    context.run("dnf5 install -y git")
+    context.probe("rpm -q git")
+    context.run("install", unless="test -e /thing")
+
+    assert command.calls[0][0] == ["dnf5 install -y git"]
+    assert command.calls[1][0] == ["rpm -q git"]
+    assert command.calls[2][0] == ["test -e /thing"]
+
+
 def test_non_mutating_run_does_not_record_change(tmp_path):
     command = FakeCommandRunner()
     context = make_context(tmp_path, command=command)

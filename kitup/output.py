@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, TextIO
 
 from . import __version__
@@ -36,6 +36,7 @@ class Output:
         self.stream = stream if stream is not None else sys.stdout
         self.verbose = verbose
         self.no_color = no_color or bool(os.environ.get("NO_COLOR")) or not self.stream.isatty()
+        self.name_width = NAME_WIDTH
 
     def _paint(self, text: str, code: str) -> str:
         if self.no_color or not code:
@@ -55,13 +56,19 @@ class Output:
         self.write()
         self.write(f"bundle: {name}")
 
+    def fit_task_names(self, names: Iterable[str]) -> None:
+        """Widen the task name column so statuses stay aligned."""
+        self.name_width = max(
+            NAME_WIDTH, max((len(name) for name in names), default=0) + 2
+        )
+
     def task(self, result: TaskResult) -> None:
         detail = self._task_detail(result)
         status_text = result.status.value
         if detail:
             status_text = status_text.ljust(STATUS_WIDTH)
         status = self._paint(status_text, _COLORS.get(result.status, ""))
-        width = max(NAME_WIDTH, len(result.task.name) + 1)
+        width = max(self.name_width, len(result.task.name) + 2)
         line = f"  {result.task.name:<{width}}{status}{detail}"
         duration = self._paint(f"  ({result.duration:.2f} s)", _DIM)
         self.write(f"{line}{duration}")

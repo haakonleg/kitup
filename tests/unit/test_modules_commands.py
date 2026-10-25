@@ -30,6 +30,17 @@ def test_unguarded_command_runs_and_records_change(tmp_path):
     assert len(ctx.changes) == 1
 
 
+def test_single_string_is_one_argument(tmp_path):
+    command = FakeCommandRunner()
+    ctx = make_context(tmp_path, command=command)
+
+    commands.run(ctx, "echo hello")
+    commands.run(ctx, ["install"], unless="test -e /thing")
+
+    assert command.calls[0][0] == ["echo hello"]
+    assert command.calls[1][0] == ["test -e /thing"]
+
+
 def test_changed_false_suppresses_change_record(tmp_path):
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
@@ -82,16 +93,38 @@ def test_shell_uses_default_shell_from_environment(tmp_path, monkeypatch):
     assert command.calls[0][0] == ["/bin/zsh", "-c", "echo hello"]
 
 
+def test_shell_unless_runs_through_shell(tmp_path):
+    command = FakeCommandRunner()
+    ctx = make_context(tmp_path, command=command)
+
+    commands.shell(ctx, "install", shell="/bin/bash", unless="test -e /thing")
+
+    assert command.calls == [
+        (
+            ["/bin/bash", "-c", "test -e /thing"],
+            {
+                "cwd": None,
+                "env": None,
+                "sudo": False,
+                "timeout": 600,
+                "check": False,
+                "refresh_sudo": False,
+            },
+        )
+    ]
+    assert ctx.changes == []
+
+
 def test_invalid_arguments_are_rejected(tmp_path):
     ctx = make_context(tmp_path)
 
-    with pytest.raises(TaskFailed, match="sequence of arguments"):
-        commands.run(ctx, "echo hello")
     with pytest.raises(TaskFailed, match="creates path must not be empty"):
         commands.run(ctx, ["true"], creates="")
     with pytest.raises(TaskFailed, match="cwd must not be empty"):
         commands.run(ctx, ["true"], cwd="")
     with pytest.raises(TaskFailed, match="shell command must not be empty"):
         commands.shell(ctx, "  ")
+    with pytest.raises(TaskFailed, match="shell unless must not be empty"):
+        commands.shell(ctx, "true", unless="  ")
     with pytest.raises(TaskFailed, match="shell must not be empty"):
         commands.shell(ctx, "true", shell="")

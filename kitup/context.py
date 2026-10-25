@@ -15,7 +15,7 @@ from .output import Output
 from .privileges import PrivilegeManager
 from .registry import Task
 from .results import Change
-from .validation import require_text
+from .validation import normalize_strings, require_text
 
 T = TypeVar("T")
 
@@ -89,11 +89,11 @@ class TaskContext:
 
     def run(
         self,
-        argv: Sequence[str],
+        argv: str | Sequence[str],
         *,
         mutates: bool = True,
         creates: str | Path | None = None,
-        unless: Sequence[str] | None = None,
+        unless: str | Sequence[str] | None = None,
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
         sudo: bool = False,
@@ -105,7 +105,7 @@ class TaskContext:
         Only commands run with ``sudo=True`` request sudo credentials. Cached
         credentials are checked again before every privileged operation.
         """
-        command = [str(part) for part in argv]
+        command = [str(part) for part in normalize_strings(argv)]
         if not command:
             raise TaskFailed("empty command")
 
@@ -128,7 +128,9 @@ class TaskContext:
         }
 
         if unless is not None:
-            probe = self.command.run(unless, check=False, **run_options)
+            probe = self.command.run(
+                normalize_strings(unless), check=False, **run_options
+            )
             if probe.returncode == 0:
                 return _skipped(command)
 
@@ -152,7 +154,9 @@ class TaskContext:
         # task failure.
         return self.command.run(command, check=False, **run_options)
 
-    def probe(self, argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def probe(
+        self, argv: str | Sequence[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
         """Run a query command without recording a change."""
         kwargs.pop("mutates", None)
         return self.run(argv, mutates=False, **kwargs)

@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from .errors import TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
+from .validation import normalize_strings
 
 
 class CommandRunner:
@@ -27,7 +28,7 @@ class CommandRunner:
 
     def run(
         self,
-        argv: Sequence[str],
+        argv: str | Sequence[str],
         *,
         cwd: str | os.PathLike[str] | None = None,
         env: Mapping[str, str] | None = None,
@@ -36,7 +37,7 @@ class CommandRunner:
         check: bool = True,
         refresh_sudo: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        command = [str(part) for part in argv]
+        command = [str(part) for part in normalize_strings(argv)]
         if not command:
             raise TaskFailed("empty command")
 
