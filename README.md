@@ -65,8 +65,8 @@ DNF_CONF = "/etc/dnf/dnf.conf"
 An override passed with `-C` replaces same-named fields and adds new ones.
 
 System facts are collected once per run and exposed read-only as `ctx.facts`,
-including `hostname`, `os_release`, `distro_id`, `version_id`, `arch`, and
-`kernel`. Tasks needing live state should query it directly. See
+including `hostname`, `os_release`, `distro_id`, `version_id`, `arch`, `kernel`,
+and `mounts`. Tasks needing live state should query it directly. See
 [docs/facts.md](docs/facts.md) for details.
 
 ## Bundle layout
