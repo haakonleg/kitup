@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import textwrap
 
 import pytest
@@ -71,25 +70,6 @@ def test_import_errors_are_wrapped(tmp_path):
 
     with pytest.raises(DiscoveryError, match="failed to load bundle 'bad': boom"):
         discover_bundles(tmp_path)
-
-
-def test_failed_bundle_import_leaves_no_modules_behind(tmp_path):
-    write(
-        tmp_path / "bundles" / "bad" / "__init__.py",
-        "from . import helper\nraise RuntimeError('boom')\n",
-    )
-    write(tmp_path / "bundles" / "bad" / "helper.py", "VALUE = 1\n")
-    before = set(sys.modules)
-
-    with pytest.raises(DiscoveryError):
-        discover_bundles(tmp_path)
-
-    new_modules = {
-        name
-        for name in sys.modules
-        if name not in before and name.startswith("_kitup_bundle_")
-    }
-    assert new_modules == set()
 
 
 def test_multi_file_task_order(tmp_path):

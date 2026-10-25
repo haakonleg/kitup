@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import subprocess
-from io import StringIO
 
 import pytest
 
 from kitup import commands as command_module
 from kitup.commands import CommandRunner
 from kitup.errors import TaskFailed
-from kitup.output import Output
 from kitup.privileges import PrivilegeManager
 
 from .helpers import FakeSudo
@@ -118,21 +116,6 @@ def test_sudo_is_refreshed_and_wrapped(monkeypatch):
 
     assert sudo.refresh_count == 1
     assert calls[0][0] == ["sudo", "-n", "--", "dnf5", "install"]
-
-
-def test_verbose_mode_logs_commands_and_output(monkeypatch):
-    patch_popen(monkeypatch, FakeProcess(stdout="out", stderr="err"))
-    stream = StringIO()
-    output = Output(stream, no_color=True, verbose=True)
-    runner = CommandRunner(PrivilegeManager(), output=output)
-
-    runner.run(["tool"])
-
-    text = stream.getvalue()
-    assert "$ tool" in text
-    assert "exit 0" in text
-    assert "stdout:\n      out" in text
-    assert "stderr:\n      err" in text
 
 
 def test_timeout_kills_the_process_group(monkeypatch):

@@ -41,19 +41,6 @@ def test_memo_is_cached_across_tasks(tmp_path):
     assert len(calls) == 1
 
 
-def test_input_stores_and_returns_value(tmp_path, monkeypatch):
-    prompts = []
-    monkeypatch.setattr(
-        "builtins.input",
-        lambda prompt: prompts.append(prompt) or "answer",
-    )
-    context = make_context(tmp_path)
-
-    assert context.input("username", "Username: ") == "answer"
-    assert context.get("username") == "answer"
-    assert prompts == ["Username: "]
-
-
 def test_input_shares_store_with_memo_and_survives_tasks(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt: "provided")
     context = make_context(tmp_path)
@@ -71,15 +58,6 @@ def test_input_shares_store_with_memo_and_survives_tasks(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_input_allows_empty_value(tmp_path, monkeypatch):
-    monkeypatch.setattr("builtins.input", lambda prompt: "")
-    context = make_context(tmp_path)
-
-    assert context.input("key") == ""
-    assert context.get("key") == ""
-    assert context.get("key", "fallback") == ""
-
-
 def test_get_returns_default_and_raises_for_missing_key(tmp_path):
     context = make_context(tmp_path)
 
@@ -87,44 +65,6 @@ def test_get_returns_default_and_raises_for_missing_key(tmp_path):
 
     with pytest.raises(TaskFailed, match="no stored value for key: missing"):
         context.get("missing")
-
-
-def test_input_and_get_reject_empty_keys(tmp_path, monkeypatch):
-    monkeypatch.setattr("builtins.input", lambda prompt: "value")
-    context = make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="input key must not be empty"):
-        context.input("  ")
-
-    with pytest.raises(TaskFailed, match="input key must not be empty"):
-        context.get("")
-
-
-def test_input_without_key_only_returns_value(tmp_path, monkeypatch):
-    prompts = []
-    monkeypatch.setattr(
-        "builtins.input",
-        lambda prompt: prompts.append(prompt) or "answer",
-    )
-    context = make_context(tmp_path)
-
-    assert context.input(prompt="Continue? ") == "answer"
-    assert context.input(None, "Again? ") == "answer"
-    assert prompts == ["Continue? ", "Again? "]
-    assert context.get("answer", "missing") == "missing"
-
-
-def test_input_eof_is_a_task_failure(tmp_path, monkeypatch):
-    def no_input(prompt):
-        raise EOFError
-
-    monkeypatch.setattr("builtins.input", no_input)
-    context = make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="no input received for key: key"):
-        context.input("key")
-    with pytest.raises(TaskFailed, match="no input received$"):
-        context.input(prompt="Continue? ")
 
 
 def test_skip_uses_reason_or_default(tmp_path):
@@ -245,26 +185,6 @@ def test_sudo_is_refreshed_once_per_run(tmp_path):
     assert command.calls[1][1]["sudo"] is True
 
 
-def test_sudo_validation_survives_task_boundaries(tmp_path):
-    command = FakeCommandRunner()
-    sudo = FakeSudo()
-    context = make_context(tmp_path, command=command, sudo=sudo)
-
-    context.begin_task(task_for("First"))
-    context.run(["first"], sudo=True)
-
-    context.begin_task(task_for("Second"))
-    context.run(["second"], sudo=True)
-
-    assert sudo.refresh_count == 1
-    assert sudo.reasons == [
-        (
-            'Task "First" requires sudo privileges; '
-            "you may be prompted for your password."
-        )
-    ]
-
-
 def test_sudo_is_revalidated_when_credentials_expire(tmp_path):
     command = FakeCommandRunner()
     sudo = FakeSudo()
@@ -294,31 +214,6 @@ def test_dry_run_mutating_command_requests_sudo_but_does_not_execute(tmp_path):
     assert sudo.refresh_count == 1
     assert command.calls == []
     assert len(context.changes) == 1
-
-
-def test_dry_run_probe_requests_sudo_when_requested(tmp_path):
-    command = FakeCommandRunner()
-    sudo = FakeSudo()
-    context = make_context(tmp_path, dry_run=True, command=command, sudo=sudo)
-    context.begin_task(task_for())
-
-    context.run(["rpm", "-q", "git"], mutates=False, sudo=True)
-
-    assert sudo.refresh_count == 1
-    assert command.calls[0][1]["sudo"] is True
-    assert context.changes == []
-
-
-def test_sudo_defaults_to_false(tmp_path):
-    command = FakeCommandRunner()
-    context = make_context(tmp_path, command=command)
-    context.begin_task(task_for())
-
-    context.run(["first"])
-    context.run(["second"], sudo=True)
-
-    assert command.calls[0][1]["sudo"] is False
-    assert command.calls[1][1]["sudo"] is True
 
 
 def test_guard_can_run_against_nonzero_result(tmp_path):

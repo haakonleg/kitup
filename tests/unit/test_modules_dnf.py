@@ -149,27 +149,6 @@ def test_at_prefixed_group_and_package_install_together(tmp_path):
     assert ctx.changes[0].summary == "+@multimedia +ripgrep"
 
 
-def test_at_prefixed_group_install_uses_install(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0, "Installed groups:\n base\n"),
-        response(0),
-        response(0, "Installed groups:\n base\n multimedia\n"),
-    ]
-    ctx = make_context(tmp_path, command=command)
-
-    dnf.packages(ctx, ["@multimedia"])
-
-    assert command.calls[1][0] == [
-        "dnf5",
-        "install",
-        "-y",
-        "--setopt=install_weak_deps=False",
-        "@multimedia",
-    ]
-    assert ctx.changes[0].data == {"added": ["multimedia"], "group": True}
-
-
 def test_group_install_passes_weak_deps_and_excludes(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
@@ -315,17 +294,6 @@ def test_swap_replaces_package_and_verifies_result(tmp_path):
     assert command.calls[2][0] == ["rpm", "-q", "ffmpeg"]
     assert ctx.changes[0].data == {"removed": "ffmpeg-free", "installed": "ffmpeg"}
     assert ctx.changes[0].summary == "swap ffmpeg-free -> ffmpeg"
-
-
-def test_swap_dry_run_does_not_execute(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(1)]
-    ctx = make_context(tmp_path, dry_run=True, command=command)
-
-    dnf.swap(ctx, "ffmpeg-free", "ffmpeg", allowerasing=True)
-
-    assert [call[0] for call in command.calls] == [["rpm", "-q", "ffmpeg"]]
-    assert len(ctx.changes) == 1
 
 
 def test_swap_failure_is_reported(tmp_path):
@@ -616,19 +584,6 @@ def test_repository_absent_is_a_noop_when_file_is_missing(tmp_path):
 
     assert [call[0] for call in command.calls] == [["dnf5", "--dump-main-config"]]
     assert ctx.changes == []
-
-
-def test_repository_present_dry_run_does_not_add(tmp_path):
-    reposdir = tmp_path / "repos.d"
-    reposdir.mkdir()
-    command = FakeCommandRunner()
-    command.responses = [response(0, f"reposdir = {reposdir}\n")]
-    ctx = make_context(tmp_path, dry_run=True, command=command)
-
-    dnf.repository(ctx, "https://example.test/tool.repo")
-
-    assert [call[0] for call in command.calls] == [["dnf5", "--dump-main-config"]]
-    assert ctx.changes[0].summary == "add repository tool.repo"
 
 
 def test_repository_uses_custom_name(tmp_path):

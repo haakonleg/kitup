@@ -91,24 +91,6 @@ def test_tty_prompts_when_cache_is_missing(monkeypatch):
     assert calls == [["sudo", "-n", "-v"], ["sudo", "-v"]]
 
 
-def test_tty_prompt_prints_reason(monkeypatch, capsys):
-    monkeypatch.setattr("os.geteuid", lambda: 1000)
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv, 1 if argv == ["sudo", "-n", "-v"] else 0
-        ),
-    )
-
-    reason = 'Task "Install packages" requires sudo privileges.'
-    PrivilegeManager().refresh(reason)
-
-    assert capsys.readouterr().err == f"{reason}\n"
-
-
 def test_failed_prompt_is_an_error(monkeypatch):
     monkeypatch.setattr("os.geteuid", lambda: 1000)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")

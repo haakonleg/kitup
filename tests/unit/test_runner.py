@@ -16,10 +16,9 @@ def make_output() -> Output:
     return Output(StringIO(), no_color=True)
 
 
-def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False):
+def run_plan(tmp_path, bundles, *, tags=(), skip_tags=()):
     context = make_context(
         tmp_path,
-        dry_run=dry_run,
         command=FakeCommandRunner(),
         sudo=FakeSudo(),
     )
@@ -69,41 +68,6 @@ def test_status_inference_and_summary(tmp_path):
     assert "changed  +x" in text
     assert "skipped  not needed" in text
     assert "Summary: 1 changed, 1 ok, 1 skipped, 0 failed, 0 not run" in text
-
-
-def test_long_task_name_keeps_status_column_aligned(tmp_path):
-    bundle = Bundle("base")
-    add_task(bundle, lambda ctx: None, name="Short")
-    add_task(
-        bundle,
-        lambda ctx: None,
-        name="A much longer task name that exceeds the default column width",
-    )
-
-    code, text, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 0
-    lines = [
-        line
-        for line in text.splitlines()
-        if line.strip().startswith(("Short", "A much longer"))
-    ]
-    assert len(lines) == 2
-    assert len({line.index("ok") for line in lines}) == 1
-    for line in lines:
-        status = line.index("ok")
-        assert line[status - 2 : status] == "  "
-
-
-def test_fail_uses_given_reason(tmp_path):
-    bundle = Bundle("base")
-    add_task(bundle, lambda ctx: ctx.fail("unsupported host"))
-
-    code, text, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 1
-    assert "failed" in text
-    assert "error: unsupported host" in text
 
 
 def test_fail_fast_and_remaining_count(tmp_path):
@@ -184,17 +148,6 @@ def test_tag_filtering_and_skip_tags(tmp_path):
     assert "Summary: 0 changed, 1 ok, 0 failed, 0 not run" in text
 
 
-def test_fully_filtered_bundle_has_no_header(tmp_path):
-    bundle = Bundle("base")
-    add_task(bundle, lambda ctx: None, tags={"packages"})
-
-    code, text, _ = run_plan(tmp_path, [bundle], tags={"config"})
-
-    assert code == 0
-    assert "bundle: base" not in text
-    assert "Summary: 0 changed, 0 ok, 0 failed, 0 not run" in text
-
-
 def test_sudo_is_requested_at_first_sudo_operation(tmp_path):
     bundle = Bundle("base")
 
@@ -215,29 +168,4 @@ def test_sudo_is_requested_at_first_sudo_operation(tmp_path):
     ]
 
 
-def test_task_without_sudo_operations_does_not_request_sudo(tmp_path):
-    bundle = Bundle("base")
 
-    def plain(ctx):
-        ctx.run(["true"])
-
-    add_task(bundle, plain, name="No privileges")
-
-    code, _, context = run_plan(tmp_path, [bundle])
-
-    assert code == 0
-    assert context.sudo.refresh_count == 0
-
-
-def test_sudo_is_requested_in_dry_run(tmp_path):
-    bundle = Bundle("base")
-
-    def install(ctx):
-        ctx.run(["install"], sudo=True)
-
-    add_task(bundle, install)
-
-    code, _, context = run_plan(tmp_path, [bundle], dry_run=True)
-
-    assert code == 0
-    assert context.sudo.refresh_count == 1

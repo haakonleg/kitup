@@ -47,7 +47,11 @@ class Runner:
                     continue
                 self.output.bundle_header(bundle.name)
                 for task in tasks:
-                    result = self._run_task(task)
+                    self.output.task_start(task.name)
+                    try:
+                        result = self._run_task(task)
+                    finally:
+                        self.output.task_stop()
                     completed += 1
                     self._summary.add(result.status)
                     self.output.task(result)

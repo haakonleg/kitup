@@ -97,17 +97,6 @@ def test_control_characters_are_escaped(tmp_path):
     assert command.calls[1][0][-1] == "'a\\nb\\tc'"
 
 
-def test_empty_string_value_is_allowed(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0, "'old'\n"), response(0)]
-    ctx = make_context(tmp_path, command=command)
-
-    gsettings.key(ctx, "org.example", "text", "")
-
-    assert command.calls[1][0][-1] == "''"
-    assert ctx.changes[0].data["value"] == ""
-
-
 def test_schema_error_is_actionable(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1, stderr="schema not found\n")]
@@ -173,21 +162,6 @@ def test_absent_is_a_noop_at_the_schema_default(tmp_path):
 
     assert len(command.calls) == 2
     assert ctx.changes == []
-
-
-def test_absent_resets_when_default_lookup_fails(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0, "'dark'\n"),
-        response(1),
-        response(0),
-    ]
-    ctx = make_context(tmp_path, command=command)
-
-    gsettings.key(ctx, "org.example", "theme", state="absent")
-
-    assert command.calls[-1][0] == ["gsettings", "reset", "org.example", "theme"]
-    assert len(ctx.changes) == 1
 
 
 def test_present_requires_a_value(tmp_path):

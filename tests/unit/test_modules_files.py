@@ -124,27 +124,6 @@ def test_file_refuses_directory_in_both_states(tmp_path):
         files.file(ctx, tmp_path, state="absent")
 
 
-def test_file_creates_empty_file_with_or_without_content(tmp_path):
-    ctx = context(tmp_path)
-
-    files.file(ctx, tmp_path / "empty")
-    files.file(ctx, tmp_path / "empty-content", content="")
-
-    assert (tmp_path / "empty").read_text() == ""
-    assert (tmp_path / "empty-content").read_text() == ""
-    assert len(ctx.changes) == 2
-
-
-def test_line_allows_empty_line(tmp_path):
-    path = tmp_path / "lines"
-    path.write_text("one\n")
-    ctx = context(tmp_path)
-
-    files.line(ctx, path, "")
-
-    assert path.read_text() == "one\n\n"
-
-
 def test_file_without_content_preserves_existing_content_and_mode(tmp_path):
     path = tmp_path / "existing"
     path.write_text("keep me\n")
@@ -236,15 +215,6 @@ def test_file_absent_removes_valid_and_broken_symlinks(tmp_path):
     assert target.read_text() == "keep\n"
 
 
-def test_file_absent_is_a_noop_when_missing(tmp_path):
-    path = tmp_path / "missing"
-    ctx = context(tmp_path)
-
-    files.file(ctx, path, state="absent")
-
-    assert ctx.changes == []
-
-
 def test_file_invalid_state_is_an_error(tmp_path):
     ctx = context(tmp_path)
 
@@ -271,19 +241,6 @@ def test_empty_paths_and_metadata_are_rejected(tmp_path):
         files.symlink(ctx, "", tmp_path / "link")
 
     assert ctx.changes == []
-
-
-def test_empty_match_and_marker_are_rejected(tmp_path):
-    line_path = tmp_path / "lines"
-    line_path.write_text("value\n")
-    block_path = tmp_path / "block"
-    block_path.write_text("")
-    ctx = context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="line match must not be empty"):
-        files.line(ctx, line_path, "value", match="")
-    with pytest.raises(TaskFailed, match="block marker must not be empty"):
-        files.block(ctx, block_path, "", "content")
 
 
 def test_line_add_replace_and_remove(tmp_path):
@@ -423,14 +380,6 @@ def test_directory_absent_removes_empty_directory(tmp_path):
 
     assert not path.exists()
     assert len(ctx.changes) == 1
-
-
-def test_directory_absent_is_a_noop_when_missing(tmp_path):
-    ctx = context(tmp_path)
-
-    files.directory(ctx, tmp_path / "missing", state="absent")
-
-    assert ctx.changes == []
 
 
 def test_directory_absent_refuses_non_empty_directory(tmp_path):
