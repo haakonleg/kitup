@@ -154,9 +154,10 @@ Operations request sudo explicitly with `sudo=True`, for example
 `files.file(..., sudo=True)`. Inherently privileged operations, such as `dnf`
 and system-scoped `systemd`, request sudo themselves.
 
-Cached credentials are reused, and kitup prompts only when they expire. Running
-as root is supported, but user-scoped modules and home-directory dotfiles must
-run as the target user.
+Cached credentials are reused, and kitup prompts only when they expire. The
+password prompt is handled by kitup and passed to sudo on stdin, so sudo never
+prompts on the terminal directly. Running as root is supported, but user-scoped
+modules and home-directory dotfiles must run as the target user.
 
 ## Development
 

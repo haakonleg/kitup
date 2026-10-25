@@ -108,11 +108,8 @@ class TaskContext:
 
     def _sudo_reason(self) -> str:
         if not self._task_name:
-            return "sudo privileges are required; you may be prompted for your password."
-        return (
-            f'Task "{self._task_name}" requires sudo privileges; '
-            "you may be prompted for your password."
-        )
+            return "sudo privileges are required"
+        return f'task "{self._task_name}" requires sudo privileges'
 
     def run(
         self,

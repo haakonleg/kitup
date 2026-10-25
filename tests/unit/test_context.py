@@ -190,12 +190,7 @@ def test_sudo_is_refreshed_once_per_run(tmp_path):
     context.run(["second"], sudo=True)
 
     assert sudo.refresh_count == 1
-    assert sudo.reasons == [
-        (
-            'Task "Install packages" requires sudo privileges; '
-            "you may be prompted for your password."
-        )
-    ]
+    assert sudo.reasons == ['Task "Install packages" requires sudo privileges']
     assert command.calls[0][1]["sudo"] is True
     assert command.calls[1][1]["sudo"] is True
 
@@ -228,10 +223,7 @@ def test_sudo_is_revalidated_when_credentials_expire(tmp_path):
     sudo.valid = False
     context.run(["second"], sudo=True)
 
-    expected = (
-        'Task "Install packages" requires sudo privileges; '
-        "you may be prompted for your password."
-    )
+    expected = 'Task "Install packages" requires sudo privileges'
     assert sudo.refresh_count == 2
     assert sudo.reasons == [expected, expected]
 
