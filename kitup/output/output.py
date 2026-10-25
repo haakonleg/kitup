@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import os
 import sys
-import threading
-import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any, TextIO
 
-from . import __version__
-from .results import Status, TaskResult
+from .. import __version__
+from ..results import Status, TaskResult
+from .animation import Animation
+from .live_line import LiveLine
 
 NAME_WIDTH = 44
 STATUS_WIDTH = 9
@@ -29,7 +30,11 @@ _DIM = "\033[2m"
 
 
 class Output:
-    """Small formatter shared by the CLI and runner."""
+    """Small formatter shared by the CLI and runner.
+
+    Terminal animations are suspended inside :meth:`interactive`, allowing
+    external prompts to own the terminal.
+    """
 
     def __init__(
         self,
@@ -40,18 +45,16 @@ class Output:
     ) -> None:
         self.stream = stream if stream is not None else sys.stdout
         self.verbose = verbose
-        self._interactive = self.stream.isatty()
-        self.no_color = no_color or bool(os.environ.get("NO_COLOR")) or not self._interactive
+        self._is_interactive = self.stream.isatty()
+        self.no_color = no_color or bool(os.environ.get("NO_COLOR")) or not self._is_interactive
         self.name_width = NAME_WIDTH
 
-        self._spinner_condition = threading.Condition()
-        self._spinner_thread: threading.Thread | None = None
-        self._spinner_active = False
-        self._spinner_drawn = False
-        self._spinner_name = ""
-        self._spinner_started = 0.0
-        self._spinner_frame = 0
-        self._spinner_generation = 0
+        self._live = LiveLine(self.stream)
+
+    @property
+    def is_interactive(self) -> bool:
+        """Whether the output stream supports interactive terminal output."""
+        return self._is_interactive
 
     def _paint(self, text: str, code: str) -> str:
         if self.no_color or not code:
@@ -59,18 +62,7 @@ class Output:
         return f"{code}{text}{_RESET}"
 
     def write(self, text: str = "") -> None:
-        # Only the runner toggles spinner state, so this uncontended check is
-        # safe and avoids taking the lock for ordinary output.
-        if not self._spinner_active or not self._spinner_drawn:
-            print(text, file=self.stream)
-            return
-        with self._spinner_condition:
-            if not self._spinner_active or not self._spinner_drawn:
-                print(text, file=self.stream)
-                return
-            self._erase_spinner()
-            print(text, file=self.stream)
-            self._draw_spinner()
+        self._live.write(text)
 
     def banner(self, facts: Mapping[str, Any]) -> None:
         parts = [f"kitup {__version__}", _platform_label(facts)]
@@ -90,74 +82,33 @@ class Output:
 
     def task_start(self, name: str) -> None:
         """Show an animated running line until :meth:`task_stop` is called."""
-        if not self._interactive:
+        if not self._is_interactive:
             return
-        with self._spinner_condition:
-            self._spinner_name = name
-            self._spinner_started = time.monotonic()
-            self._spinner_frame = 0
-            self._spinner_drawn = False
-            self._spinner_generation += 1
-            self._spinner_active = True
-            self._start_spinner()
-            self._spinner_condition.notify()
+        self._live.start(self._task_spinner(name))
 
     def task_stop(self) -> None:
         """Stop the running indicator and clear its line."""
-        with self._spinner_condition:
-            if not self._spinner_active:
-                return
-            self._spinner_active = False
-            if self._spinner_drawn:
-                self._erase_spinner()
-                self.stream.flush()
-                self._spinner_drawn = False
-            self._spinner_condition.notify()
+        self._live.stop()
 
-    def _start_spinner(self) -> None:
-        if self._spinner_thread is not None:
-            return
-        self._spinner_thread = threading.Thread(
-            target=self._spin, daemon=True, name="kitup-spinner"
-        )
-        self._spinner_thread.start()
+    @contextmanager
+    def interactive(self) -> Iterator[None]:
+        """Suspend animations for the duration of an interactive prompt."""
+        self._live.suspend()
+        try:
+            yield
+        finally:
+            self._live.resume()
 
-    def _spin(self) -> None:
-        while True:
-            with self._spinner_condition:
-                while not self._spinner_active:
-                    self._spinner_condition.wait()
-                generation = self._spinner_generation
+    def _task_spinner(self, name: str) -> Animation:
+        width = max(self.name_width, len(name) + 2)
 
-                # Delay the first frame so very fast tasks do not flicker.
-                self._spinner_condition.wait(SPINNER_DELAY)
-                if not self._spinner_active or generation != self._spinner_generation:
-                    continue
-                self._spinner_frame = 0
-                self._draw_spinner()
+        def render(elapsed: float, tick: int) -> str:
+            frame = SPINNER_FRAMES[tick % len(SPINNER_FRAMES)]
+            status = self._paint(frame.ljust(2), _DIM)
+            duration = self._paint(f"  ({elapsed:.2f} s)", _DIM)
+            return f"  {name:<{width}}{status}{duration}"
 
-                while True:
-                    self._spinner_condition.wait(SPINNER_INTERVAL)
-                    if (
-                        not self._spinner_active
-                        or generation != self._spinner_generation
-                    ):
-                        break
-                    self._spinner_frame += 1
-                    self._draw_spinner()
-
-    def _draw_spinner(self) -> None:
-        frame = SPINNER_FRAMES[self._spinner_frame % len(SPINNER_FRAMES)]
-        elapsed = time.monotonic() - self._spinner_started
-        width = max(self.name_width, len(self._spinner_name) + 2)
-        status = self._paint(frame.ljust(2), _DIM)
-        duration = self._paint(f"  ({elapsed:.2f} s)", _DIM)
-        self.stream.write(f"\r  {self._spinner_name:<{width}}{status}{duration}\033[K")
-        self.stream.flush()
-        self._spinner_drawn = True
-
-    def _erase_spinner(self) -> None:
-        self.stream.write("\r\033[K")
+        return Animation(render, SPINNER_DELAY, SPINNER_INTERVAL)
 
     def task(self, result: TaskResult) -> None:
         detail = self._task_detail(result)

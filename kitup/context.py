@@ -99,7 +99,11 @@ class TaskContext:
         """Revalidate sudo, prompting only when cached credentials expired."""
         if self._sudo_ready and self.sudo.credentials_valid():
             return
-        self.sudo.refresh(reason)
+        if self.output is not None:
+            with self.output.interactive():
+                self.sudo.refresh(reason)
+        else:
+            self.sudo.refresh(reason)
         self._sudo_ready = True
 
     def _sudo_reason(self) -> str:

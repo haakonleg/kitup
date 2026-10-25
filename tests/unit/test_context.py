@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from types import SimpleNamespace
+
 import pytest
 
 from kitup.errors import SkipTask, TaskFailed
@@ -195,6 +198,24 @@ def test_sudo_is_refreshed_once_per_run(tmp_path):
     ]
     assert command.calls[0][1]["sudo"] is True
     assert command.calls[1][1]["sudo"] is True
+
+
+def test_sudo_refresh_enters_interactive_output(tmp_path):
+    calls = []
+
+    @contextmanager
+    def interactive():
+        calls.append("begin")
+        try:
+            yield
+        finally:
+            calls.append("end")
+
+    context = make_context(tmp_path, output=SimpleNamespace(interactive=interactive))
+
+    context.ensure_sudo()
+
+    assert calls == ["begin", "end"]
 
 
 def test_sudo_is_revalidated_when_credentials_expire(tmp_path):

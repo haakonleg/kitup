@@ -17,7 +17,7 @@ dev = ["pytest", "ruff", "mypy"]
 kitup = "kitup.cli:main"
 
 [tool.setuptools]
-packages = ["kitup", "kitup.modules"]
+packages = ["kitup", "kitup.modules", "kitup.output"]
 
 [tool.setuptools.package-data]
 kitup = ["py.typed"]
