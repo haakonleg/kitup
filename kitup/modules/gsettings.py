@@ -6,7 +6,7 @@ from typing import Any
 
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_text
+from ..validation import require_state, require_text
 
 
 def key(
@@ -18,8 +18,7 @@ def key(
     state: str = "present",
 ) -> None:
     """Manage a gsettings key, or reset it to its schema default."""
-    if state not in {"present", "absent"}:
-        raise TaskFailed(f"invalid gsettings state: {state!r}")
+    require_state(state, "gsettings")
     require_text(schema, "gsettings schema")
     require_text(key, "gsettings key")
     if ctx.sudo.is_root:

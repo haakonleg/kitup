@@ -11,7 +11,16 @@ from urllib.parse import urlparse
 
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_collection, require_path, require_text
+from ..validation import (
+    normalize_strings,
+    require_collection,
+    require_path,
+    require_state,
+    require_success,
+    require_text,
+    require_texts,
+    unique_strings,
+)
 
 
 def packages(
@@ -27,15 +36,13 @@ def packages(
 
     Names beginning with ``@`` are treated as package groups.
     """
-    if isinstance(names, str):
-        names = [names]
-    wanted = _dedupe(names)
+    wanted = unique_strings(normalize_strings(names))
     require_collection(wanted, "package names")
-    for name in wanted:
-        require_text(name, "package name")
+    require_texts(wanted, "package name")
 
     excluded = _normalize_excludes(exclude)
     group_names, package_names = _split_names(wanted, group=group)
+    require_state(state, "package")
     if state == "present":
         _ensure_present(
             ctx,
@@ -45,7 +52,7 @@ def packages(
             exclude=excluded,
             explicit_group=group,
         )
-    elif state == "absent":
+    else:
         if excluded:
             raise TaskFailed("exclude is only supported when state is 'present'")
         _ensure_absent(
@@ -54,8 +61,6 @@ def packages(
             package_names=package_names,
             explicit_group=group,
         )
-    else:
-        raise TaskFailed(f"invalid package state: {state!r}")
 
 
 def swap(
@@ -93,7 +98,7 @@ def _ensure_absent(
     package_names: list[str],
     explicit_group: bool,
 ) -> None:
-    installed_groups = _installed_group_names(ctx, group_names)
+    installed_groups = _installed_groups(ctx, group_names)
     installed_packages = [name for name in package_names if _rpm_installed(ctx, name)]
     if not installed_groups and not installed_packages:
         return
@@ -124,7 +129,7 @@ def _ensure_absent(
 
     if ctx.dry_run:
         return
-    remaining_groups = _installed_group_names(ctx, installed_groups)
+    remaining_groups = _installed_groups(ctx, installed_groups)
     remaining_packages = [name for name in installed_packages if _rpm_installed(ctx, name)]
     remaining = _display_names(remaining_groups, remaining_packages)
     if remaining:
@@ -144,13 +149,7 @@ def autoremove(ctx: TaskContext) -> None:
         ],
         sudo=False,
     )
-    if result.returncode != 0:
-        raise TaskFailed(
-            "could not list unneeded packages",
-            command=result.args,
-            stdout=result.stdout,
-            stderr=result.stderr,
-        )
+    require_success(result, "could not list unneeded packages")
 
     packages = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     if not packages:
@@ -163,18 +162,11 @@ def autoremove(ctx: TaskContext) -> None:
 
 def copr(ctx: TaskContext, project: str, *, state: str = "present") -> None:
     """Ensure a COPR project is enabled or removed."""
-    if state not in {"present", "absent"}:
-        raise TaskFailed(f"invalid COPR state: {state!r}")
+    require_state(state, "COPR")
     require_text(project, "COPR project")
 
     result = ctx.probe([_dnf_command(ctx), "copr", "list"], sudo=False)
-    if result.returncode != 0:
-        raise TaskFailed(
-            "could not list COPR repositories",
-            command=result.args,
-            stdout=result.stdout,
-            stderr=result.stderr,
-        )
+    require_success(result, "could not list COPR repositories")
     configured = _copr_configured(result.stdout, project)
 
     if state == "present":
@@ -217,8 +209,7 @@ def repository(
     name: str | None = None,
 ) -> None:
     """Ensure a repository from a .repo file is present or absent."""
-    if state not in {"present", "absent"}:
-        raise TaskFailed(f"invalid repository state: {state!r}")
+    require_state(state, "repository")
 
     if state == "present":
         if source is None:
@@ -260,12 +251,12 @@ def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> None:
     """Install release RPMs from URLs or local paths."""
     if isinstance(sources, (str, Path)):
         sources = [sources]
-    validated = _dedupe(sources)
+    validated = unique_strings(sources)
     require_collection(validated, "RPM sources")
     for source in validated:
         require_path(source, "RPM source")
 
-    wanted = _dedupe(_resolve_dnf_source(ctx, source) for source in validated)
+    wanted = unique_strings(_resolve_dnf_source(ctx, source) for source in validated)
     labels = [Path(urlparse(source).path).name or source for source in wanted]
     ctx.changed({"sources": wanted}, f"install {', '.join(labels)}")
     ctx.run([_dnf_command(ctx), "install", "-y", *wanted], sudo=True, record=False)
@@ -375,11 +366,8 @@ def _add_repository_command(ctx: TaskContext, source: str | Path, filename: str)
 def _normalize_excludes(exclude: Iterable[str] | str | None) -> list[str]:
     if exclude is None:
         return []
-    if isinstance(exclude, str):
-        exclude = [exclude]
-    values = _dedupe(exclude)
-    for value in values:
-        require_text(value, "excluded package")
+    values = unique_strings(normalize_strings(exclude))
+    require_texts(values, "excluded package")
     return values
 
 
@@ -393,7 +381,7 @@ def _split_names(names: list[str], *, group: bool) -> tuple[list[str], list[str]
             group_names.append(candidate)
         else:
             package_names.append(name)
-    return _dedupe(group_names), _dedupe(package_names)
+    return unique_strings(group_names), unique_strings(package_names)
 
 
 def _display_names(groups: list[str], packages: list[str]) -> list[str]:
@@ -401,31 +389,18 @@ def _display_names(groups: list[str], packages: list[str]) -> list[str]:
 
 
 def _missing_group_names(ctx: TaskContext, names: list[str]) -> list[str]:
-    if not names:
-        return []
     installed = set(_installed_groups(ctx, names))
     return [name for name in names if name not in installed]
 
 
-def _installed_group_names(ctx: TaskContext, names: list[str]) -> list[str]:
+def _installed_groups(ctx: TaskContext, names: list[str]) -> list[str]:
     if not names:
         return []
-    installed = set(_installed_groups(ctx, names))
-    return [name for name in names if name in installed]
-
-
-def _installed_groups(ctx: TaskContext, names: list[str]) -> list[str]:
     result = ctx.probe(
         [_dnf_command(ctx), "group", "list", "--installed", "--hidden"],
         sudo=False,
     )
-    if result.returncode != 0:
-        raise TaskFailed(
-            "could not list installed package groups",
-            command=result.args,
-            stdout=result.stdout,
-            stderr=result.stderr,
-        )
+    require_success(result, "could not list installed package groups")
     installed = _parse_installed_groups(result.stdout)
     return [name for name in names if name in installed]
 
@@ -443,10 +418,6 @@ def _parse_installed_groups(output: str) -> set[str]:
         else:
             groups.add(stripped)
     return groups
-
-
-def _dedupe(names: Iterable[str | Path]) -> list[str]:
-    return list(dict.fromkeys(str(name) for name in names))
 
 
 def _dnf_command(ctx: TaskContext) -> str:

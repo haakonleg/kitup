@@ -153,15 +153,14 @@ def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
             output.write(f"  depends:{f' {dependencies}' if dependencies else ''}")
             output.write("  tasks:")
         for task in bundle.tasks:
+            tags = ", ".join(sorted(task.tags))
             if verbose:
                 output.write(f"    - {task.name}")
                 output.write(f"      id: {task.id}")
-                tags = ", ".join(sorted(task.tags))
                 output.write(f"      tags:{f' {tags}' if tags else ''}")
                 if task.description:
                     output.write(f"      description: {task.description}")
             else:
-                tags = ", ".join(sorted(task.tags))
                 output.write(f"    - {task.name}{f' [{tags}]' if tags else ''}")
 
 

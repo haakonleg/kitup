@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import stat
 from io import StringIO
@@ -12,7 +13,7 @@ from kitup.modules import files
 from kitup.output import Output
 from kitup.registry import Bundle
 
-from .helpers import FakeSudo, PassthroughSudo, make_context
+from .helpers import FakeCommandRunner, FakeSudo, PassthroughSudo, completed, make_context
 
 
 def context(tmp_path, *, dry_run=False, diff=False):
@@ -175,6 +176,67 @@ def test_privileged_file_operations_use_helper(tmp_path):
     assert ctx.sudo.refresh_count > 0
     assert not path.exists()
     assert not directory.exists()
+
+
+def test_privileged_symlink_copy_and_metadata_use_helper(tmp_path):
+    ctx = privileged_context(tmp_path)
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    dest = tmp_path / "dest"
+    link = tmp_path / "link"
+
+    files.copy(ctx, source, dest, sudo=True)
+    files.symlink(ctx, dest, link, sudo=True)
+    files.file(ctx, dest, mode=0o600, sudo=True)
+
+    assert dest.read_text() == "data\n"
+    assert link.is_symlink()
+    assert link.resolve() == dest
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o600
+
+
+class ReadFailureRunner(FakeCommandRunner):
+    """Simulate a privileged helper whose read action fails."""
+
+    def run(self, argv, **kwargs):
+        with open(argv[-1], encoding="utf-8") as stream:
+            request = json.load(stream)
+        self.calls.append((list(argv), kwargs))
+        if request["action"] == "read":
+            return completed(argv, 1, "", "simulated read failure")
+        if request["action"] == "stat":
+            info = os.lstat(request["path"])
+            result = {
+                "exists": True,
+                "is_dir": stat.S_ISDIR(info.st_mode),
+                "is_symlink": stat.S_ISLNK(info.st_mode),
+                "is_file": stat.S_ISREG(info.st_mode),
+                "mode": stat.S_IMODE(info.st_mode),
+                "uid": info.st_uid,
+                "gid": info.st_gid,
+            }
+            return completed(argv, 0, json.dumps(result))
+        return completed(argv, 0, "{}")
+
+
+def test_privileged_read_failure_does_not_rewrite_file(tmp_path):
+    path = tmp_path / "example"
+    path.write_text("keep me\n")
+    ctx = make_context(tmp_path, command=ReadFailureRunner(), sudo=FakeSudo())
+
+    with pytest.raises(TaskFailed, match="file helper read failed"):
+        files.line(ctx, path, "new line", sudo=True)
+
+    assert path.read_text() == "keep me\n"
+
+
+def test_unknown_owner_is_a_task_failure(tmp_path):
+    path = tmp_path / "example"
+
+    with pytest.raises(TaskFailed, match="unknown user"):
+        files.file(context(tmp_path), path, content="value\n", owner="kitup-missing-user")
+
+    assert not path.exists()
 
 
 def test_unprivileged_file_operations_do_not_request_credentials(tmp_path):
@@ -452,6 +514,17 @@ def test_copy_preserves_mode_and_is_idempotent(tmp_path):
     count = len(ctx.changes)
     files.copy(ctx, source, dest)
     assert len(ctx.changes) == count
+
+
+def test_copy_preserves_special_mode_bits(tmp_path):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    source.chmod(0o4755)
+    dest = tmp_path / "dest"
+
+    files.copy(context(tmp_path), source, dest)
+
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o4755
 
 
 def test_copy_replaces_destination_symlink(tmp_path):

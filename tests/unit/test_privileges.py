@@ -100,6 +100,13 @@ def test_tty_prompts_when_cache_is_missing(monkeypatch):
     assert calls[1][1]["input"] == "secret\n"
 
 
+def test_empty_reason_does_not_print_a_blank_line(monkeypatch, capsys):
+    monkeypatch.setattr("kitup.privileges.getpass.getpass", lambda prompt: "secret")
+
+    assert PrivilegeManager()._prompt_password("") == "secret"
+    assert capsys.readouterr().err == ""
+
+
 def test_failed_prompt_is_an_error(monkeypatch):
     monkeypatch.setattr("os.geteuid", lambda: 1000)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")

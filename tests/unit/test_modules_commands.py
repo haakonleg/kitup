@@ -122,6 +122,8 @@ def test_invalid_arguments_are_rejected(tmp_path):
         commands.run(ctx, ["true"], creates="")
     with pytest.raises(TaskFailed, match="cwd must not be empty"):
         commands.run(ctx, ["true"], cwd="")
+    with pytest.raises(TaskFailed, match="unless must not be empty"):
+        commands.run(ctx, ["true"], unless=" ")
     with pytest.raises(TaskFailed, match="shell command must not be empty"):
         commands.shell(ctx, "  ")
     with pytest.raises(TaskFailed, match="shell unless must not be empty"):

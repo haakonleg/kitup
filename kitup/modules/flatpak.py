@@ -7,9 +7,16 @@ from collections.abc import Iterable
 
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_collection, require_text
-
-_STATES = {"present", "absent"}
+from ..validation import (
+    normalize_strings,
+    require_collection,
+    require_scope,
+    require_state,
+    require_success,
+    require_text,
+    require_texts,
+    unique_strings,
+)
 
 
 def remote(
@@ -22,7 +29,7 @@ def remote(
     gpg_verify: bool = True,
 ) -> None:
     """Ensure a Flatpak remote repository is present or absent."""
-    _require_state(state)
+    require_state(state, "flatpak")
     flag = _scope_flag(ctx, scope)
     require_text(name, "flatpak remote name")
 
@@ -72,17 +79,16 @@ def packages(
     remote: str | None = None,
 ) -> None:
     """Ensure Flatpak applications or runtimes are present or absent."""
-    _require_state(state)
+    require_state(state, "flatpak")
     flag = _scope_flag(ctx, scope)
     if remote is not None:
         require_text(remote, "flatpak remote")
         if state == "absent":
             raise TaskFailed("remote is only supported when state is 'present'")
 
-    wanted = _dedupe([names] if isinstance(names, str) else names)
+    wanted = unique_strings(normalize_strings(names))
     require_collection(wanted, "flatpak refs")
-    for name in wanted:
-        require_text(name, "flatpak ref")
+    require_texts(wanted, "flatpak ref")
 
     installed = _installed_refs(ctx, flag)
 
@@ -120,7 +126,7 @@ def packages(
     present = [name for name in wanted if _matching_refs(name, installed)]
     if not present:
         return
-    targets = _dedupe(
+    targets = unique_strings(
         ref for name in present for ref in _matching_refs(name, installed)
     )
     ctx.changed(
@@ -144,19 +150,9 @@ def packages(
         )
 
 
-def _require_state(state: str) -> None:
-    if state not in _STATES:
-        raise TaskFailed(f"invalid flatpak state: {state!r}")
-
-
 def _scope_flag(ctx: TaskContext, scope: str) -> str:
-    if scope == "system":
-        return "--system"
-    if scope == "user":
-        if ctx.sudo.is_root:
-            raise TaskFailed("user-scoped flatpak cannot run as root")
-        return "--user"
-    raise TaskFailed(f"invalid flatpak scope: {scope!r}")
+    require_scope(scope, "flatpak", is_root=ctx.sudo.is_root)
+    return "--system" if scope == "system" else "--user"
 
 
 def _flatpak(ctx: TaskContext) -> str:
@@ -171,13 +167,7 @@ def _remote_names(ctx: TaskContext, flag: str) -> list[str]:
         [_flatpak(ctx), "remotes", flag, "--columns=name"],
         sudo=False,
     )
-    if result.returncode != 0:
-        raise TaskFailed(
-            "could not list flatpak remotes",
-            command=result.args,
-            stdout=result.stdout,
-            stderr=result.stderr,
-        )
+    require_success(result, "could not list flatpak remotes")
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
@@ -186,13 +176,7 @@ def _installed_refs(ctx: TaskContext, flag: str) -> list[tuple[str, str]]:
         [_flatpak(ctx), "list", flag, "--columns=application,ref"],
         sudo=False,
     )
-    if result.returncode != 0:
-        raise TaskFailed(
-            "could not list installed flatpak refs",
-            command=result.args,
-            stdout=result.stdout,
-            stderr=result.stderr,
-        )
+    require_success(result, "could not list installed flatpak refs")
 
     installed: list[tuple[str, str]] = []
     for line in result.stdout.splitlines():
@@ -222,7 +206,3 @@ def _strip_kind(ref: str) -> str:
         if ref.startswith(prefix):
             return ref[len(prefix) :]
     return ref
-
-
-def _dedupe(values: Iterable[str]) -> list[str]:
-    return list(dict.fromkeys(str(value) for value in values))

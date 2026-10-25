@@ -87,7 +87,6 @@ class Runner:
         return selected
 
     def _run_task(self, task: Task) -> TaskResult:
-        started = time.monotonic()
         self.context.begin_task(task)
         status = Status.OK
         detail = ""
@@ -125,6 +124,6 @@ class Runner:
             changes=changes,
             notes=notes,
             detail=detail,
-            duration=self.output.elapsed_since(started),
+            duration=self.output.task_elapsed,
             error=error,
         )

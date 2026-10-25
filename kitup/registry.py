@@ -7,6 +7,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from .validation import normalize_string_sequence
+
 
 @dataclass(frozen=True)
 class Task:
@@ -40,7 +42,7 @@ class Bundle:
             raise ValueError("bundle name must not be empty")
         self.name = name
         self.description = description
-        self.depends_on = tuple(depends_on)
+        self.depends_on = normalize_string_sequence(depends_on, "bundle depends_on")
         self.path = path
         self.tasks: list[Task] = []
 
@@ -64,6 +66,7 @@ class Bundle:
         ``name`` is the display name. When omitted the Python function name is
         used, which is handy for small bundles.
         """
+        tag_values = normalize_string_sequence(tags, "task tags")
 
         def register(func: Callable[[Any], None]) -> Callable[[Any], None]:
             self.tasks.append(
@@ -71,7 +74,7 @@ class Bundle:
                     bundle=self.name,
                     name=name or func.__name__,
                     func=func,
-                    tags=frozenset(tags),
+                    tags=frozenset(tag_values),
                     description=description,
                     bundle_path=self.path,
                 )

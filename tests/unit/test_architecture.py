@@ -5,7 +5,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-MODULES_DIR = Path(__file__).parents[2] / "kitup" / "modules"
+PACKAGE_DIR = Path(__file__).parents[2] / "kitup"
+MODULES_DIR = PACKAGE_DIR / "modules"
+FILE_HELPER = PACKAGE_DIR / "_file_helper.py"
 
 
 def _sibling_imports(path: Path) -> set[str]:
@@ -45,3 +47,28 @@ def test_modules_do_not_import_each_other():
                 violations.append(f"{path.name} imports {imported}")
 
     assert not violations, "modules must remain standalone: " + ", ".join(violations)
+
+
+def test_file_helper_is_standalone():
+    """The helper is embedded with ``python -c``, so it cannot import kitup."""
+    tree = ast.parse(FILE_HELPER.read_text(encoding="utf-8"))
+    violations: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            violations.extend(
+                alias.name
+                for alias in node.names
+                if alias.name == "kitup" or alias.name.startswith("kitup.")
+            )
+        elif isinstance(node, ast.ImportFrom):
+            if node.level != 0:
+                violations.append(f"relative import: {node.module or '<unknown>'}")
+            elif node.module and (
+                node.module == "kitup" or node.module.startswith("kitup.")
+            ):
+                violations.append(node.module)
+
+    assert not violations, "file helper must use only the standard library: " + ", ".join(
+        violations
+    )

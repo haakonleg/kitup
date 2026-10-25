@@ -69,15 +69,14 @@ class PrivilegeManager:
             raise PrivilegeError(message)
 
     def _prompt_password(self, reason: str | None) -> str:
-        show_reason = bool(reason)
-        if reason is not None:
+        if reason:
             print(self._fit_reason(reason), file=sys.stderr, flush=True)
         try:
             password = getpass.getpass(_SUDO_PROMPT)
         except EOFError as exc:
             raise PrivilegeError("no sudo password received") from exc
         # getpass leaves the cursor on the line after the prompt.
-        clear_lines(sys.stderr, 2 if show_reason else 1)
+        clear_lines(sys.stderr, 2 if reason else 1)
         return password
 
     @staticmethod

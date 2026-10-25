@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from ..context import TaskContext
-from ..errors import TaskFailed
-from ..validation import require_text
+from ..validation import require_scope, require_state, require_text
 
 _ENABLED_STATES = {
     "enabled",
@@ -72,13 +71,8 @@ def _reload(ctx: TaskContext, scope: str) -> None:
 
 
 def _command(ctx: TaskContext, scope: str) -> list[str]:
-    if scope == "system":
-        return ["systemctl"]
-    if scope == "user":
-        if ctx.sudo.is_root:
-            raise TaskFailed("user-scoped systemd cannot run as root")
-        return ["systemctl", "--user"]
-    raise TaskFailed(f"invalid systemd scope: {scope!r}")
+    require_scope(scope, "systemd", is_root=ctx.sudo.is_root)
+    return ["systemctl"] if scope == "system" else ["systemctl", "--user"]
 
 
 def _is_enabled(ctx: TaskContext, base: list[str], unit: str) -> bool:
@@ -92,8 +86,5 @@ def _is_active(ctx: TaskContext, base: list[str], unit: str) -> bool:
 
 
 def _desired_active(state: str) -> bool:
-    if state == "started":
-        return True
-    if state == "stopped":
-        return False
-    raise TaskFailed(f"invalid systemd state: {state!r}")
+    require_state(state, "systemd", ("started", "stopped"))
+    return state == "started"

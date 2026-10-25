@@ -14,6 +14,7 @@ from ..results import Status, TaskResult
 from .animation import Animation
 from .live_line import LiveLine
 from .terminal import clear_input as clear_terminal_input
+from .timer import Stopwatch
 
 NAME_WIDTH = 44
 STATUS_WIDTH = 9
@@ -48,20 +49,13 @@ class Output:
     ) -> None:
         self.stream = stream if stream is not None else sys.stdout
         self.verbose = verbose
-        self._clock = clock
-        self._is_interactive = self.stream.isatty()
-        self.no_color = no_color or bool(os.environ.get("NO_COLOR")) or not self._is_interactive
+        self.is_interactive = self.stream.isatty()
+        self.no_color = no_color or bool(os.environ.get("NO_COLOR")) or not self.is_interactive
         self.name_width = NAME_WIDTH
 
         self._live = LiveLine(self.stream, clock=clock)
+        self._task_timer = Stopwatch(clock)
         self._interactive_depth = 0
-        self._pause_started: float | None = None
-        self._pause_intervals: list[tuple[float, float]] = []
-
-    @property
-    def is_interactive(self) -> bool:
-        """Whether the output stream supports interactive terminal output."""
-        return self._is_interactive
 
     def _paint(self, text: str, code: str) -> str:
         if self.no_color or not code:
@@ -88,9 +82,11 @@ class Output:
         )
 
     def task_start(self, name: str) -> None:
-        """Show an animated running line until :meth:`task_stop` is called."""
-        self._pause_intervals.clear()
-        if not self._is_interactive:
+        """Start timing a task and show its animated running line."""
+        self._task_timer.reset()
+        if self._interactive_depth:
+            self._task_timer.pause()
+        if not self.is_interactive:
             return
         self._live.start(self._task_spinner(name))
 
@@ -100,9 +96,9 @@ class Output:
 
     @contextmanager
     def interactive(self) -> Iterator[None]:
-        """Suspend animations for the duration of an interactive prompt."""
+        """Suspend animations and task timing during an interactive prompt."""
         if self._interactive_depth == 0:
-            self._pause_started = self._clock()
+            self._task_timer.pause()
         self._interactive_depth += 1
         self._live.suspend()
         try:
@@ -110,23 +106,13 @@ class Output:
         finally:
             self._live.resume()
             self._interactive_depth -= 1
-            if self._interactive_depth == 0 and self._pause_started is not None:
-                self._pause_intervals.append((self._pause_started, self._clock()))
-                self._pause_started = None
+            if self._interactive_depth == 0:
+                self._task_timer.resume()
 
-    def elapsed_since(self, started: float) -> float:
-        """Return elapsed time since ``started``, excluding prompts."""
-        now = self._clock()
-        paused = 0.0
-        for start, end in self._pause_intervals:
-            overlap = min(now, end) - max(started, start)
-            if overlap > 0:
-                paused += overlap
-        if self._pause_started is not None:
-            overlap = now - max(started, self._pause_started)
-            if overlap > 0:
-                paused += overlap
-        return max(0.0, now - started - paused)
+    @property
+    def task_elapsed(self) -> float:
+        """Return the current task duration, excluding prompts."""
+        return self._task_timer.elapsed()
 
     def clear_input(self, prompt: str, value: str) -> None:
         """Erase an input prompt and its echoed value from the terminal."""

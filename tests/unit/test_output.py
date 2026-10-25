@@ -41,17 +41,45 @@ def test_stopwatch_excludes_paused_time():
     assert timer.elapsed() == 3.0
 
 
-def test_output_elapsed_since_excludes_interactive_time():
+def test_output_task_elapsed_excludes_interactive_time():
     clock = FakeClock()
     output = Output(StringIO(), no_color=True, clock=clock)
-    started = clock()
+    output.task_start("task")
 
     clock.advance(1)
     with output.interactive():
         clock.advance(5)
     clock.advance(2)
 
-    assert output.elapsed_since(started) == 3.0
+    assert output.task_elapsed == 3.0
+
+
+def test_output_task_elapsed_handles_nested_interactive_prompts():
+    clock = FakeClock()
+    output = Output(StringIO(), no_color=True, clock=clock)
+    output.task_start("task")
+
+    clock.advance(1)
+    with output.interactive():
+        clock.advance(2)
+        with output.interactive():
+            clock.advance(3)
+        clock.advance(4)
+    clock.advance(5)
+
+    assert output.task_elapsed == 6.0
+
+
+def test_output_task_timer_resets_for_each_task():
+    clock = FakeClock()
+    output = Output(StringIO(), no_color=True, clock=clock)
+
+    output.task_start("first")
+    clock.advance(4)
+    assert output.task_elapsed == 4.0
+
+    output.task_start("second")
+    assert output.task_elapsed == 0.0
 
 
 def test_terminal_columns_falls_back_without_a_terminal_size():

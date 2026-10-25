@@ -4,23 +4,30 @@ from __future__ import annotations
 
 import base64
 import difflib
-import grp
 import json
 import os
 import pkgutil
-import pwd
 import re
-import shutil
-import stat
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .._file_helper import (
+    apply_metadata,
+    mkdir_path,
+    read_path,
+    remove_path,
+    resolve_group,
+    resolve_owner,
+    stat_path,
+    symlink_path,
+    write_path,
+)
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_path, require_regex, require_text
+from ..validation import require_path, require_regex, require_state, require_success, require_text
 
 
 @dataclass(frozen=True)
@@ -49,8 +56,7 @@ def file(
 
     ``sudo=True`` performs the operation through the privileged helper.
     """
-    if state not in {"present", "absent"}:
-        raise TaskFailed(f"invalid file state: {state!r}")
+    require_state(state, "file")
     require_path(path, "file path")
     _validate_metadata(owner, group)
 
@@ -126,7 +132,7 @@ def copy(
         ctx,
         target,
         _read_bytes(ctx, source, source_info, sudo=sudo),
-        mode=source_info.mode & 0o777 if mode is None else mode,
+        mode=source_info.mode if mode is None else mode,
         owner=owner,
         group=group,
         summary=f"copy {source} -> {target}",
@@ -145,8 +151,7 @@ def line(
     sudo: bool = False,
 ) -> None:
     """Add, replace, or remove a line selected by an exact value or regex."""
-    if state not in {"present", "absent"}:
-        raise TaskFailed(f"invalid line state: {state!r}")
+    require_state(state, "line")
     require_path(path, "line path")
     if match is not None:
         require_regex(match, "line match")
@@ -192,8 +197,7 @@ def block(
     sudo: bool = False,
 ) -> None:
     """Create, update, or remove a marked block in a file."""
-    if state not in {"present", "absent"}:
-        raise TaskFailed(f"invalid block state: {state!r}")
+    require_state(state, "block")
     require_path(path, "block path")
     require_text(marker, "block marker")
 
@@ -240,8 +244,7 @@ def directory(
     sudo: bool = False,
 ) -> None:
     """Ensure a directory exists or is absent."""
-    if state not in {"present", "absent"}:
-        raise TaskFailed(f"invalid directory state: {state!r}")
+    require_state(state, "directory")
     require_path(path, "directory path")
     _validate_metadata(owner, group)
 
@@ -279,7 +282,7 @@ def directory(
     if _metadata_differs(info, resolved, owner, group):
         ctx.changed({"path": str(target), "action": "chmod"}, f"chmod {target}")
         if not ctx.dry_run:
-            _apply_metadata_ctx(ctx, target, resolved, owner, group, info, sudo=sudo)
+            _apply_metadata_ctx(ctx, target, resolved, owner, group, sudo=sudo)
 
 
 def symlink(
@@ -315,9 +318,10 @@ def symlink(
             sudo=sudo,
         )
         return
-    if os.path.lexists(link):
-        link.unlink()
-    link.symlink_to(desired)
+    try:
+        symlink_path(desired, link)
+    except OSError as exc:
+        raise TaskFailed(f"could not create symlink {link}: {exc}") from exc
 
 
 def _apply_bytes(
@@ -356,9 +360,9 @@ def _apply_bytes(
         return
 
     if content_differs:
-        _write_bytes(ctx, path, content, resolved, owner, group, info, sudo=sudo)
+        _write_bytes(ctx, path, content, resolved, owner, group, sudo=sudo)
     else:
-        _apply_metadata_ctx(ctx, path, resolved, owner, group, info, sudo=sudo)
+        _apply_metadata_ctx(ctx, path, resolved, owner, group, sudo=sudo)
 
 
 def _rewrite_text(
@@ -401,6 +405,7 @@ def _read_text(ctx: TaskContext, path: Path, *, sudo: bool) -> str:
 
 
 def _lstat(ctx: TaskContext, path: Path, *, sudo: bool) -> _FileInfo | None:
+    result: dict[str, Any] | None
     if _privileged(ctx, sudo):
         result = _helper(
             ctx,
@@ -408,32 +413,22 @@ def _lstat(ctx: TaskContext, path: Path, *, sudo: bool) -> _FileInfo | None:
             mutates=False,
             sudo=sudo,
         )
-        if not result.get("exists"):
-            return None
-        return _FileInfo(
-            mode=result["mode"],
-            uid=result["uid"],
-            gid=result["gid"],
-            is_dir=result["is_dir"],
-            is_symlink=result["is_symlink"],
-            is_file=result["is_file"],
-            link=result.get("link"),
-        )
+    else:
+        try:
+            result = stat_path(path)
+        except OSError as exc:
+            raise TaskFailed(f"could not stat {path}: {exc}") from exc
 
-    try:
-        info = os.lstat(path)
-    except FileNotFoundError:
+    if not result or not result.get("exists"):
         return None
-    except OSError as exc:
-        raise TaskFailed(f"could not stat {path}: {exc}") from exc
     return _FileInfo(
-        mode=stat.S_IMODE(info.st_mode),
-        uid=info.st_uid,
-        gid=info.st_gid,
-        is_dir=stat.S_ISDIR(info.st_mode),
-        is_symlink=stat.S_ISLNK(info.st_mode),
-        is_file=stat.S_ISREG(info.st_mode),
-        link=os.readlink(path) if stat.S_ISLNK(info.st_mode) else None,
+        mode=result["mode"],
+        uid=result["uid"],
+        gid=result["gid"],
+        is_dir=result["is_dir"],
+        is_symlink=result["is_symlink"],
+        is_file=result["is_file"],
+        link=result.get("link"),
     )
 
 
@@ -451,7 +446,7 @@ def _read_bytes(ctx: TaskContext, path: Path, info: _FileInfo | None, *, sudo: b
             return b""
         return base64.b64decode(result.get("content", ""))
     try:
-        return path.read_bytes()
+        return read_path(path)
     except OSError as exc:
         raise TaskFailed(f"could not read {path}: {exc}") from exc
 
@@ -463,7 +458,6 @@ def _write_bytes(
     mode: int,
     owner: str | int | None,
     group: str | int | None,
-    info: _FileInfo | None,
     *,
     sudo: bool,
 ) -> None:
@@ -483,40 +477,13 @@ def _write_bytes(
         )
         return
 
-    _atomic_write(ctx, path, content, mode, owner, group, info)
-
-
-def _atomic_write(
-    ctx: TaskContext,
-    path: Path,
-    content: bytes,
-    mode: int,
-    owner: str | int | None,
-    group: str | int | None,
-    info: _FileInfo | None,
-) -> None:
     _require_parent(ctx, path, sudo=False)
-    handle, temp_name = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    )
-    temp = Path(temp_name)
     try:
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if info is not None and not info.is_symlink:
-            try:
-                shutil.copystat(path, temp, follow_symlinks=False)
-            except OSError:
-                pass
-        _apply_metadata(temp, mode, owner, group, info, preserve=True)
-        os.replace(temp, path)
-    except BaseException:
-        temp.unlink(missing_ok=True)
-        raise
+        write_path(path, content, mode=mode, owner=owner, group=group)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
+    except OSError as exc:
+        raise TaskFailed(f"could not write {path}: {exc}") from exc
 
 
 def _mkdir(
@@ -542,8 +509,12 @@ def _mkdir(
             sudo=sudo,
         )
         return
-    path.mkdir()
-    _apply_metadata(path, mode, owner, group, None, preserve=False)
+    try:
+        mkdir_path(path, mode=mode, owner=owner, group=group)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
+    except OSError as exc:
+        raise TaskFailed(f"could not create directory {path}: {exc}") from exc
 
 
 def _remove_path(ctx: TaskContext, path: Path, *, force: bool, sudo: bool) -> None:
@@ -565,16 +536,12 @@ def _remove_path(ctx: TaskContext, path: Path, *, force: bool, sudo: bool) -> No
             sudo=sudo,
         )
         return
-    if info.is_dir and not info.is_symlink:
-        if force:
-            shutil.rmtree(path)
-            return
-        try:
-            path.rmdir()
-        except OSError as exc:
+    try:
+        remove_path(path, force=force)
+    except OSError as exc:
+        if info.is_dir and not info.is_symlink and not force:
             raise TaskFailed(f"directory is not empty: {path}") from exc
-        return
-    path.unlink()
+        raise TaskFailed(f"could not remove {path}: {exc}") from exc
 
 
 def _apply_metadata_ctx(
@@ -583,7 +550,6 @@ def _apply_metadata_ctx(
     mode: int,
     owner: str | int | None,
     group: str | int | None,
-    info: _FileInfo | None,
     *,
     sudo: bool,
 ) -> None:
@@ -601,29 +567,12 @@ def _apply_metadata_ctx(
             sudo=sudo,
         )
         return
-    _apply_metadata(path, mode, owner, group, info, preserve=False)
-
-
-def _apply_metadata(
-    path: Path,
-    mode: int | None,
-    owner: str | int | None,
-    group: str | int | None,
-    info: _FileInfo | None,
-    *,
-    preserve: bool,
-) -> None:
-    uid = _resolve_owner(owner)
-    gid = _resolve_group(group)
-    if preserve and info is not None:
-        if uid is None:
-            uid = info.uid
-        if gid is None:
-            gid = info.gid
-    if uid is not None or gid is not None:
-        os.chown(path, -1 if uid is None else uid, -1 if gid is None else gid)
-    if mode is not None:
-        os.chmod(path, mode)
+    try:
+        apply_metadata(path, mode, owner, group, preserve=False)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
+    except OSError as exc:
+        raise TaskFailed(f"could not update metadata for {path}: {exc}") from exc
 
 
 def _metadata_differs(
@@ -634,8 +583,11 @@ def _metadata_differs(
 ) -> bool:
     if info.mode != mode:
         return True
-    uid = _resolve_owner(owner)
-    gid = _resolve_group(group)
+    try:
+        uid = resolve_owner(owner)
+        gid = resolve_group(group)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
     if uid is not None and info.uid != uid:
         return True
     return gid is not None and info.gid != gid
@@ -646,26 +598,6 @@ def _validate_metadata(owner: str | int | None, group: str | int | None) -> None
         require_text(owner, "owner")
     if group is not None and not isinstance(group, int):
         require_text(group, "group")
-
-
-def _resolve_owner(owner: str | int | None) -> int | None:
-    if owner is None or isinstance(owner, int):
-        return owner
-    require_text(owner, "owner")
-    try:
-        return pwd.getpwnam(owner).pw_uid
-    except KeyError as exc:
-        raise TaskFailed(f"unknown user: {owner}") from exc
-
-
-def _resolve_group(group: str | int | None) -> int | None:
-    if group is None or isinstance(group, int):
-        return group
-    require_text(group, "group")
-    try:
-        return grp.getgrnam(group).gr_gid
-    except KeyError as exc:
-        raise TaskFailed(f"unknown group: {group}") from exc
 
 
 def _emit_diff(ctx: TaskContext, path: Path, old: bytes | None, new: bytes) -> None:
@@ -756,6 +688,7 @@ def _helper(
             result = ctx.run(command, record=False, sudo=sudo)
         else:
             result = ctx.probe(command, sudo=sudo)
+        require_success(result, f"file helper {request['action']} failed")
         if not result.stdout.strip():
             return {}
         return json.loads(result.stdout)
@@ -763,13 +696,15 @@ def _helper(
         request_path.unlink(missing_ok=True)
 
 
+# The helper lives in the top-level package, not next to this module.
+_HELPER_PACKAGE = __name__.partition(".")[0]
 _HELPER_SOURCE: str | None = None
 
 
 def _helper_source() -> str:
     global _HELPER_SOURCE
     if _HELPER_SOURCE is None:
-        data = pkgutil.get_data(__package__, "_file_helper.py")
+        data = pkgutil.get_data(_HELPER_PACKAGE, "_file_helper.py")
         if data is None:
             raise RuntimeError("file helper source is unavailable")
         _HELPER_SOURCE = data.decode()

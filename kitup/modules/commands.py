@@ -30,6 +30,7 @@ def run(
     if unless is not None:
         unless = normalize_strings(unless)
         require_collection(unless, "unless")
+        require_text(unless[0], "unless")
     if creates is not None:
         require_path(creates, "creates path")
     if cwd is not None:
