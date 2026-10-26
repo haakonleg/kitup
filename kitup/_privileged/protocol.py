@@ -1,7 +1,7 @@
 """NDJSON protocol shared by the privileged worker and its client.
 
 This module is embedded into the worker with ``python -c``. Keep the imports
-standard-library-only and avoid ``kitup`` imports or a ``__main__`` guard.
+standard-library-only and avoid package imports or a ``__main__`` guard.
 """
 
 import json

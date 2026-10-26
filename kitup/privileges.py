@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 
+from . import PACKAGE_NAME
 from .errors import PrivilegeError
 from .output.terminal import clear_lines, terminal_columns
 
@@ -29,9 +30,10 @@ class PrivilegeManager:
         """Ensure cached sudo credentials are valid, prompting when needed.
 
         ``reason`` is shown before an interactive password prompt. The password
-        is read by kitup and passed to non-interactive sudo on stdin, so sudo's
-        own prompt never reaches the terminal. Outside a TTY, an expired cache
-        is a hard error instead of hanging on an invisible password prompt.
+        is read by the application and passed to non-interactive sudo on stdin,
+        so sudo's own prompt never reaches the terminal. Outside a TTY, an
+        expired cache is a hard error instead of hanging on an invisible
+        password prompt.
         """
         if self.is_root:
             return
@@ -45,7 +47,7 @@ class PrivilegeManager:
         if not sys.stdin.isatty():
             raise PrivilegeError(
                 "sudo credentials are required but stdin is not a TTY; "
-                "run kitup from a terminal"
+                f"run {PACKAGE_NAME} from a terminal"
             )
 
         password = self._prompt_password(reason)

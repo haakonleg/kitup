@@ -12,6 +12,7 @@ from collections import deque
 from functools import lru_cache
 from typing import IO, TYPE_CHECKING, Any
 
+from .. import PACKAGE_NAME
 from ..errors import TaskFailed
 from .protocol import MAX_MESSAGE_BYTES, READY, Request, Response
 
@@ -256,7 +257,7 @@ class PrivilegedWorker:
 @lru_cache(maxsize=1)
 def _embedded_script() -> str:
     protocol = _read_source(__package__, "protocol.py")
-    helper = _read_source("kitup._utils", "file_helper.py")
+    helper = _read_source(f"{PACKAGE_NAME}._utils", "file_helper.py")
     worker = _read_source(__package__, "worker.py")
     return f"{protocol.strip()}\n\n{helper.strip()}\n\n{worker.strip()}\n\nmain()\n"
 

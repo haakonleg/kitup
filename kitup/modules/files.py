@@ -266,6 +266,8 @@ def directory(
 
     if info is None:
         _require_parent(ctx, target, sudo=sudo)
+        if ctx.dry_run:
+            _resolve_metadata(owner, group)
         ctx.changed({"path": str(target), "action": "mkdir"}, f"mkdir {target}")
         if not ctx.dry_run:
             _mkdir(
@@ -280,6 +282,8 @@ def directory(
 
     resolved = info.mode if mode is None else mode
     if _metadata_differs(info, resolved, owner, group):
+        if ctx.dry_run:
+            _resolve_metadata(owner, group)
         ctx.changed({"path": str(target), "action": "chmod"}, f"chmod {target}")
         if not ctx.dry_run:
             _apply_metadata_ctx(ctx, target, resolved, owner, group, sudo=sudo)
@@ -350,6 +354,8 @@ def _apply_bytes(
     _require_parent(ctx, path, sudo=sudo)
     if content_differs:
         _emit_diff(ctx, path, old, content)
+    if ctx.dry_run:
+        _resolve_metadata(owner, group)
     ctx.changed(data, summary)
     if ctx.dry_run:
         return
@@ -596,6 +602,15 @@ def _validate_mode(mode: int | None) -> None:
         raise TaskFailed("mode must be an integer")
     if not 0 <= mode <= 0o7777:
         raise TaskFailed("mode must be between 0 and 0o7777")
+
+
+def _resolve_metadata(owner: str | int | None, group: str | int | None) -> None:
+    """Validate metadata identities without applying them."""
+    try:
+        resolve_owner(owner)
+        resolve_group(group)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
 
 
 def _emit_diff(ctx: TaskContext, path: Path, old: bytes | None, new: bytes) -> None:

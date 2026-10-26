@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from . import __version__
+from . import PACKAGE_NAME, __version__
 from ._utils.security import disable_same_uid_ptrace
 from .commands import CommandRunner
 from .config import load_config
@@ -25,7 +25,7 @@ from .runner import Runner
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="kitup",
+        prog=PACKAGE_NAME,
         description="The simple python-driven system configuration tool.",
     )
     parser.add_argument("-V", "--version", action="version", version=_version())
@@ -64,7 +64,7 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
 
 
 def _version() -> str:
-    return f"kitup {__version__}"
+    return f"{PACKAGE_NAME} {__version__}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 class KitupError(Exception):
-    """Base class for expected, user-facing kitup errors."""
+    """Base class for expected, user-facing application errors."""
 
 
 class UsageError(KitupError):

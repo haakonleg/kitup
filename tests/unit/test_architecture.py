@@ -6,7 +6,9 @@ import ast
 import sys
 from pathlib import Path
 
-PACKAGE_DIR = Path(__file__).parents[2] / "kitup"
+from kitup import PACKAGE_NAME
+
+PACKAGE_DIR = Path(__file__).parents[2] / PACKAGE_NAME
 MODULES_DIR = PACKAGE_DIR / "modules"
 FILE_HELPER = PACKAGE_DIR / "_utils" / "file_helper.py"
 PROTOCOL = PACKAGE_DIR / "_privileged" / "protocol.py"
@@ -23,8 +25,8 @@ def _sibling_imports(path: Path) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.startswith("kitup.modules."):
-                    imported.add(alias.name.removeprefix("kitup.modules."))
+                if alias.name.startswith(f"{PACKAGE_NAME}.modules."):
+                    imported.add(alias.name.removeprefix(f"{PACKAGE_NAME}.modules."))
         elif isinstance(node, ast.ImportFrom):
             if node.level == 1:
                 if node.module:
@@ -35,10 +37,14 @@ def _sibling_imports(path: Path) -> set[str]:
                 imported.update(alias.name for alias in node.names)
             elif node.level == 2 and node.module and node.module.startswith("modules."):
                 imported.add(node.module.removeprefix("modules."))
-            elif node.level == 0 and node.module == "kitup.modules":
+            elif node.level == 0 and node.module == f"{PACKAGE_NAME}.modules":
                 imported.update(alias.name for alias in node.names)
-            elif node.level == 0 and node.module and node.module.startswith("kitup.modules."):
-                imported.add(node.module.removeprefix("kitup.modules."))
+            elif (
+                node.level == 0
+                and node.module
+                and node.module.startswith(f"{PACKAGE_NAME}.modules.")
+            ):
+                imported.add(node.module.removeprefix(f"{PACKAGE_NAME}.modules."))
 
     return imported
 
@@ -82,14 +88,14 @@ class _EmbeddedVisitor(ast.NodeVisitor):
 
     def _check(self, name: str) -> None:
         top = name.split(".")[0]
-        if name == "kitup" or name.startswith("kitup."):
+        if name == PACKAGE_NAME or name.startswith(f"{PACKAGE_NAME}."):
             self.violations.append(f"{self.path.name}: imports {name}")
         elif top not in sys.stdlib_module_names:
             self.violations.append(f"{self.path.name}: non-stdlib import {name}")
 
 
 def test_embedded_sources_are_standalone():
-    """Embedded sources run via ``python -c`` and cannot import kitup."""
+    """Embedded sources run via ``python -c`` and cannot import the package."""
     violations: list[str] = []
     for path in EMBEDDED_SOURCES:
         visitor = _EmbeddedVisitor(path)

@@ -1,8 +1,8 @@
 """Privileged worker server.
 
-This module is embedded with ``protocol.py`` and ``_utils/file_helper.py`` into
-a single ``python -c`` script. Keep it standard-library-only, free of runtime
-``kitup`` imports, and without a ``__main__`` guard.
+This module is embedded with ``protocol.py`` and ``_utils/file_helper.py`` into a
+single ``python -c`` script. Keep it standard-library-only, free of runtime
+package imports, and without a ``__main__`` guard.
 """
 
 # ruff: noqa: TC004 - these names come from the concatenated embedded sources

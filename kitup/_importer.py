@@ -1,4 +1,4 @@
-"""Shared helper for importing kitup configuration and bundle modules."""
+"""Shared helper for importing configuration and bundle modules."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ import itertools
 import sys
 from pathlib import Path
 from types import ModuleType
+
+from . import PACKAGE_NAME
 
 _counter = itertools.count()
 
@@ -24,7 +26,7 @@ def load_module(
     imports work. ``keep`` retains the module in ``sys.modules`` after a
     successful import; failed imports are always cleaned up.
     """
-    module_name = f"_kitup_{prefix}_{next(_counter)}"
+    module_name = f"_{PACKAGE_NAME}_{prefix}_{next(_counter)}"
     if package_dir is None:
         spec = importlib.util.spec_from_file_location(module_name, path)
     else:

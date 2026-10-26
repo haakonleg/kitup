@@ -1,7 +1,7 @@
 """Low-level filesystem operations shared by the files module and worker.
 
 The privileged worker embeds this module's source, so keep the imports
-standard-library-only and avoid ``kitup`` imports.
+standard-library-only and avoid package imports.
 """
 
 import grp

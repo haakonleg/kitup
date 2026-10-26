@@ -87,6 +87,60 @@ def test_file_dry_run_reports_without_writing(tmp_path):
     assert len(ctx.changes) == 1
 
 
+@pytest.mark.parametrize(
+    ("owner", "group", "message"),
+    [
+        ("kitup-missing-user", None, "unknown user"),
+        (None, "kitup-missing-group", "unknown group"),
+    ],
+)
+def test_dry_run_validates_metadata_identities(tmp_path, owner, group, message):
+    ctx = context(tmp_path, dry_run=True)
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    existing_file = tmp_path / "existing"
+    existing_file.write_text("data\n")
+    existing_file.chmod(0o644)
+    existing_dir = tmp_path / "existing-dir"
+    existing_dir.mkdir()
+
+    calls = [
+        lambda: files.file(
+            ctx,
+            tmp_path / "new-file",
+            content="data\n",
+            owner=owner,
+            group=group,
+        ),
+        lambda: files.file(
+            ctx,
+            existing_file,
+            content="data\n",
+            mode=0o600,
+            owner=owner,
+            group=group,
+        ),
+        lambda: files.copy(ctx, source, tmp_path / "new-copy", owner=owner, group=group),
+        lambda: files.directory(ctx, tmp_path / "new-dir", owner=owner, group=group),
+        lambda: files.directory(
+            ctx,
+            existing_dir,
+            mode=0o700,
+            owner=owner,
+            group=group,
+        ),
+    ]
+
+    for call in calls:
+        with pytest.raises(TaskFailed, match=message):
+            call()
+
+    assert ctx.changes == []
+    assert not (tmp_path / "new-file").exists()
+    assert not (tmp_path / "new-copy").exists()
+    assert not (tmp_path / "new-dir").exists()
+
+
 def test_file_replaces_symlink_without_following_it(tmp_path):
     target = tmp_path / "target"
     target.write_text("target content\n")

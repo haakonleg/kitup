@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from typing import TextIO
 
+from .. import PACKAGE_NAME
 from .animation import Animation
 from .timer import Stopwatch
 
@@ -94,7 +95,7 @@ class LiveLine:
         if self._thread is not None and self._thread.is_alive():
             return
         self._thread = threading.Thread(
-            target=self._run, daemon=True, name="kitup-animation"
+            target=self._run, daemon=True, name=f"{PACKAGE_NAME}-animation"
         )
         self._thread.start()
 

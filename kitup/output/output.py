@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any, TextIO
 
-from .. import __version__
+from .. import PACKAGE_NAME, __version__
 from ..results import Status, TaskResult
 from .animation import Animation
 from .live_line import LiveLine
@@ -66,7 +66,7 @@ class Output:
         self._live.write(text)
 
     def banner(self, facts: Mapping[str, Any]) -> None:
-        parts = [f"kitup {__version__}", _platform_label(facts)]
+        parts = [f"{PACKAGE_NAME} {__version__}", _platform_label(facts)]
         if desktop := _desktop_label():
             parts.append(desktop)
         self.write("  ·  ".join(part for part in parts if part))

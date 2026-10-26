@@ -1,4 +1,4 @@
-"""Allow running the CLI with ``python -m kitup``."""
+"""Allow running the CLI as a module."""
 
 from .cli import main
 
