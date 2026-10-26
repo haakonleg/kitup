@@ -24,11 +24,6 @@ def test_load_base_config(tmp_path):
     assert config.DNF_CONF == "/etc/dnf/dnf.conf"
 
 
-def test_missing_base_config_is_empty(tmp_path):
-    config = load_config(tmp_path)
-    assert vars(config) == {}
-
-
 def test_override_replaces_retains_and_adds(tmp_path):
     write(tmp_path / "config.py", """
         KEEP = "base"

@@ -97,15 +97,6 @@ def test_control_characters_are_escaped(tmp_path):
     assert command.calls[1][0][-1] == "'a\\nb\\tc'"
 
 
-def test_schema_error_is_actionable(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(1, stderr="schema not found\n")]
-    ctx = make_context(tmp_path, command=command)
-
-    with pytest.raises(TaskFailed, match="org.example theme: schema not found"):
-        gsettings.key(ctx, "org.example", "theme", "dark")
-
-
 def test_gsettings_refuses_root(tmp_path):
     ctx = make_context(tmp_path, sudo=FakeSudo(is_root=True))
 

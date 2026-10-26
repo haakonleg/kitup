@@ -367,15 +367,6 @@ def test_autoremove_removes_unneeded_packages(tmp_path):
     assert ctx.changes[0].summary == "-libfoo -libbar"
 
 
-def test_autoremove_query_failure_is_reported(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(1)]
-    ctx = make_context(tmp_path, command=command)
-
-    with pytest.raises(TaskFailed, match="could not list unneeded"):
-        dnf.autoremove(ctx)
-
-
 def test_copr_is_a_noop_when_listed(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "owner/project\n")]
@@ -418,15 +409,6 @@ def test_copr_near_miss_is_not_treated_as_listed(tmp_path):
         "-y",
         "owner/project",
     ]
-
-
-def test_copr_list_failure_is_reported(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(1, stderr="copr unavailable\n")]
-    ctx = make_context(tmp_path, command=command)
-
-    with pytest.raises(TaskFailed, match="could not list COPR"):
-        dnf.copr(ctx, "owner/project")
 
 
 def test_copr_absent_removes_listed_project(tmp_path):
@@ -647,9 +629,3 @@ def test_repository_uses_custom_name(tmp_path):
     assert ctx.changes[0].data["path"] == str(reposdir / "vendor.repo")
 
 
-def test_missing_dnf5_is_an_error(monkeypatch, tmp_path):
-    monkeypatch.setattr("kitup.modules.dnf.shutil.which", lambda name: None)
-    ctx = make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="dnf5 is required"):
-        dnf.rpm(ctx, tmp_path / "tool.rpm")

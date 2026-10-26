@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import builtins
 import subprocess
+import traceback
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NoReturn, TypeVar, overload
 
+from ._privileged.client import PrivilegedWorker
 from .commands import CommandRunner
 from .errors import SkipTask, TaskFailed
 from .output import Output
@@ -58,6 +60,7 @@ class TaskContext:
         self._task_name = ""
         self._bundle_path: Path | None = None
         self._sudo_ready = False
+        self.privileged_worker: PrivilegedWorker = PrivilegedWorker(self)
 
     @property
     def changes(self) -> list[Change]:
@@ -97,6 +100,8 @@ class TaskContext:
 
     def ensure_sudo(self, reason: str | None = None) -> None:
         """Revalidate sudo, prompting only when cached credentials expired."""
+        if reason is None:
+            reason = self._sudo_reason()
         if self._sudo_ready and self.sudo.credentials_valid():
             return
         if self.output is not None:
@@ -141,7 +146,7 @@ class TaskContext:
                 return _skipped(command)
 
         if sudo:
-            self.ensure_sudo(self._sudo_reason())
+            self.ensure_sudo()
 
         run_options: dict[str, Any] = {
             "cwd": cwd,
@@ -206,6 +211,14 @@ class TaskContext:
         if key not in self._memo:
             self._memo[key] = loader()
         return self._memo[key]
+
+    def close(self) -> None:
+        """Close the privileged worker, if it was started."""
+        try:
+            self.privileged_worker.close()
+        except Exception:  # noqa: BLE001 - cleanup must not mask the run
+            if self.verbose:
+                traceback.print_exc()
 
     def input(self, key: str | None = None, prompt: str = "") -> str:
         """Prompt for a line of input and return it.

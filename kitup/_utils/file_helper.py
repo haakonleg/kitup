@@ -1,20 +1,14 @@
-"""Low-level filesystem operations shared by the files module and its helper.
+"""Low-level filesystem operations shared by the files module and worker.
 
-This module must stay importable as a standalone script: ``files`` embeds its
-source and runs it with ``python -c`` when privileged access is required. Keep
-the imports standard-library-only and avoid ``kitup`` imports.
+The privileged worker embeds this module's source, so keep the imports
+standard-library-only and avoid ``kitup`` imports.
 """
 
-from __future__ import annotations
-
-import base64
 import grp
-import json
 import os
 import pwd
 import shutil
 import stat
-import sys
 import tempfile
 from typing import Any
 
@@ -185,61 +179,3 @@ def remove_path(path: str | os.PathLike[str], *, force: bool = False) -> None:
             os.rmdir(path)
     else:
         os.unlink(path)
-
-
-def main() -> None:
-    with open(sys.argv[1], encoding="utf-8") as stream:
-        request = json.load(stream)
-
-    action = request["action"]
-    if action == "stat":
-        result = stat_path(request["path"], follow=request.get("follow", False))
-        result = result if result is not None else {"exists": False}
-    elif action == "read":
-        result = stat_path(request["path"])
-        result = result if result is not None else {"exists": False}
-        if result["exists"] and result["is_file"]:
-            result["content"] = base64.b64encode(read_path(request["path"])).decode()
-    elif action == "write":
-        write_path(
-            request["path"],
-            base64.b64decode(request["content"]),
-            mode=request.get("mode"),
-            owner=request.get("owner"),
-            group=request.get("group"),
-        )
-        result = {}
-    elif action == "mkdir":
-        mkdir_path(
-            request["path"],
-            mode=request.get("mode"),
-            owner=request.get("owner"),
-            group=request.get("group"),
-        )
-        result = {}
-    elif action == "metadata":
-        apply_metadata(
-            request["path"],
-            request.get("mode"),
-            request.get("owner"),
-            request.get("group"),
-        )
-        result = {}
-    elif action == "symlink":
-        symlink_path(request["target"], request["path"])
-        result = {}
-    elif action == "remove":
-        remove_path(request["path"], force=bool(request.get("force")))
-        result = {}
-    else:
-        raise ValueError(f"unknown file helper action: {action}")
-
-    print(json.dumps(result))
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as exc:  # noqa: BLE001 - report any helper failure
-        print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
-        sys.exit(1)

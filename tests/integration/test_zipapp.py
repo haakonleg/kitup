@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,14 @@ from .helpers import run, write_bundle
 pytestmark = pytest.mark.integration
 
 ZIPAPP = Path("/kitup-integration-test/dist/kitup")
+WORKER_PATH = "/etc/kitup-zipapp-worker-test.conf"
+
+
+@pytest.fixture(autouse=True)
+def worker_file_absent() -> Iterator[None]:
+    run(["sudo", "-n", "rm", "-f", WORKER_PATH], check=False)
+    yield
+    run(["sudo", "-n", "rm", "-f", WORKER_PATH], check=False)
 
 
 def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> None:
@@ -24,6 +33,14 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
         f"""
         from . import bundle
         from kitup.modules import files
+
+        @bundle.task("write privileged marker")
+        def write_privileged(ctx):
+            path = {WORKER_PATH!r}
+            files.file(ctx, path, content="applied\\n", mode=0o600, sudo=True)
+            if not ctx.dry_run:
+                assert ctx.probe(["cat", path], sudo=True).stdout == "applied\\n"
+                files.file(ctx, path, state="absent", sudo=True)
 
         @bundle.task("write marker")
         def write_marker(ctx):
@@ -51,3 +68,4 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
     )
     assert applied.returncode == 0
     assert (tmp_path / "marker.txt").read_text(encoding="utf-8") == "applied\n"
+    assert not Path(WORKER_PATH).exists()

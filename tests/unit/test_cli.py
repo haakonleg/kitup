@@ -5,7 +5,7 @@ import textwrap
 import pytest
 
 from kitup import cli
-from kitup.errors import PrivilegeError
+from kitup.errors import PrivilegeError, TaskFailed
 
 
 def write(path, text: str) -> None:
@@ -111,6 +111,63 @@ def test_apply_uses_override_config(tmp_path, capsys):
 
     assert code == 0
     assert "value=work" in capsys.readouterr().out
+
+
+def test_apply_closes_context_on_success(tmp_path, monkeypatch):
+    contexts = []
+
+    class Context:
+        def __init__(self, **kwargs):
+            self.closed = False
+            contexts.append(self)
+
+        def close(self):
+            self.closed = True
+
+    class Runner:
+        def __init__(self, plan, context, output, **kwargs):
+            pass
+
+        def run(self):
+            return 0
+
+    monkeypatch.setattr(cli, "TaskContext", Context)
+    monkeypatch.setattr(cli, "Runner", Runner)
+    make_bundle(tmp_path, "base")
+
+    code = cli.main(["apply", "-D", str(tmp_path)])
+
+    assert code == 0
+    assert contexts and contexts[0].closed
+
+
+def test_apply_closes_context_on_failure(tmp_path, capsys, monkeypatch):
+    contexts = []
+
+    class Context:
+        def __init__(self, **kwargs):
+            self.closed = False
+            contexts.append(self)
+
+        def close(self):
+            self.closed = True
+
+    class Runner:
+        def __init__(self, plan, context, output, **kwargs):
+            pass
+
+        def run(self):
+            raise TaskFailed("boom")
+
+    monkeypatch.setattr(cli, "TaskContext", Context)
+    monkeypatch.setattr(cli, "Runner", Runner)
+    make_bundle(tmp_path, "base")
+
+    code = cli.main(["apply", "-D", str(tmp_path)])
+
+    assert code == 1
+    assert contexts and contexts[0].closed
+    assert "error: boom" in capsys.readouterr().err
 
 
 def test_unknown_bundle_is_exit_2(tmp_path, capsys):

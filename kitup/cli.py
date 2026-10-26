@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from . import __version__
+from ._utils.security import disable_same_uid_ptrace
 from .commands import CommandRunner
 from .config import load_config
 from .context import TaskContext
@@ -67,6 +68,7 @@ def _version() -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    disable_same_uid_ptrace()
     args = build_parser().parse_args(argv)
     output = Output(no_color=args.no_color, verbose=args.verbose)
 
@@ -122,14 +124,17 @@ def _apply(
         command=command,
         output=output,
     )
-    runner = Runner(
-        plan,
-        context,
-        output,
-        tags=tags,
-        skip_tags=skip_tags,
-    )
-    return runner.run()
+    try:
+        runner = Runner(
+            plan,
+            context,
+            output,
+            tags=tags,
+            skip_tags=skip_tags,
+        )
+        return runner.run()
+    finally:
+        context.close()
 
 
 def _print_environment(config_dir: Path, override: Path | None, output: Output) -> None:

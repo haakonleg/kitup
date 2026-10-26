@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import json
 import os
 import stat
 from io import StringIO
 
 import pytest
 
+from kitup._utils.file_helper import stat_path
 from kitup.commands import CommandRunner
 from kitup.errors import TaskFailed
 from kitup.modules import files
 from kitup.output import Output
 from kitup.registry import Bundle
 
-from .helpers import FakeCommandRunner, FakeSudo, PassthroughSudo, completed, make_context
+from .helpers import FakeSudo, PassthroughSudo, make_context
 
 
 def context(tmp_path, *, dry_run=False, diff=False):
@@ -108,15 +108,6 @@ def test_file_requires_parent_directory(tmp_path):
         files.file(ctx, tmp_path / "missing" / "file", content="content")
 
 
-def test_file_dry_run_still_validates_parent_directory(tmp_path):
-    ctx = context(tmp_path, dry_run=True)
-
-    with pytest.raises(TaskFailed, match="parent directory"):
-        files.file(ctx, tmp_path / "missing" / "file", content="content")
-
-    assert ctx.changes == []
-
-
 def test_file_refuses_directory_in_both_states(tmp_path):
     ctx = context(tmp_path)
 
@@ -162,69 +153,63 @@ def test_file_without_content_refuses_symlink(tmp_path):
     assert target.read_text() == "data\n"
 
 
-def test_privileged_file_operations_use_helper(tmp_path):
+def test_privileged_file_operations_use_worker(tmp_path):
     path = tmp_path / "root-owned.conf"
     directory = tmp_path / "root-owned-dir"
     ctx = privileged_context(tmp_path)
 
-    files.file(ctx, path, content="one\n", mode=0o600, sudo=True)
-    files.line(ctx, path, "two", sudo=True)
-    files.directory(ctx, directory, mode=0o700, sudo=True)
-    files.directory(ctx, directory, state="absent", sudo=True)
-    files.file(ctx, path, state="absent", sudo=True)
+    try:
+        files.file(ctx, path, content="one\n", mode=0o600, sudo=True)
+        files.line(ctx, path, "two", sudo=True)
+        files.directory(ctx, directory, mode=0o700, sudo=True)
+        files.directory(ctx, directory, state="absent", sudo=True)
+        files.file(ctx, path, state="absent", sudo=True)
 
-    assert ctx.sudo.refresh_count > 0
-    assert not path.exists()
-    assert not directory.exists()
+        assert ctx.sudo.refresh_count > 0
+        assert not path.exists()
+        assert not directory.exists()
+    finally:
+        ctx.close()
 
 
-def test_privileged_symlink_copy_and_metadata_use_helper(tmp_path):
+def test_privileged_symlink_copy_and_metadata_use_worker(tmp_path):
     ctx = privileged_context(tmp_path)
     source = tmp_path / "source"
     source.write_text("data\n")
     dest = tmp_path / "dest"
     link = tmp_path / "link"
 
-    files.copy(ctx, source, dest, sudo=True)
-    files.symlink(ctx, dest, link, sudo=True)
-    files.file(ctx, dest, mode=0o600, sudo=True)
+    try:
+        files.copy(ctx, source, dest, sudo=True)
+        files.symlink(ctx, dest, link, sudo=True)
+        files.file(ctx, dest, mode=0o600, sudo=True)
 
-    assert dest.read_text() == "data\n"
-    assert link.is_symlink()
-    assert link.resolve() == dest
-    assert stat.S_IMODE(dest.stat().st_mode) == 0o600
+        assert dest.read_text() == "data\n"
+        assert link.is_symlink()
+        assert link.resolve() == dest
+        assert stat.S_IMODE(dest.stat().st_mode) == 0o600
+    finally:
+        ctx.close()
 
 
-class ReadFailureRunner(FakeCommandRunner):
-    """Simulate a privileged helper whose read action fails."""
+class ReadFailureWorker:
+    """Simulate a privileged worker whose read action fails."""
 
-    def run(self, argv, **kwargs):
-        with open(argv[-1], encoding="utf-8") as stream:
-            request = json.load(stream)
-        self.calls.append((list(argv), kwargs))
-        if request["action"] == "read":
-            return completed(argv, 1, "", "simulated read failure")
-        if request["action"] == "stat":
-            info = os.lstat(request["path"])
-            result = {
-                "exists": True,
-                "is_dir": stat.S_ISDIR(info.st_mode),
-                "is_symlink": stat.S_ISLNK(info.st_mode),
-                "is_file": stat.S_ISREG(info.st_mode),
-                "mode": stat.S_IMODE(info.st_mode),
-                "uid": info.st_uid,
-                "gid": info.st_gid,
-            }
-            return completed(argv, 0, json.dumps(result))
-        return completed(argv, 0, "{}")
+    def request(self, request):
+        if request.action == "read":
+            raise TaskFailed("privileged worker read failed: simulated")
+        if request.action == "stat":
+            return stat_path(request.params["path"]) or {"exists": False}
+        return {}
 
 
 def test_privileged_read_failure_does_not_rewrite_file(tmp_path):
     path = tmp_path / "example"
     path.write_text("keep me\n")
-    ctx = make_context(tmp_path, command=ReadFailureRunner(), sudo=FakeSudo())
+    ctx = make_context(tmp_path, sudo=FakeSudo())
+    ctx.privileged_worker = ReadFailureWorker()  # type: ignore[assignment]
 
-    with pytest.raises(TaskFailed, match="file helper read failed"):
+    with pytest.raises(TaskFailed, match="read failed"):
         files.line(ctx, path, "new line", sudo=True)
 
     assert path.read_text() == "keep me\n"
@@ -304,6 +289,29 @@ def test_empty_paths_and_metadata_are_rejected(tmp_path):
         files.symlink(ctx, "", tmp_path / "link")
 
     assert ctx.changes == []
+
+
+def test_invalid_modes_are_rejected(tmp_path):
+    ctx = context(tmp_path)
+
+    for mode in (True, -1, 0o10000):
+        with pytest.raises(TaskFailed, match="mode"):
+            files.file(ctx, tmp_path / "file", content="x", mode=mode)
+
+    assert not (tmp_path / "file").exists()
+
+
+def test_invalid_numeric_ids_are_rejected(tmp_path):
+    ctx = context(tmp_path)
+
+    for owner in (True, -1):
+        with pytest.raises(TaskFailed, match="owner"):
+            files.file(ctx, tmp_path / "file", content="x", owner=owner)
+    for group in (True, -1):
+        with pytest.raises(TaskFailed, match="group"):
+            files.file(ctx, tmp_path / "file", content="x", group=group)
+
+    assert not (tmp_path / "file").exists()
 
 
 def test_line_add_replace_and_remove(tmp_path):

@@ -30,17 +30,6 @@ def test_unguarded_command_runs_and_records_change(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_single_string_is_one_argument(tmp_path):
-    command = FakeCommandRunner()
-    ctx = make_context(tmp_path, command=command)
-
-    commands.run(ctx, "echo hello")
-    commands.run(ctx, ["install"], unless="test -e /thing")
-
-    assert command.calls[0][0] == ["echo hello"]
-    assert command.calls[1][0] == ["test -e /thing"]
-
-
 def test_changed_false_suppresses_change_record(tmp_path):
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)

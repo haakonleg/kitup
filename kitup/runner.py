@@ -34,7 +34,9 @@ class Runner:
 
     def run(self) -> int:
         start = time.monotonic()
-        selected = [(bundle, self._select(bundle.tasks)) for bundle in self.plan.bundles]
+        selected = [
+            (bundle, self._select(bundle.tasks)) for bundle in self.plan.bundles
+        ]
         self.output.fit_task_names(
             task.name for _, tasks in selected for task in tasks
         )

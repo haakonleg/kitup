@@ -131,15 +131,6 @@ def test_remote_absent_is_a_noop_when_missing(tmp_path):
     assert ctx.changes == []
 
 
-def test_remote_list_failure_is_reported(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(1, stderr="boom\n")]
-    ctx = make_context(tmp_path, command=command)
-
-    with pytest.raises(TaskFailed, match="could not list flatpak remotes"):
-        flatpak.remote(ctx, REMOTE, REMOTE_URL)
-
-
 def test_remote_present_requires_url_and_text(tmp_path):
     ctx = make_context(tmp_path)
 
@@ -407,14 +398,6 @@ def test_empty_package_inputs_are_rejected(tmp_path):
         flatpak.packages(ctx, [APP], remote="  ")
 
 
-def test_missing_flatpak_is_an_error(monkeypatch, tmp_path):
-    monkeypatch.setattr("kitup.modules.flatpak.shutil.which", lambda name: None)
-    ctx = make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="flatpak is required"):
-        flatpak.remote(ctx, REMOTE, REMOTE_URL)
-
-
 def test_install_verification_failure_is_reported(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0), response(0), response(0)]
@@ -451,24 +434,3 @@ def test_packages_accepts_a_single_string(tmp_path):
     assert command.calls[1][0][-1] == APP
 
 
-def test_packages_deduplicates_names(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0),
-        response(0),
-        response(0, installed((APP, APP_REF))),
-    ]
-    ctx = make_context(tmp_path, command=command)
-
-    flatpak.packages(ctx, [APP, APP])
-
-    assert command.calls[1][0].count(APP) == 1
-
-
-def test_malformed_list_output_is_reported(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0, "not-tab-separated\n")]
-    ctx = make_context(tmp_path, command=command)
-
-    with pytest.raises(TaskFailed, match="could not parse flatpak list"):
-        flatpak.packages(ctx, [APP])

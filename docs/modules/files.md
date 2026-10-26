@@ -20,7 +20,7 @@ Ensure a text file exists with optional content, or is absent.
 - `state="absent"` removes the file or symlink, but not a directory.
 - `mode=None` preserves an existing mode; new files default to `0o644`.
 - `owner` and `group` accept a name or numeric ID.
-- `sudo=True` performs the operation through a privileged helper.
+- `sudo=True` performs the operation through a privileged worker.
 
 ```python
 files.file(ctx, "/etc/example.conf", content="enabled=true\n", mode=0o644, sudo=True)
@@ -88,5 +88,11 @@ are never replaced.
 - Only regular files are read or written. Non-UTF-8 files are rejected when
   editing lines or blocks.
 - `sudo=True` routes every read, write, and metadata operation in that call
-  through the privileged helper. Without it, operations run as the current
+  through the privileged worker. Without it, operations run as the current
   user.
+- Privileged worker messages are limited to 64 MiB. Because content is
+  base64-encoded, privileged writes are practically limited to about 48 MiB,
+  and privileged reads are limited to 32 MiB. Larger files must be handled by
+  task code using commands or split operations.
+- `mode` values must be between `0` and `0o7777`. Numeric `owner` and `group`
+  IDs must be non-negative; names may also be used.

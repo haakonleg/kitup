@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import base64
 import difflib
-import json
 import os
-import pkgutil
 import re
-import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .._file_helper import (
+from .._privileged.protocol import Request
+from .._utils.file_helper import (
     apply_metadata,
     mkdir_path,
     read_path,
@@ -27,7 +24,7 @@ from .._file_helper import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_path, require_regex, require_state, require_success, require_text
+from ..validation import require_path, require_regex, require_state, require_text
 
 
 @dataclass(frozen=True)
@@ -54,11 +51,12 @@ def file(
 ) -> None:
     """Ensure a text file exists with optional content, or is absent.
 
-    ``sudo=True`` performs the operation through the privileged helper.
+    ``sudo=True`` performs the operation through the privileged worker.
     """
     require_state(state, "file")
     require_path(path, "file path")
     _validate_metadata(owner, group)
+    _validate_mode(mode)
 
     target = Path(path)
     if state == "absent":
@@ -117,6 +115,7 @@ def copy(
     require_path(src, "copy source")
     require_path(dest, "copy destination")
     _validate_metadata(owner, group)
+    _validate_mode(mode)
     source = ctx.resolve_source(src)
     target = Path(dest)
     if str(dest).endswith("/"):
@@ -247,6 +246,7 @@ def directory(
     require_state(state, "directory")
     require_path(path, "directory path")
     _validate_metadata(owner, group)
+    _validate_mode(mode)
 
     target = Path(path)
     if state == "absent":
@@ -311,12 +311,7 @@ def symlink(
     if ctx.dry_run:
         return
     if _privileged(ctx, sudo):
-        _helper(
-            ctx,
-            {"action": "symlink", "path": str(link), "target": desired},
-            mutates=True,
-            sudo=sudo,
-        )
+        _helper(ctx, {"action": "symlink", "path": str(link), "target": desired})
         return
     try:
         symlink_path(desired, link)
@@ -407,12 +402,7 @@ def _read_text(ctx: TaskContext, path: Path, *, sudo: bool) -> str:
 def _lstat(ctx: TaskContext, path: Path, *, sudo: bool) -> _FileInfo | None:
     result: dict[str, Any] | None
     if _privileged(ctx, sudo):
-        result = _helper(
-            ctx,
-            {"action": "stat", "path": str(path)},
-            mutates=False,
-            sudo=sudo,
-        )
+        result = _helper(ctx, {"action": "stat", "path": str(path)})
     else:
         try:
             result = stat_path(path)
@@ -436,12 +426,7 @@ def _read_bytes(ctx: TaskContext, path: Path, info: _FileInfo | None, *, sudo: b
     if info is None:
         return b""
     if _privileged(ctx, sudo):
-        result = _helper(
-            ctx,
-            {"action": "read", "path": str(path)},
-            mutates=False,
-            sudo=sudo,
-        )
+        result = _helper(ctx, {"action": "read", "path": str(path)})
         if not result.get("exists"):
             return b""
         return base64.b64decode(result.get("content", ""))
@@ -472,8 +457,6 @@ def _write_bytes(
                 "owner": owner,
                 "group": group,
             },
-            mutates=True,
-            sudo=sudo,
         )
         return
 
@@ -505,8 +488,6 @@ def _mkdir(
                 "owner": owner,
                 "group": group,
             },
-            mutates=True,
-            sudo=sudo,
         )
         return
     try:
@@ -532,8 +513,6 @@ def _remove_path(ctx: TaskContext, path: Path, *, force: bool, sudo: bool) -> No
         _helper(
             ctx,
             {"action": "remove", "path": str(path), "force": force},
-            mutates=True,
-            sudo=sudo,
         )
         return
     try:
@@ -563,8 +542,6 @@ def _apply_metadata_ctx(
                 "owner": owner,
                 "group": group,
             },
-            mutates=True,
-            sudo=sudo,
         )
         return
     try:
@@ -594,10 +571,31 @@ def _metadata_differs(
 
 
 def _validate_metadata(owner: str | int | None, group: str | int | None) -> None:
-    if owner is not None and not isinstance(owner, int):
-        require_text(owner, "owner")
-    if group is not None and not isinstance(group, int):
-        require_text(group, "group")
+    _validate_identity(owner, "owner")
+    _validate_identity(group, "group")
+
+
+def _validate_identity(value: str | int | None, label: str) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool):
+        raise TaskFailed(f"{label} must be a name or numeric ID")
+    if isinstance(value, int):
+        if value < 0:
+            raise TaskFailed(f"{label} must be non-negative")
+        return
+    if not isinstance(value, str):
+        raise TaskFailed(f"{label} must be a name or numeric ID")
+    require_text(value, label)
+
+
+def _validate_mode(mode: int | None) -> None:
+    if mode is None:
+        return
+    if isinstance(mode, bool) or not isinstance(mode, int):
+        raise TaskFailed("mode must be an integer")
+    if not 0 <= mode <= 0o7777:
+        raise TaskFailed("mode must be between 0 and 0o7777")
 
 
 def _emit_diff(ctx: TaskContext, path: Path, old: bytes | None, new: bytes) -> None:
@@ -657,8 +655,6 @@ def _require_parent(ctx: TaskContext, path: Path, *, sudo: bool) -> None:
         result = _helper(
             ctx,
             {"action": "stat", "path": str(path.parent), "follow": True},
-            mutates=False,
-            sudo=sudo,
         )
         if not result.get("exists") or not result.get("is_dir"):
             raise TaskFailed(f"parent directory does not exist: {path.parent}")
@@ -671,41 +667,12 @@ def _privileged(ctx: TaskContext, sudo: bool) -> bool:
     return sudo and not ctx.sudo.is_root
 
 
-def _helper(
-    ctx: TaskContext,
-    request: dict[str, object],
-    *,
-    mutates: bool,
-    sudo: bool,
-) -> dict[str, Any]:
-    handle, request_name = tempfile.mkstemp(prefix="kitup-file-", suffix=".json")
-    request_path = Path(request_name)
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump(request, stream)
-        command = [sys.executable, "-c", _helper_source(), str(request_path)]
-        if mutates:
-            result = ctx.run(command, record=False, sudo=sudo)
-        else:
-            result = ctx.probe(command, sudo=sudo)
-        require_success(result, f"file helper {request['action']} failed")
-        if not result.stdout.strip():
-            return {}
-        return json.loads(result.stdout)
-    finally:
-        request_path.unlink(missing_ok=True)
-
-
-# The helper lives in the top-level package, not next to this module.
-_HELPER_PACKAGE = __name__.partition(".")[0]
-_HELPER_SOURCE: str | None = None
-
-
-def _helper_source() -> str:
-    global _HELPER_SOURCE
-    if _HELPER_SOURCE is None:
-        data = pkgutil.get_data(_HELPER_PACKAGE, "_file_helper.py")
-        if data is None:
-            raise RuntimeError("file helper source is unavailable")
-        _HELPER_SOURCE = data.decode()
-    return _HELPER_SOURCE
+def _helper(ctx: TaskContext, request: dict[str, Any]) -> dict[str, Any]:
+    params = dict(request)
+    action = params.pop("action", None)
+    if "path" in params:
+        path = str(params["path"])
+        if not os.path.isabs(path):
+            path = os.path.join(os.getcwd(), path)
+        params["path"] = path
+    return ctx.privileged_worker.request(Request(action, params))

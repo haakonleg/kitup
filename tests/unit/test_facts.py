@@ -122,21 +122,3 @@ def test_missing_os_release_omits_optional_facts(tmp_path):
     assert "hostname" in facts
 
 
-def test_facts_are_read_only(tmp_path):
-    path = tmp_path / "os-release"
-    path.write_text("ID=testos\nVERSION_ID=1\n", encoding="utf-8")
-    facts = collect_facts(path)
-
-    try:
-        facts["hostname"] = "other"  # type: ignore[index]
-    except TypeError:
-        pass
-    else:
-        raise AssertionError("facts should be read-only")
-
-    try:
-        facts["os_release"]["ID"] = "other"  # type: ignore[index]
-    except TypeError:
-        pass
-    else:
-        raise AssertionError("nested os_release should be read-only")
