@@ -1,13 +1,12 @@
 from pathlib import Path
 
 from kitup.modules import files
+from kitup.registry import task
 
-from . import bundle
 
-
-@bundle.task("Install dotfiles", tags={"dotfiles"})
+@task("Install shell and editor dotfiles", tags={"dotfiles"})
 def install_dotfiles(ctx):
-    _copy_dotfiles(ctx, bundle.resource_path("files/dotfiles"), Path.home())
+    _copy_dotfiles(ctx, ctx.bundle.resource_path("files/dotfiles"), Path.home())
 
 
 def _copy_dotfiles(ctx, source: Path, target: Path) -> None:

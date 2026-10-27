@@ -1,5 +1,5 @@
 from kitup.registry import Bundle
 
-bundle = Bundle("base", "Base system configuration")
+Bundle("Base system", "Core packages, services, and SSH hardening")
 
-from . import dnf_config, packages  # noqa: F401
+from . import packages, security, services  # noqa: E402,F401

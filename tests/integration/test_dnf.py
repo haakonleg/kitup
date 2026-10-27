@@ -44,10 +44,9 @@ def test_install_and_remove_package(tmp_path: Path) -> None:
         tmp_path / "install",
         "dnf_install",
         """
-        from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("install fixture package")
+        @task("install fixture package")
         def install_fixture(ctx):
             dnf.packages(ctx, ["kitup-test"])
         """,
@@ -59,10 +58,9 @@ def test_install_and_remove_package(tmp_path: Path) -> None:
         tmp_path / "remove",
         "dnf_remove",
         """
-        from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("remove fixture package")
+        @task("remove fixture package")
         def remove_fixture(ctx):
             dnf.packages(ctx, ["kitup-test"], state="absent")
         """,
@@ -79,10 +77,9 @@ def test_install_and_remove_group_and_package(
         tmp_path / "install",
         "dnf_group_install",
         f"""
-        from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("install fixture group and package")
+        @task("install fixture group and package")
         def install_group(ctx):
             dnf.packages(ctx, ["@{TEST_GROUP}", {TEST_PACKAGE!r}])
         """,
@@ -95,10 +92,9 @@ def test_install_and_remove_group_and_package(
         tmp_path / "remove",
         "dnf_group_remove",
         f"""
-        from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("remove fixture group and package")
+        @task("remove fixture group and package")
         def remove_group(ctx):
             dnf.packages(ctx, ["@{TEST_GROUP}", {TEST_PACKAGE!r}], state="absent")
         """,
@@ -116,10 +112,9 @@ def test_install_and_remove_explicit_group(
         tmp_path / "install",
         "dnf_group_only_install",
         f"""
-        from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("install fixture group")
+        @task("install fixture group")
         def install_group(ctx):
             dnf.packages(ctx, [{TEST_GROUP!r}], group=True)
         """,
@@ -132,10 +127,9 @@ def test_install_and_remove_explicit_group(
         tmp_path / "remove",
         "dnf_group_only_remove",
         f"""
-        from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("remove fixture group")
+        @task("remove fixture group")
         def remove_group(ctx):
             dnf.packages(ctx, [{TEST_GROUP!r}], group=True, state="absent")
         """,
@@ -150,10 +144,9 @@ def test_install_local_rpm(tmp_path: Path) -> None:
         tmp_path,
         "dnf_rpm",
         f"""
-        from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("install local RPM")
+        @task("install local RPM")
         def install_rpm(ctx):
             dnf.rpm(ctx, {str(TEST_RPM)!r})
         """,
@@ -180,10 +173,9 @@ def test_repository_add_and_remove(tmp_path: Path) -> None:
         tmp_path / "add",
         "dnf_repository_add",
         f"""
-        from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("add repository")
+        @task("add repository")
         def add_repository(ctx):
             dnf.repository(ctx, {str(repository_file)!r})
         """,
@@ -195,10 +187,9 @@ def test_repository_add_and_remove(tmp_path: Path) -> None:
         tmp_path / "remove",
         "dnf_repository_remove",
         f"""
-        from . import bundle
         from kitup.modules import dnf
 
-        @bundle.task("remove repository")
+        @task("remove repository")
         def remove_repository(ctx):
             dnf.repository(ctx, state="absent", name={repository_name!r})
         """,

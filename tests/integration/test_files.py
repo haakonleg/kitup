@@ -50,10 +50,9 @@ def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
         tmp_path / "write",
         "files_write",
         f"""
-        from . import bundle
         from kitup.modules import files
 
-        @bundle.task("write privileged file")
+        @task("write privileged file")
         def write_file(ctx):
             files.file(
                 ctx,
@@ -76,10 +75,9 @@ def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
         tmp_path / "remove",
         "files_remove",
         f"""
-        from . import bundle
         from kitup.modules import files
 
-        @bundle.task("remove privileged file")
+        @task("remove privileged file")
         def remove_file(ctx):
             files.file(ctx, {str(MANAGED_PATH)!r}, state="absent", sudo=True)
         """,
@@ -93,10 +91,9 @@ def test_privileged_worker_handles_multiple_operations(tmp_path: Path) -> None:
         tmp_path / "worker",
         "files_worker",
         f"""
-        from . import bundle
         from kitup.modules import files
 
-        @bundle.task("exercise privileged worker")
+        @task("exercise privileged worker")
         def exercise(ctx):
             path = {str(MANAGED_PATH)!r}
             files.file(ctx, path, content="one\\n", mode=0o600, sudo=True)
@@ -122,10 +119,9 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
         tmp_path / "lifecycle",
         "files_lifecycle",
         f"""
-        from . import bundle
         from kitup.modules import files
 
-        @bundle.task("exercise privileged file actions")
+        @task("exercise privileged file actions")
         def exercise(ctx):
             files.directory(
                 ctx,
@@ -205,10 +201,9 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
         tmp_path / "cleanup",
         "files_cleanup",
         f"""
-        from . import bundle
         from kitup.modules import files
 
-        @bundle.task("remove privileged file actions")
+        @task("remove privileged file actions")
         def cleanup(ctx):
             files.file(ctx, {str(WORKER_FILE)!r}, state="absent", sudo=True)
             files.file(ctx, {str(WORKER_COPY)!r}, state="absent", sudo=True)
@@ -230,10 +225,9 @@ def test_privileged_dry_run_does_not_mutate(tmp_path: Path) -> None:
         tmp_path / "dry",
         "files_dry",
         f"""
-        from . import bundle
         from kitup.modules import files
 
-        @bundle.task("dry privileged file actions")
+        @task("dry privileged file actions")
         def dry(ctx):
             files.file(
                 ctx,
@@ -265,10 +259,9 @@ def test_privileged_directory_requires_force_for_non_empty(tmp_path: Path) -> No
         tmp_path / "nonempty",
         "files_nonempty",
         f"""
-        from . import bundle
         from kitup.modules import files
 
-        @bundle.task("create non-empty directory")
+        @task("create non-empty directory")
         def create(ctx):
             files.directory(ctx, {str(WORKER_ROOT)!r}, mode=0o750, sudo=True)
             files.directory(ctx, {str(NONEMPTY_DIR)!r}, sudo=True)
@@ -279,7 +272,7 @@ def test_privileged_directory_requires_force_for_non_empty(tmp_path: Path) -> No
                 sudo=True,
             )
 
-        @bundle.task("remove non-empty directory without force")
+        @task("remove non-empty directory without force")
         def remove(ctx):
             files.directory(ctx, {str(NONEMPTY_DIR)!r}, state="absent", sudo=True)
         """,

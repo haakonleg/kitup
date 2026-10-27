@@ -106,4 +106,4 @@ def add_task(
     name: str | None = None,
     tags: Sequence[str] = (),
 ) -> Callable[[TaskContext], None]:
-    return bundle.task(name, tags=tags)(func)
+    return bundle.task(name or func.__name__, tags=tags)(func)

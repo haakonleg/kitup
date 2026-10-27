@@ -77,10 +77,9 @@ def test_system_remote_add_and_remove(tmp_path: Path) -> None:
         tmp_path / "add",
         "flatpak_remote_add",
         f"""
-        from . import bundle
         from kitup.modules import flatpak
 
-        @bundle.task("add flatpak remote")
+        @task("add flatpak remote")
         def add_remote(ctx):
             flatpak.remote(
                 ctx,
@@ -97,10 +96,9 @@ def test_system_remote_add_and_remove(tmp_path: Path) -> None:
         tmp_path / "remove",
         "flatpak_remote_remove",
         f"""
-        from . import bundle
         from kitup.modules import flatpak
 
-        @bundle.task("remove flatpak remote")
+        @task("remove flatpak remote")
         def remove_remote(ctx):
             flatpak.remote(ctx, {FLATPAK_REMOTE!r}, state="absent")
         """,
@@ -117,10 +115,9 @@ def test_system_package_install_and_remove(
         tmp_path / "install",
         "flatpak_package_install",
         f"""
-        from . import bundle
         from kitup.modules import flatpak
 
-        @bundle.task("install flatpak app")
+        @task("install flatpak app")
         def install_app(ctx):
             flatpak.packages(ctx, [{FLATPAK_APP!r}], remote={FLATPAK_REMOTE!r})
         """,
@@ -134,10 +131,9 @@ def test_system_package_install_and_remove(
         tmp_path / "remove",
         "flatpak_package_remove",
         f"""
-        from . import bundle
         from kitup.modules import flatpak
 
-        @bundle.task("remove flatpak app")
+        @task("remove flatpak app")
         def remove_app(ctx):
             flatpak.packages(ctx, [{FLATPAK_APP!r}], state="absent")
         """,
@@ -151,10 +147,9 @@ def test_user_remote_add_and_remove(tmp_path: Path) -> None:
         tmp_path / "add",
         "flatpak_user_remote_add",
         f"""
-        from . import bundle
         from kitup.modules import flatpak
 
-        @bundle.task("add user flatpak remote")
+        @task("add user flatpak remote")
         def add_remote(ctx):
             flatpak.remote(
                 ctx,
@@ -172,10 +167,9 @@ def test_user_remote_add_and_remove(tmp_path: Path) -> None:
         tmp_path / "remove",
         "flatpak_user_remote_remove",
         f"""
-        from . import bundle
         from kitup.modules import flatpak
 
-        @bundle.task("remove user flatpak remote")
+        @task("remove user flatpak remote")
         def remove_remote(ctx):
             flatpak.remote(ctx, {FLATPAK_USER_REMOTE!r}, state="absent", scope="user")
         """,

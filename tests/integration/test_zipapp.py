@@ -31,10 +31,9 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
         tmp_path / "config",
         "zipapp_bundle",
         f"""
-        from . import bundle
         from kitup.modules import files
 
-        @bundle.task("write privileged marker")
+        @task("write privileged marker")
         def write_privileged(ctx):
             path = {WORKER_PATH!r}
             files.file(ctx, path, content="applied\\n", mode=0o600, sudo=True)
@@ -42,7 +41,7 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
                 assert ctx.probe(["cat", path], sudo=True).stdout == "applied\\n"
                 files.file(ctx, path, state="absent", sudo=True)
 
-        @bundle.task("write marker")
+        @task("write marker")
         def write_marker(ctx):
             files.file(ctx, {str(tmp_path / "marker.txt")!r}, content="applied\\n")
         """,
@@ -50,11 +49,15 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
 
-    listed = run([str(ZIPAPP), "list", "-D", str(root), "--no-color"], cwd=elsewhere, check=False)
+    listed = run(
+        [str(ZIPAPP), "list", str(root / "kitup.py"), "--no-color"],
+        cwd=elsewhere,
+        check=False,
+    )
     assert listed.returncode == 0
 
     dry_run = run(
-        [str(ZIPAPP), "apply", "-D", str(root), "--no-color", "--dry-run"],
+        [str(ZIPAPP), "apply", str(root / "kitup.py"), "--no-color", "--dry-run"],
         cwd=elsewhere,
         check=False,
     )
@@ -62,7 +65,7 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
     assert not (tmp_path / "marker.txt").exists()
 
     applied = run(
-        [str(ZIPAPP), "apply", "-D", str(root), "--no-color"],
+        [str(ZIPAPP), "apply", str(root / "kitup.py"), "--no-color"],
         cwd=elsewhere,
         check=False,
     )

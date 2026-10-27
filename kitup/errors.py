@@ -12,11 +12,15 @@ class UsageError(KitupError):
 
 
 class ConfigError(UsageError):
-    """A configuration file could not be loaded."""
+    """A configuration source could not be loaded."""
 
 
-class DiscoveryError(UsageError):
-    """The bundles directory is missing or a bundle is malformed."""
+class ProfileError(UsageError):
+    """The profile is missing, malformed, or defines no run."""
+
+
+class BundleError(UsageError):
+    """A bundle module or dependency reference is malformed."""
 
 
 class ResolutionError(UsageError):

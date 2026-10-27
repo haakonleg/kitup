@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -37,14 +38,31 @@ def run(
 
 
 def write_bundle(root: Path, name: str, source: str) -> Path:
-    """Create a configuration root containing one single-purpose bundle."""
-    folder = root / "bundles" / name
+    """Create a configuration root with an imported bundle and a profile."""
+    bundles = root / "bundles"
+    folder = bundles / name
     folder.mkdir(parents=True)
+    (bundles / "__init__.py").write_text("", encoding="utf-8")
     (folder / "__init__.py").write_text(
         "from __future__ import annotations\n\n"
         "from kitup.registry import Bundle\n\n"
-        f"bundle = Bundle({name!r}, 'integration test bundle')\n\n"
-        f"{textwrap.dedent(source).strip()}\n",
+        f"Bundle({name!r}, 'integration test bundle')\n\n"
+        "from . import tasks  # noqa: E402,F401\n",
+        encoding="utf-8",
+    )
+
+    body = textwrap.dedent(source).strip()
+    (folder / "tasks.py").write_text(
+        "from __future__ import annotations\n\n"
+        "from kitup.registry import task\n\n"
+        f"{body}\n",
+        encoding="utf-8",
+    )
+
+    (root / "kitup.py").write_text(
+        "from bundles import " + name + "\n\n"
+        "from kitup import profile\n\n"
+        f"profile(bundles=[{name}])\n",
         encoding="utf-8",
     )
     return root
@@ -52,7 +70,24 @@ def write_bundle(root: Path, name: str, source: str) -> Path:
 
 def run_kitup(command: str, root: Path, *args: str) -> int:
     """Run the CLI in-process against a temporary configuration root."""
-    return main([command, "-D", str(root), "--no-color", *args])
+    _purge_profile_modules()
+    try:
+        return main(
+            [command, str(root / "kitup.py"), "--no-color", *args]
+        )
+    finally:
+        _purge_profile_modules()
+
+
+def _purge_profile_modules() -> None:
+    """Keep separate configuration roots isolated inside one pytest process."""
+    for name in tuple(sys.modules):
+        if (
+            name == "bundles"
+            or name.startswith("bundles.")
+            or name in {"base_profile", "middle_profile", "child_profile"}
+        ):
+            sys.modules.pop(name, None)
 
 
 def rpm_installed(name: str = TEST_PACKAGE) -> bool:

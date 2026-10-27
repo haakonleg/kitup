@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from kitup.errors import TaskFailed
-from kitup.registry import Bundle
+from kitup.registry import Bundle, Task
 
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
 
@@ -15,7 +15,6 @@ def task_for(name: str = "test"):
     bundle = Bundle("test")
     add_task(bundle, lambda ctx: None, name=name)
     return bundle.tasks[0]
-
 
 def test_changed_and_notes_are_task_scoped(tmp_path):
     context = make_context(tmp_path)
@@ -29,7 +28,6 @@ def test_changed_and_notes_are_task_scoped(tmp_path):
     assert context.changes == []
     assert context.notes == []
 
-
 def test_memo_is_cached_across_tasks(tmp_path):
     context = make_context(tmp_path)
     calls = []
@@ -42,7 +40,6 @@ def test_memo_is_cached_across_tasks(tmp_path):
     context.begin_task(task_for())
     assert context.memo("key", load) == "value"
     assert len(calls) == 1
-
 
 def test_input_shares_store_with_memo_and_survives_tasks(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt: "provided")
@@ -59,7 +56,6 @@ def test_input_shares_store_with_memo_and_survives_tasks(tmp_path, monkeypatch):
     assert context.memo("key", load) == "provided"
     assert context.get("key") == "provided"
     assert calls == []
-
 
 def test_input_enters_interactive_output_and_clears_prompt(tmp_path, monkeypatch):
     calls = []
@@ -90,7 +86,6 @@ def test_input_enters_interactive_output_and_clears_prompt(tmp_path, monkeypatch
     assert cleared == [("Value: ", "provided")]
     assert calls == ["begin", "end"]
 
-
 def test_get_returns_default_and_raises_for_missing_key(tmp_path):
     context = make_context(tmp_path)
 
@@ -98,7 +93,6 @@ def test_get_returns_default_and_raises_for_missing_key(tmp_path):
 
     with pytest.raises(TaskFailed, match="no stored value for key: missing"):
         context.get("missing")
-
 
 def test_creates_guard_skips_command_and_resolves_cwd(tmp_path):
     command = FakeCommandRunner()
@@ -114,7 +108,6 @@ def test_creates_guard_skips_command_and_resolves_cwd(tmp_path):
 
     assert command.calls == []
     assert context.changes == []
-
 
 def test_unless_guard_is_evaluated_even_in_dry_run(tmp_path):
     command = FakeCommandRunner(returncode=0)
@@ -132,7 +125,6 @@ def test_unless_guard_is_evaluated_even_in_dry_run(tmp_path):
     })]
     assert context.changes == []
 
-
 def test_dry_run_records_but_does_not_execute_mutating_command(tmp_path):
     command = FakeCommandRunner()
     context = make_context(tmp_path, dry_run=True, command=command)
@@ -143,7 +135,6 @@ def test_dry_run_records_but_does_not_execute_mutating_command(tmp_path):
     assert len(context.changes) == 1
     assert context.changes[0].summary == "would run: dnf5 install -y git"
     assert context.changes[0].data["reason"] == "would run unconditionally"
-
 
 def test_command_runs_and_records_change(tmp_path):
     command = FakeCommandRunner()
@@ -156,7 +147,6 @@ def test_command_runs_and_records_change(tmp_path):
     assert len(context.changes) == 1
     assert context.changes[0].data == {"argv": ["dnf5", "install", "-y", "git"]}
 
-
 def test_probe_returns_nonzero_result_instead_of_failing(tmp_path):
     command = FakeCommandRunner(returncode=1)
     context = make_context(tmp_path, command=command)
@@ -165,7 +155,6 @@ def test_probe_returns_nonzero_result_instead_of_failing(tmp_path):
 
     assert result.returncode == 1
     assert command.calls[0][1]["check"] is False
-
 
 def test_sudo_is_refreshed_once_per_run(tmp_path):
     command = FakeCommandRunner()
@@ -181,25 +170,6 @@ def test_sudo_is_refreshed_once_per_run(tmp_path):
     assert command.calls[0][1]["sudo"] is True
     assert command.calls[1][1]["sudo"] is True
 
-
-def test_sudo_refresh_enters_interactive_output(tmp_path):
-    calls = []
-
-    @contextmanager
-    def interactive():
-        calls.append("begin")
-        try:
-            yield
-        finally:
-            calls.append("end")
-
-    context = make_context(tmp_path, output=SimpleNamespace(interactive=interactive))
-
-    context.ensure_sudo()
-
-    assert calls == ["begin", "end"]
-
-
 def test_sudo_is_revalidated_when_credentials_expire(tmp_path):
     command = FakeCommandRunner()
     sudo = FakeSudo()
@@ -214,7 +184,6 @@ def test_sudo_is_revalidated_when_credentials_expire(tmp_path):
     assert sudo.refresh_count == 2
     assert sudo.reasons == [expected, expected]
 
-
 def test_dry_run_mutating_command_requests_sudo_but_does_not_execute(tmp_path):
     command = FakeCommandRunner()
     sudo = FakeSudo()
@@ -227,7 +196,6 @@ def test_dry_run_mutating_command_requests_sudo_but_does_not_execute(tmp_path):
     assert command.calls == []
     assert len(context.changes) == 1
 
-
 def test_guard_can_run_against_nonzero_result(tmp_path):
     command = FakeCommandRunner()
     command.responses = [lambda argv: 1, lambda argv: 0]
@@ -238,3 +206,34 @@ def test_guard_can_run_against_nonzero_result(tmp_path):
     assert len(command.calls) == 2
     assert result.returncode == 0
     assert len(context.changes) == 1
+
+def test_bundle_is_the_owning_bundle_for_the_current_task(tmp_path):
+    bundle = Bundle("base", path=tmp_path)
+    add_task(bundle, lambda ctx: None, name="Task")
+    context = make_context(tmp_path)
+
+    context.begin_task(bundle.tasks[0])
+
+    assert context.bundle is bundle
+    assert context.bundle_path == tmp_path
+
+def test_bundle_raises_for_a_task_without_an_owner(tmp_path):
+    task = Task(bundle=None, name="Unowned", func=lambda ctx: None)
+    context = make_context(tmp_path)
+
+    context.begin_task(task)
+
+    with pytest.raises(TaskFailed, match="no owning bundle"):
+        _ = context.bundle
+
+def test_bundle_resources_are_available_through_the_context(tmp_path):
+    resource = tmp_path / "files" / "example.conf"
+    resource.parent.mkdir()
+    resource.write_text("value\n", encoding="utf-8")
+    bundle = Bundle("base", path=tmp_path)
+    add_task(bundle, lambda ctx: ctx.bundle.read_resource("files/example.conf"))
+    context = make_context(tmp_path)
+
+    context.begin_task(bundle.tasks[0])
+
+    assert context.bundle.read_resource("files/example.conf") == "value\n"

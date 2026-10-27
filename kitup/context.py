@@ -15,7 +15,7 @@ from .commands import CommandRunner
 from .errors import SkipTask, TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
-from .registry import Task
+from .registry import Bundle, Task
 from .results import Change
 from .validation import normalize_strings, require_text
 
@@ -29,6 +29,7 @@ class TaskContext:
 
     One context is reused for the whole run so ``memo`` is a per-run cache.
     ``begin_task`` resets the task-specific parts before each task executes.
+    ``config_dir`` is the directory of the top-level profile.
     """
 
     def __init__(
@@ -58,6 +59,7 @@ class TaskContext:
         self._notes: list[str] = []
         self._memo: dict[str, Any] = {}
         self._task_name = ""
+        self._bundle: Bundle | None = None
         self._bundle_path: Path | None = None
         self._sudo_ready = False
         self.privileged_worker: PrivilegedWorker = PrivilegedWorker(self)
@@ -69,6 +71,13 @@ class TaskContext:
     @property
     def notes(self) -> list[str]:
         return list(self._notes)
+
+    @property
+    def bundle(self) -> Bundle:
+        """The bundle that owns the current task."""
+        if self._bundle is None:
+            raise TaskFailed("the current task has no owning bundle")
+        return self._bundle
 
     @property
     def bundle_path(self) -> Path | None:
@@ -96,6 +105,7 @@ class TaskContext:
         self._changes.clear()
         self._notes.clear()
         self._task_name = task.name
+        self._bundle = task.bundle
         self._bundle_path = task.bundle_path
 
     def ensure_sudo(self, reason: str | None = None) -> None:
@@ -244,7 +254,7 @@ class TaskContext:
 
     def set(self, key: str, value: Any) -> None:
         """Store a value that later tasks can retrieve with :meth:`get`."""
-        require_text(key, "input key")
+        require_text(key, "key")
         self._memo[key] = value
 
     @overload
@@ -258,7 +268,7 @@ class TaskContext:
 
         Raises ``TaskFailed`` when the key is missing and no default is given.
         """
-        require_text(key, "input key")
+        require_text(key, "key")
         if key in self._memo:
             return self._memo[key]
         if default is _MISSING:

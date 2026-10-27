@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -12,71 +14,94 @@ def write(path, text: str) -> None:
     path.write_text(textwrap.dedent(text), encoding="utf-8")
 
 
-def test_load_base_config(tmp_path):
-    write(tmp_path / "config.py", """
-        PACKAGES = ["git", "vim"]
-        DNF_CONF = "/etc/dnf/dnf.conf"
-    """)
-
-    config = load_config(tmp_path)
-
-    assert config.PACKAGES == ["git", "vim"]
-    assert config.DNF_CONF == "/etc/dnf/dnf.conf"
+def module(**values) -> ModuleType:
+    result = ModuleType("config_source")
+    for name, value in values.items():
+        setattr(result, name, value)
+    return result
 
 
-def test_override_replaces_retains_and_adds(tmp_path):
-    write(tmp_path / "config.py", """
-        KEEP = "base"
-        REPLACE = "base"
+def test_path_sources_merge_in_order(tmp_path):
+    first = tmp_path / "first.py"
+    second = tmp_path / "second.py"
+    write(first, """
+        KEEP = "first"
+        REPLACE = "first"
         COLLECTION = [1, 2]
     """)
-    override = tmp_path / "work.py"
-    write(override, """
-        REPLACE = "override"
+    write(second, """
+        REPLACE = "second"
         COLLECTION = [3]
         ADDED = True
     """)
 
-    config = load_config(tmp_path, override)
+    config = load_config([first, second])
 
-    assert config.KEEP == "base"
-    assert config.REPLACE == "override"
+    assert config.KEEP == "first"
+    assert config.REPLACE == "second"
     assert config.COLLECTION == [3]
     assert config.ADDED is True
 
 
-def test_missing_override_is_an_error(tmp_path):
-    with pytest.raises(ConfigError, match="override not found"):
-        load_config(tmp_path, tmp_path / "missing.py")
+def test_module_and_mapping_sources_contribute_public_fields():
+    module_config = load_config(
+        [module(VALUE="module", _PRIVATE="hidden", helper=lambda: None)]
+    )
+    mapping_config = load_config([{"VALUE": 1, "helper": lambda: None}])
+
+    assert vars(module_config) == {"VALUE": "module"}
+    assert vars(mapping_config) == {"VALUE": 1}
 
 
-def test_syntax_error_in_config_is_reported(tmp_path):
-    write(tmp_path / "config.py", "VALUE = (\n")
+def test_mapping_sources_reject_invalid_keys():
+    with pytest.raises(ConfigError, match="key must not be private: _PRIVATE"):
+        load_config([{"_PRIVATE": 1}])
+    with pytest.raises(ConfigError, match="keys must be strings, not int"):
+        load_config([{1: "value"}])  # type: ignore[list-item]
 
-    with pytest.raises(ConfigError, match="error while importing"):
-        load_config(tmp_path)
+
+def test_mixed_sources_merge_left_to_right():
+    config = load_config(
+        [
+            {"VALUE": "mapping", "MAPPING_ONLY": True},
+            module(VALUE="module", MODULE_ONLY=True),
+        ]
+    )
+
+    assert config.VALUE == "module"
+    assert config.MAPPING_ONLY is True
+    assert config.MODULE_ONLY is True
+
+
+def test_invalid_source_shapes_are_rejected():
+    for source in ({"VALUE": 1}, "config.py", Path("config.py"), module(VALUE=1)):
+        with pytest.raises(ConfigError, match="not a single source"):
+            load_config(source)  # type: ignore[arg-type]
+
+    with pytest.raises(ConfigError, match="Path objects"):
+        load_config(["config.py"])  # type: ignore[list-item]
+
+
+def test_missing_config_is_an_error(tmp_path):
+    with pytest.raises(ConfigError, match="config not found"):
+        load_config([tmp_path / "missing.py"])
 
 
 def test_import_exception_is_reported(tmp_path):
     write(tmp_path / "config.py", "raise RuntimeError('boom')\n")
 
     with pytest.raises(ConfigError, match="boom"):
-        load_config(tmp_path)
+        load_config([tmp_path / "config.py"])
 
 
-def test_public_fields_exclude_imports_functions_and_classes(tmp_path):
+def test_bundle_instances_are_not_config_values(tmp_path):
     write(tmp_path / "config.py", """
-        import os
+        from kitup.registry import Bundle
 
         VALUE = 1
-
-        def helper():
-            return 2
-
-        class Thing:
-            pass
+        BUNDLE = Bundle("nested")
     """)
 
-    config = load_config(tmp_path)
+    config = load_config([tmp_path / "config.py"])
 
     assert vars(config) == {"VALUE": 1}

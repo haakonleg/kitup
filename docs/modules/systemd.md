@@ -4,6 +4,7 @@ Manage systemd units.
 
 ```python
 from kitup.modules import systemd
+from kitup.registry import task
 ```
 
 ## `unit(ctx, unit, *, enabled=None, state=None, scope="system")`
@@ -16,7 +17,7 @@ Manage a unit's enabled and active state.
 - `scope` — `"system"` or `"user"`.
 
 ```python
-@bundle.task("Enable example service")
+@task("Enable example service")
 def enable_example_service(ctx):
     systemd.unit(ctx, "example.service", enabled=True, state="started")
 ```

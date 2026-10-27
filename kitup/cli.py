@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from . import PACKAGE_NAME, __version__
@@ -14,13 +14,14 @@ from ._utils.security import disable_same_uid_ptrace
 from .commands import CommandRunner
 from .config import load_config
 from .context import TaskContext
-from .discovery import bundles_dir, discover_bundles
 from .errors import KitupError, PrivilegeError, UsageError
 from .facts import collect_facts
 from .output import Output
 from .privileges import PrivilegeManager
+from .profiles import RunDefinition, load_profile
 from .resolver import BundlePlan, resolve
 from .runner import Runner
+from .validation import split_tags
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,8 +32,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-V", "--version", action="version", version=_version())
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    apply_parser = subparsers.add_parser("apply", help="apply bundles")
-    apply_parser.add_argument("bundles", nargs="*", metavar="BUNDLE")
+    apply_parser = subparsers.add_parser("apply", help="apply a profile")
+    apply_parser.add_argument(
+        "profile",
+        nargs="?",
+        metavar="PROFILE",
+        help="profile file (default: ./kitup.py)",
+    )
     _add_common_options(apply_parser)
     apply_parser.add_argument(
         "-n", "--dry-run", action="store_true", help="report without mutating"
@@ -49,15 +55,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     list_parser = subparsers.add_parser("list", help="list bundles and tasks")
-    list_parser.add_argument("bundles", nargs="*", metavar="BUNDLE")
+    list_parser.add_argument(
+        "profile",
+        nargs="?",
+        metavar="PROFILE",
+        help="profile file (default: ./kitup.py)",
+    )
     _add_common_options(list_parser)
 
     return parser
 
 
 def _add_common_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("-D", "--dir", metavar="PATH", help="configuration root")
-    parser.add_argument("-C", "--config", metavar="PATH", help="override config file")
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
     parser.add_argument("-c", "--no-color", action="store_true", help="disable colors")
     parser.add_argument("-V", "--version", action="version", version=_version())
@@ -73,22 +82,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     output = Output(no_color=args.no_color, verbose=args.verbose)
 
     try:
-        config_dir = _resolve_config_dir(args.dir)
-        override = _resolve_override(args.config)
-        config = load_config(config_dir, override)
-        bundles = discover_bundles(config_dir)
-        plan = resolve(args.bundles or None, bundles)
+        profile_path = _resolve_profile(args.profile)
+        old_path = list(sys.path)
+        try:
+            sys.path.insert(0, str(profile_path.parent))
+            definition = load_profile(profile_path)
+            config = load_config(definition.config)
+            plan = resolve(definition.bundles)
 
-        facts = collect_facts()
-        output.banner(facts)
-        if args.verbose:
-            _print_environment(config_dir, override, output)
-
-        if args.command == "list":
-            _print_plan(plan, output, verbose=args.verbose)
-            return 0
-
-        return _apply(args, plan, config_dir, config, facts, output)
+            facts = collect_facts()
+            output.banner(facts)
+            if args.command == "list":
+                _print_environment(profile_path, definition, output)
+                _print_plan(plan, output, verbose=args.verbose)
+                return 0
+            if args.verbose:
+                _print_environment(profile_path, definition, output)
+            return _apply(args, profile_path, definition, plan, config, facts, output)
+        finally:
+            sys.path[:] = old_path
     except KitupError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2 if isinstance(exc, (UsageError, PrivilegeError)) else 1
@@ -99,14 +111,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _apply(
     args: argparse.Namespace,
+    profile_path: Path,
+    definition: RunDefinition,
     plan: BundlePlan,
-    config_dir: Path,
     config: SimpleNamespace,
     facts: Mapping[str, Any],
     output: Output,
 ) -> int:
-    tags = _tag_filter(args.tags)
-    skip_tags = _tag_filter(args.skip_tags)
+    tags = _merge_include_tags(definition.tags, _tag_filter(args.tags))
+    skip_tags = _merge_skip_tags(definition.skip_tags, _tag_filter(args.skip_tags))
 
     sudo = PrivilegeManager()
     if args.sudo:
@@ -117,7 +130,7 @@ def _apply(
         dry_run=args.dry_run,
         diff=args.diff,
         verbose=args.verbose,
-        config_dir=config_dir,
+        config_dir=profile_path.parent,
         config=config,
         facts=facts,
         sudo=sudo,
@@ -137,14 +150,24 @@ def _apply(
         context.close()
 
 
-def _print_environment(config_dir: Path, override: Path | None, output: Output) -> None:
+def _print_environment(
+    profile_path: Path, definition: RunDefinition, output: Output
+) -> None:
     output.write()
-    output.write(f"using bundle dir: {bundles_dir(config_dir)}")
-    config = config_dir / "config.py"
-    if config.is_file():
-        output.write(f"using config: {config}")
-    if override is not None:
-        output.write(f"using config: {override}")
+    output.write(f"profile: {profile_path}")
+    if definition.description:
+        output.write(f"description: {definition.description}")
+    if definition.config:
+        sources = ", ".join(_config_label(source) for source in definition.config)
+        output.write(f"config: {sources}")
+
+
+def _config_label(source: object) -> str:
+    if isinstance(source, Path):
+        return str(source)
+    if isinstance(source, ModuleType):
+        return f"<module {source.__name__}>"
+    return "<mapping>"
 
 
 def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
@@ -154,7 +177,9 @@ def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
         if bundle.description:
             output.write(f"  {bundle.description}")
         if verbose:
-            dependencies = ", ".join(bundle.depends_on)
+            dependencies = ", ".join(
+                dependency.name for dependency in bundle.depends_on
+            )
             output.write(f"  depends:{f' {dependencies}' if dependencies else ''}")
             output.write("  tasks:")
         for task in bundle.tasks:
@@ -177,21 +202,27 @@ def _tag_filter(values: Sequence[str]) -> frozenset[str] | None:
     """
     if not values:
         return None
-    return frozenset(_split_tags(values))
+    return frozenset(split_tags(values))
 
 
-def _split_tags(values: Sequence[str]) -> list[str]:
-    return [
-        tag.strip()
-        for value in values
-        for tag in value.split(",")
-        if tag.strip()
-    ]
+def _merge_include_tags(
+    profile_tags: frozenset[str], cli_tags: frozenset[str] | None
+) -> frozenset[str] | None:
+    if cli_tags is None:
+        return profile_tags or None
+    if profile_tags:
+        return cli_tags & profile_tags
+    return cli_tags
 
 
-def _resolve_config_dir(value: str | None) -> Path:
-    return Path(value).expanduser().resolve() if value else Path.cwd().resolve()
+def _merge_skip_tags(
+    profile_tags: frozenset[str], cli_tags: frozenset[str] | None
+) -> frozenset[str] | None:
+    combined = profile_tags | (cli_tags or frozenset())
+    return combined or None
 
 
-def _resolve_override(value: str | None) -> Path | None:
-    return Path(value).expanduser().resolve() if value else None
+def _resolve_profile(value: str | None) -> Path:
+    if value:
+        return Path(value).expanduser().resolve()
+    return (Path.cwd() / "kitup.py").resolve()

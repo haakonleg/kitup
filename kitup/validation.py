@@ -25,6 +25,19 @@ def normalize_string_sequence(values: Iterable[str], label: str) -> tuple[str, .
     return tuple(values)
 
 
+def split_tags(values: Iterable[str], *, allow_empty: bool = True) -> list[str]:
+    """Split comma-separated tag values and strip surrounding whitespace."""
+    tags: list[str] = []
+    for value in values:
+        for part in value.split(","):
+            tag = part.strip()
+            if tag:
+                tags.append(tag)
+            elif not allow_empty:
+                raise ValueError("tag must not be empty")
+    return tags
+
+
 def unique_strings(values: Iterable[str | Path]) -> list[str]:
     """Return deduplicated values as strings, preserving order."""
     return list(dict.fromkeys(str(value) for value in values))

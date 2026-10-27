@@ -2,63 +2,55 @@ from __future__ import annotations
 
 import pytest
 
-from kitup.errors import ResolutionError
+from kitup.errors import BundleError, ResolutionError
 from kitup.registry import Bundle
 from kitup.resolver import resolve
-
-
-def bundle(name: str, *depends_on: str) -> Bundle:
-    return Bundle(name, name, depends_on=depends_on)
 
 
 def names(plan) -> list[str]:
     return [bundle.name for bundle in plan.bundles]
 
 
-def test_all_bundles_preserve_discovery_order():
-    registry = [bundle("base"), bundle("desktop", "base"), bundle("repos", "base")]
+def test_roots_run_in_declared_order():
+    base = Bundle("base")
+    desktop = Bundle("desktop")
 
-    assert names(resolve(None, registry)) == ["base", "desktop", "repos"]
+    assert names(resolve([base, desktop])) == ["base", "desktop"]
 
 
 def test_dependencies_run_first_and_are_deduplicated():
-    base = bundle("base")
-    repos = bundle("repos", "base")
-    desktop = bundle("desktop", "base", "repos")
-    registry = [base, repos, desktop]
+    base = Bundle("base")
+    repos = Bundle("repos", depends_on=[base])
+    desktop = Bundle("desktop", depends_on=[base, repos])
 
-    assert names(resolve(["desktop"], registry)) == ["base", "repos", "desktop"]
-    assert names(resolve(["desktop", "base"], registry)) == ["base", "repos", "desktop"]
-
-
-def test_requested_order_is_kept_for_roots():
-    registry = [bundle("a"), bundle("b")]
-
-    assert names(resolve(["b", "a"], registry)) == ["b", "a"]
+    assert names(resolve([desktop])) == ["base", "repos", "desktop"]
+    assert names(resolve([desktop, base])) == ["base", "repos", "desktop"]
 
 
-def test_unknown_bundle_is_an_error():
-    with pytest.raises(ResolutionError, match="unknown bundle: missing"):
-        resolve(["missing"], [bundle("base")])
+def test_same_bundle_reached_twice_runs_once():
+    base = Bundle("base")
+    one = Bundle("one", depends_on=[base])
+    two = Bundle("two", depends_on=[base])
+
+    assert names(resolve([one, two])) == ["base", "one", "two"]
 
 
-def test_unknown_dependency_is_an_error():
-    with pytest.raises(ResolutionError, match="unknown dependency 'missing'"):
-        resolve(None, [bundle("desktop", "missing")])
+def test_duplicate_names_are_rejected():
+    first = Bundle("same")
+    second = Bundle("same")
+    root = Bundle("root", depends_on=[first, second])
+
+    with pytest.raises(BundleError, match="duplicate bundle name: same"):
+        resolve([first, second])
+
+    with pytest.raises(BundleError, match="duplicate bundle name: same"):
+        resolve([root])
 
 
 def test_cycle_reports_the_path():
-    registry = [
-        bundle("base", "repos"),
-        bundle("repos", "base"),
-    ]
+    base = Bundle("base")
+    repos = Bundle("repos", depends_on=[base])
+    base.depends_on = (repos,)
 
     with pytest.raises(ResolutionError, match="dependency cycle: base -> repos -> base"):
-        resolve(["base"], registry)
-
-
-def test_validation_covers_unselected_bundles():
-    registry = [bundle("base"), bundle("desktop", "missing")]
-
-    with pytest.raises(ResolutionError, match="unknown dependency 'missing'"):
-        resolve(["base"], registry)
+        resolve([base])

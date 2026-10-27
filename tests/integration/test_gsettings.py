@@ -24,10 +24,9 @@ def test_set_and_reset_key(tmp_path: Path) -> None:
         tmp_path / "set",
         "gsettings_set",
         f"""
-        from . import bundle
         from kitup.modules import gsettings
 
-        @bundle.task("set integration key")
+        @task("set integration key")
         def set_key(ctx):
             gsettings.key(ctx, {SCHEMA!r}, {SCHEMA_KEY!r}, "kitup-value")
         """,
@@ -39,10 +38,9 @@ def test_set_and_reset_key(tmp_path: Path) -> None:
         tmp_path / "reset",
         "gsettings_reset",
         f"""
-        from . import bundle
         from kitup.modules import gsettings
 
-        @bundle.task("reset integration key")
+        @task("reset integration key")
         def reset_key(ctx):
             gsettings.key(ctx, {SCHEMA!r}, {SCHEMA_KEY!r}, state="absent")
         """,

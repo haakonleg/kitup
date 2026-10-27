@@ -1,2 +1,11 @@
-PACKAGES = ["git", "vim-enhanced", "tmux", "zsh"]
-DNF_CONF = "/etc/dnf/dnf.conf"
+PACKAGES = [
+    "chrony",
+    "firewalld",
+    "git",
+    "neovim",
+    "podman",
+    "ripgrep",
+    "tmux",
+    "zsh",
+]
+SSH_PORT = 22

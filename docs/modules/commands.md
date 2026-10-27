@@ -4,6 +4,7 @@ Run guarded one-off commands.
 
 ```python
 from kitup.modules import commands
+from kitup.registry import task
 ```
 
 ## `run(ctx, argv, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600)`
@@ -21,7 +22,7 @@ Run `argv` unless a guard is already satisfied.
 - `timeout` — command timeout in seconds.
 
 ```python
-@bundle.task("Create marker", tags={"config"})
+@task("Create marker", tags={"config"})
 def create_marker(ctx):
     commands.run(
         ctx,
@@ -42,7 +43,7 @@ Run a command string through a shell. Other arguments match `run()`.
 `env["SHELL"]` sets the variable inside the command but does not select the shell.
 
 ```python
-@bundle.task("Install via shell pipeline", tags={"config"})
+@task("Install via shell pipeline", tags={"config"})
 def install_with_pipeline(ctx):
     commands.shell(
         ctx,

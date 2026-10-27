@@ -1,4 +1,4 @@
-"""Shared helper for importing configuration and bundle modules."""
+"""Shared helper for importing profile and configuration files."""
 
 from __future__ import annotations
 
@@ -13,28 +13,10 @@ from . import PACKAGE_NAME
 _counter = itertools.count()
 
 
-def load_module(
-    path: Path,
-    *,
-    prefix: str,
-    package_dir: Path | None = None,
-    keep: bool = False,
-) -> ModuleType:
-    """Import a Python file under a unique private module name.
-
-    ``package_dir`` marks the file as a package ``__init__.py`` so relative
-    imports work. ``keep`` retains the module in ``sys.modules`` after a
-    successful import; failed imports are always cleaned up.
-    """
+def load_module(path: Path, *, prefix: str) -> ModuleType:
+    """Import a Python file under a unique private module name."""
     module_name = f"_{PACKAGE_NAME}_{prefix}_{next(_counter)}"
-    if package_dir is None:
-        spec = importlib.util.spec_from_file_location(module_name, path)
-    else:
-        spec = importlib.util.spec_from_file_location(
-            module_name,
-            path,
-            submodule_search_locations=[str(package_dir)],
-        )
+    spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot import {path}")
 
@@ -46,8 +28,7 @@ def load_module(
         _purge(module_name)
         raise
 
-    if not keep:
-        _purge(module_name)
+    _purge(module_name)
     return module
 
 

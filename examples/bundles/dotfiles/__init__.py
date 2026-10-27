@@ -1,5 +1,7 @@
+from bundles import base
+
 from kitup.registry import Bundle
 
-bundle = Bundle("dotfiles", "Home directory dotfiles", depends_on=("base",))
+Bundle("Dotfiles", "Shell and editor configuration", depends_on=[base])
 
-from . import dotfiles  # noqa: F401
+from . import dotfiles  # noqa: E402,F401

@@ -4,6 +4,7 @@ Manage Flatpak remote repositories, applications, and runtimes.
 
 ```python
 from kitup.modules import flatpak
+from kitup.registry import task
 ```
 
 ## `remote(ctx, name, url=None, *, state="present", scope="system", gpg_verify=True)`
@@ -23,7 +24,7 @@ left unchanged, including its URL. `"absent"` deletes the remote without
 reports the error.
 
 ```python
-@bundle.task("Add Flathub", tags={"flatpak"})
+@task("Add Flathub", tags={"flatpak"})
 def add_flathub(ctx):
     flatpak.remote(
         ctx,
@@ -32,7 +33,7 @@ def add_flathub(ctx):
     )
 
 
-@bundle.task("Add local Flatpak repository", tags={"flatpak"})
+@task("Add local Flatpak repository", tags={"flatpak"})
 def add_local_repository(ctx):
     flatpak.remote(
         ctx,
@@ -62,7 +63,7 @@ the source for new installs; an already-installed app is not moved or
 reinstalled.
 
 ```python
-@bundle.task("Install Flatpak apps", tags={"flatpak"})
+@task("Install Flatpak apps", tags={"flatpak"})
 def install_flatpak_apps(ctx):
     flatpak.packages(
         ctx,
@@ -71,7 +72,7 @@ def install_flatpak_apps(ctx):
     )
 
 
-@bundle.task("Remove Flatpak app", tags={"flatpak"})
+@task("Remove Flatpak app", tags={"flatpak"})
 def remove_flatpak_app(ctx):
     flatpak.packages(ctx, "org.gnome.Calculator", state="absent")
 ```

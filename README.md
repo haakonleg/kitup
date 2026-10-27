@@ -1,190 +1,392 @@
 # kitup
 
-The simple python-driven system configuration tool.
+The simple Python-driven system configuration tool.
 
-`kitup` loads Python task bundles from a configuration directory and applies them
-sequentially. The runtime is standard-library only and requires Python 3.14+.
+kitup is a configuration management tool for Linux systems: describe how a
+machine should be set up — what software to install, how services should run,
+which files to manage, and which system settings to apply — and kitup applies
+it idempotently through reusable task bundles.
 
-## Usage
+kitup is inspired by Ansible, but with a smaller scope and a more expressive,
+Python-centric design: profiles, bundles, tasks, conditions, and composition are
+ordinary Python code. It currently supports local machines only; remote host
+management is not yet included.
 
-```bash
-kitup list
-kitup list -v
-kitup apply
-kitup apply -n -d
-kitup apply desktop
-kitup apply -t packages
-```
+## Install
 
-The current directory is the configuration root by default. It must contain a
-`bundles/` directory; `config.py` is optional.
-
-- `-D PATH` / `--dir PATH` — select another configuration root.
-- `-C PATH` / `--config PATH` — merge an override file over `config.py`.
-- `-v` / `--verbose` — task IDs and descriptions in `list`, plus extra detail
-  during `apply`.
-- `-t TAGS` / `-x TAGS` — include or skip tasks by tag.
-- `-n` / `--dry-run` — report changes without modifying the system.
-- `-d` / `--diff` — print unified diffs for file changes.
-- `-s` / `--sudo` — validate sudo credentials before running tasks.
-- `-c` / `--no-color` — disable colors.
-
-See `examples/` for a minimal configuration:
-
-```bash
-kitup list -D examples -v
-```
-
-## Standalone zipapp
-
-```bash
-./build.sh
-./dist/kitup --version
-./dist/kitup list -D examples -v
-```
-
-`build.sh` runs `python3`; set `PYTHON` to override. The archive contains only
-the `kitup` package. Bundles stay external: run the zipapp from a directory
-containing `bundles/`, or pass `-D`.
-
-To build and install to `~/.local/bin`:
+Install for the current user:
 
 ```bash
 ./install.sh
 ```
 
-## Configuration
+Or install with pip:
 
-Public values in `config.py` are exposed as `ctx.config`:
-
-```python
-PACKAGES = ["git", "vim-enhanced", "tmux"]
-DNF_CONF = "/etc/dnf/dnf.conf"
+```bash
+python3 -m pip install .
 ```
 
-An override passed with `-C` replaces same-named fields and adds new ones.
+A standalone zipapp can also be built:
 
-System facts are collected once per run and exposed read-only as `ctx.facts`,
-including `hostname`, `os_release`, `distro_id`, `version_id`, `arch`, `kernel`,
-and `mounts`. Tasks needing live state should query it directly. See
-[docs/facts.md](docs/facts.md) for details.
+```bash
+./build.sh
+./dist/kitup --version
+```
 
-## Bundle layout
+## Quick start
+
+Create a configuration directory:
 
 ```text
-bundles/
-└── base/
-    ├── __init__.py
-    ├── packages.py
-    └── files/
-        └── dnf.conf
+my-machine/
+├── kitup.py
+├── config.py
+└── bundles/
+    └── workstation/
+        ├── __init__.py
+        ├── tasks.py
+        └── files/
+            └── sshd.conf
 ```
 
-`__init__.py` declares the bundle. Import order defines task order across files:
+`kitup.py` is the profile. It imports the bundle and declares the run:
 
 ```python
+from pathlib import Path
+
+from bundles import workstation
+
+from kitup import profile
+
+profile(
+    bundles=[workstation],
+    config=[Path("config.py")],
+    description="Fedora workstation",
+)
+```
+
+`config.py` contains machine-specific values:
+
+```python
+PACKAGES = ["git", "ripgrep", "tmux", "neovim", "podman", "firewalld"]
+FLATPAK_APPLICATIONS = ["com.spotify.Client", "md.obsidian.Obsidian"]
+```
+
+A bundle is a Python package. Its `__init__.py` creates the bundle and imports
+the task module:
+
+```python
+# bundles/workstation/__init__.py
 from kitup.registry import Bundle
 
-bundle = Bundle("base", "Base system packages", depends_on=())
+Bundle("Workstation")
 
-from . import packages, dnf_config  # noqa: F401
+from . import tasks  # noqa: F401
 ```
 
-Every task module must be imported from `__init__.py`, directly or through
-another imported module. Files in the bundle folder are not auto-discovered.
-
-Task files register tasks with `@bundle.task`:
+Tasks use the `task` decorator. The name is required and must be a non-empty
+string:
 
 ```python
-from . import bundle
-from kitup.modules import files
+# bundles/workstation/tasks.py
+from kitup.modules import dnf, files, flatpak, systemd
+from kitup.registry import task
 
-@bundle.task("Configure DNF", tags={"config"})
-def configure_dnf(ctx):
+
+@task("Install development packages", tags={"packages"})
+def install_dev_packages(ctx):
+    dnf.packages(ctx, ctx.config.PACKAGES)
+
+
+@task("Add Flathub", tags={"flatpak"})
+def add_flathub(ctx):
+    flatpak.remote(
+        ctx,
+        "flathub",
+        "https://dl.flathub.org/repo/flathub.flatpakrepo",
+    )
+
+
+@task("Install Flatpak applications", tags={"flatpak"})
+def install_flatpak_apps(ctx):
+    flatpak.packages(ctx, ctx.config.FLATPAK_APPLICATIONS, remote="flathub")
+
+
+@task("Enable and start firewalld", tags={"services"})
+def enable_firewall(ctx):
+    systemd.unit(ctx, "firewalld.service", enabled=True, state="started")
+
+
+@task("Harden SSH", tags={"security"})
+def harden_ssh(ctx):
     files.file(
         ctx,
-        ctx.config.DNF_CONF,
-        content=bundle.read_resource("files/dnf.conf"),
+        "/etc/ssh/sshd_config.d/99-kitup.conf",
+        content=ctx.bundle.read_resource("files/sshd.conf"),
         mode=0o644,
         sudo=True,
     )
 ```
 
-Dependencies run before dependents, and each bundle runs at most once:
+Run it:
 
-```python
-Bundle("desktop", "Desktop", depends_on=("base", "repos"))
+```bash
+kitup list
+kitup apply
 ```
 
-Task code can use the context helpers:
+`list` shows the bundles and tasks without changing anything. `apply` runs
+them.
+
+## Commands
+
+```bash
+kitup list
+kitup list -v
+kitup apply
+kitup apply profiles/laptop.py
+kitup apply -n -d
+kitup apply -t packages
+kitup apply -x optional
+```
+
+`list` and `apply` use `./kitup.py` by default. Pass another profile path to use
+a different configuration:
+
+```bash
+kitup apply examples/kitup.py
+```
+
+Common options:
+
+- `-v`, `--verbose` — show task IDs, descriptions, and profile details.
+- `-n`, `--dry-run` — report what would change without changing anything.
+- `-d`, `--diff` — show unified diffs for file changes.
+- `-s`, `--sudo` — ask for sudo credentials before starting.
+- `-t TAGS` — only run tasks matching these tags.
+- `-x TAGS` — skip tasks matching these tags.
+- `-c`, `--no-color` — disable colors.
+
+Tags can be comma-separated or repeated:
+
+```bash
+kitup apply -t packages,config
+kitup apply -t packages -t config
+```
+
+## Profiles
+
+A profile can use normal Python to build a run:
 
 ```python
-ctx.run(["command", "arg"])          # guarded, dry-run aware command
-ctx.run(["command", "arg"], sudo=True)
-ctx.probe(["query", "--flag"])       # read-only query
-ctx.probe(["query", "--flag"], sudo=True)
-ctx.changed({"detail": "data"}, "+change")
-ctx.note("extra context")
-ctx.memo("key", compute_once)        # per-run cache
-ctx.input("key", "Prompt: ")         # prompt and store a value
-ctx.input(prompt="Continue? ")       # prompt and return only
-ctx.set("key", value)                # store a value for later tasks
-ctx.get("key")                       # retrieve a stored value
-ctx.skip("optional reason")          # skip before mutating
-ctx.fail("reason")                   # fail the task
+import os
+from pathlib import Path
+
+from bundles import base, gaming, laptop
+
+from kitup import profile
+
+bundles = [base]
+
+if os.environ.get("KITUP_LAPTOP") == "1":
+    bundles.append(laptop)
+
+if os.environ.get("KITUP_GAMING") == "1":
+    bundles.append(gaming)
+
+profile(
+    bundles=bundles,
+    config=[Path("config.py")],
+    description="Fedora workstation",
+)
+```
+
+Profiles can reuse and extend other profiles:
+
+```python
+# base_profile.py
+from pathlib import Path
+
+from bundles import base
+
+from kitup import profile
+
+profile(
+    bundles=[base],
+    config=[Path("config.py")],
+    description="Fedora base",
+)
+```
+
+```python
+# kitup.py
+import base_profile
+from bundles import laptop
+from pathlib import Path
+
+from kitup import profile
+
+profile.extend(
+    base_profile,
+    bundles=[laptop],
+    config=[Path("laptop.py")],
+    description="ThinkPad",
+)
+```
+
+The result contains the base bundles first, then the laptop-specific bundle,
+with both config files applied in order. Use `profile.use(base_profile)` to
+reuse a profile unchanged.
+
+See [docs/profile.md](docs/profile.md) for the complete profile reference.
+
+## Bundles
+
+Bundles group related tasks. Import task modules from the bundle's
+`__init__.py`; that import order defines task order within the bundle:
+
+```python
+from kitup.registry import Bundle
+
+Bundle("Workstation")
+
+from . import packages, services  # noqa: F401
+```
+
+Bundles can depend on other bundles:
+
+```python
+# bundles/workstation/__init__.py
+from bundles import base, repos
+
+from kitup.registry import Bundle
+
+Bundle("Workstation", depends_on=[base, repos])
+
+from . import tasks  # noqa: F401
+```
+
+Dependencies run first, and each bundle runs at most once.
+
+Resources such as config files live next to the bundle:
+
+```text
+bundles/workstation/
+├── __init__.py
+├── tasks.py
+└── files/
+    └── sshd.conf
+```
+
+Read them from a task:
+
+```python
+content = ctx.bundle.read_resource("files/sshd.conf")
+source = ctx.bundle.resource_path("files")
+```
+
+## Configuration
+
+Configuration values are declared in the profile and exposed as `ctx.config`.
+Sources can be `Path` objects, imported modules, or dictionaries. They are
+applied from left to right; later values win:
+
+```python
+import configs.laptop
+from pathlib import Path
+
+from bundles import workstation
+
+from kitup import profile
+
+profile(
+    bundles=[workstation],
+    config=[
+        Path("config.py"),
+        {"SSH_PORT": 2222},
+        configs.laptop,
+    ],
+)
+```
+
+`config.py` might contain:
+
+```python
+PACKAGES = ["git", "ripgrep", "tmux", "neovim", "podman", "firewalld"]
+FLATPAK_APPLICATIONS = ["com.spotify.Client", "md.obsidian.Obsidian"]
+SSH_PORT = 22
+GIT_NAME = "Ada Lovelace"
+GIT_EMAIL = "ada@example.com"
+```
+
+Only public names from config files become configuration values. Explicit
+mapping keys must be public strings. Relative config paths are resolved relative
+to the profile that declares them.
+
+System information is available read-only as `ctx.facts`, including hostname,
+distribution, architecture, kernel, and mounted filesystems. See
+[docs/facts.md](docs/facts.md) for details.
+
+## Task helpers
+
+Tasks receive `ctx`, which provides:
+
+```python
+ctx.config                          # merged configuration values
+ctx.facts                           # system information
+ctx.bundle                          # current bundle and its resources
+
+ctx.run(["systemctl", "reload", "sshd"], sudo=True)  # run with sudo
+ctx.probe(["systemctl", "is-active", "firewalld"])    # read-only query
+ctx.changed({"detail": "x"}, "+x")  # report a change
+ctx.note("extra context")           # add a note
+ctx.memo("key", compute_once)       # cache a value for this run
+ctx.input("key", "Prompt: ")        # prompt for input
+ctx.set("key", value)               # store a value for later tasks
+ctx.get("key")                      # read a stored value
+ctx.skip("reason")                  # skip the task
+ctx.fail("reason")                  # fail the task
 ```
 
 ## Built-in modules
 
-All modules are idempotent and report changes through `ctx.changed()`. Modules
-are standalone and do not import each other.
+All built-in modules are idempotent and report changes through `ctx.changed()`:
 
-- `dnf` — packages, groups, swaps, release RPMs, repositories, and COPR.
+- `dnf` — packages, groups, release RPMs, repositories, and COPR.
 - `flatpak` — remotes, applications, and runtimes.
-- `files` — files, copies, line/block edits, directories, and symlinks.
-- `commands` — one-off commands with `creates`/`unless` guards.
-- `systemd` — enable/disable and start/stop units.
+- `files` — files, directories, symlinks, lines, and blocks.
+- `commands` — guarded one-off commands.
+- `systemd` — units and daemon reloads.
 - `gsettings` — GNOME settings.
 
-Full API documentation is in [docs/modules/index.md](docs/modules/index.md).
+See [docs/modules/index.md](docs/modules/index.md) for the full API.
 
 ## Privileges
 
-Operations request sudo explicitly with `sudo=True`, for example
-`ctx.run(..., sudo=True)`, `commands.run(..., sudo=True)`, or
-`files.file(..., sudo=True)`. Inherently privileged operations, such as `dnf`,
-system-scoped `systemd`, and system-scoped `flatpak`, request sudo themselves.
+Use `sudo=True` when an operation needs root:
 
-Cached credentials are reused, and kitup prompts only when they expire. The
-password prompt is handled by kitup and passed to sudo on stdin, so sudo never
-prompts on the terminal directly. Running as root is supported, but user-scoped
-modules and home-directory dotfiles must run as the target user.
-
-## Development
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest
-.venv/bin/python -m ruff check .
-.venv/bin/python -m mypy kitup
+```python
+ctx.run(["systemctl", "reload", "sshd"], sudo=True)
+files.file(
+    ctx,
+    "/etc/ssh/sshd_config.d/99-kitup.conf",
+    content="PermitRootLogin no\n",
+    mode=0o644,
+    sudo=True,
+)
 ```
 
-Tests use scripted command runners and never invoke real package, service, or
-settings-management commands.
+Package, system service, and system Flatpak operations request sudo
+automatically.
 
-Integration tests exercise real Fedora tooling in a disposable, locked-down
-container:
+kitup handles sudo prompts itself and reuses cached credentials. User-scoped
+operations and home-directory dotfiles should run as the target user, not as
+root.
 
-```bash
-./tools/integration.sh
-```
+## Examples
 
-The suite needs Podman. The container runs without network access, drops all
-capabilities except the documented minimum, applies CPU/memory/PID limits, and
-mounts the repository read-only at `/kitup-integration-test`. A normal
-`pytest` run only covers `tests/unit`; set `KITUP_INTEGRATION=1` to run
-`tests/integration` directly inside the container.
+An example configuration is included in [`examples/`](examples/). Start with
+[`examples/kitup.py`](examples/kitup.py).
 
 ## License
 

@@ -4,6 +4,7 @@ RPM package, package-group, and repository management using `dnf5` (Fedora 44+).
 
 ```python
 from kitup.modules import dnf
+from kitup.registry import task
 ```
 
 ## `packages(ctx, names, *, state="present", group=False, weak_deps=False, exclude=None)`
@@ -21,7 +22,7 @@ Ensure packages or groups are present or absent.
 Changes are reported with `added` or `removed` lists.
 
 ```python
-@bundle.task("Install multimedia tools", tags={"packages"})
+@task("Install multimedia tools", tags={"packages"})
 def install_multimedia_tools(ctx):
     dnf.packages(
         ctx,
@@ -30,7 +31,7 @@ def install_multimedia_tools(ctx):
     )
 
 
-@bundle.task("Remove legacy tools")
+@task("Remove legacy tools")
 def remove_legacy_tools(ctx):
     dnf.packages(ctx, ["old-tool"], state="absent")
 ```
@@ -43,7 +44,7 @@ Replace `old` with `new`, unless `new` is already installed.
 - The swap is verified afterward with `rpm -q new`.
 
 ```python
-@bundle.task("Install full ffmpeg", tags={"packages"})
+@task("Install full ffmpeg", tags={"packages"})
 def install_full_ffmpeg(ctx):
     dnf.swap(ctx, "ffmpeg-free", "ffmpeg", allowerasing=True)
 ```
@@ -53,7 +54,7 @@ def install_full_ffmpeg(ctx):
 Remove unused package dependencies if `dnf repoquery --unneeded` reports any.
 
 ```python
-@bundle.task("Remove unused packages", tags={"packages"})
+@task("Remove unused packages", tags={"packages"})
 def remove_unused_packages(ctx):
     dnf.autoremove(ctx)
 ```
@@ -66,7 +67,7 @@ Enable or remove a COPR project.
 - `state="absent"` removes its repository file if configured.
 
 ```python
-@bundle.task("Enable example COPR", tags={"repos"})
+@task("Enable example COPR", tags={"repos"})
 def enable_example_copr(ctx):
     dnf.copr(ctx, "owner/project")
 ```
@@ -86,12 +87,12 @@ Manage a repository from a `.repo` file.
 `"absent"` removes the installed file from dnf's repository directory.
 
 ```python
-@bundle.task("Add vendor repository", tags={"repos"})
+@task("Add vendor repository", tags={"repos"})
 def add_vendor_repository(ctx):
     dnf.repository(ctx, "https://example.test/tool.repo")
 
 
-@bundle.task("Remove vendor repository", tags={"repos"})
+@task("Remove vendor repository", tags={"repos"})
 def remove_vendor_repository(ctx):
     dnf.repository(ctx, state="absent", name="tool.repo")
 ```
@@ -104,7 +105,7 @@ as `files.copy()`; URLs and absolute paths are used as-is. `dnf install` handles
 already-installed packages.
 
 ```python
-@bundle.task("Install example release RPMs", tags={"repos"})
+@task("Install example release RPMs", tags={"repos"})
 def install_example_releases(ctx):
     dnf.rpm(
         ctx,
