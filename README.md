@@ -52,7 +52,7 @@ my-machine/
 `kitup.py` is the profile. It imports the bundle and declares the run:
 
 ```python
-from pathlib import Path
+import config
 
 from bundles import workstation
 
@@ -60,7 +60,7 @@ from kitup import profile
 
 profile(
     bundles=[workstation],
-    config=[Path("config.py")],
+    config=[config],
     description="Fedora workstation",
 )
 ```
@@ -180,7 +180,8 @@ A profile can use normal Python to build a run:
 
 ```python
 import os
-from pathlib import Path
+
+import config
 
 from bundles import base, gaming, laptop
 
@@ -196,7 +197,7 @@ if os.environ.get("KITUP_GAMING") == "1":
 
 profile(
     bundles=bundles,
-    config=[Path("config.py")],
+    config=[config],
     description="Fedora workstation",
 )
 ```
@@ -205,7 +206,7 @@ Profiles can reuse and extend other profiles:
 
 ```python
 # base_profile.py
-from pathlib import Path
+import config
 
 from bundles import base
 
@@ -213,7 +214,7 @@ from kitup import profile
 
 profile(
     bundles=[base],
-    config=[Path("config.py")],
+    config=[config],
     description="Fedora base",
 )
 ```
@@ -221,15 +222,15 @@ profile(
 ```python
 # kitup.py
 import base_profile
+import laptop as laptop_config
 from bundles import laptop
-from pathlib import Path
 
 from kitup import profile
 
 profile.extend(
     base_profile,
     bundles=[laptop],
-    config=[Path("laptop.py")],
+    config=[laptop_config],
     description="ThinkPad",
 )
 ```
@@ -292,8 +293,8 @@ Sources can be `Path` objects, imported modules, or dictionaries. They are
 applied from left to right; later values win:
 
 ```python
+import config
 import configs.laptop
-from pathlib import Path
 
 from bundles import workstation
 
@@ -302,7 +303,7 @@ from kitup import profile
 profile(
     bundles=[workstation],
     config=[
-        Path("config.py"),
+        config,
         {"SSH_PORT": 2222},
         configs.laptop,
     ],
