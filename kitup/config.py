@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from ._importer import load_module
+from ._utils.importer import load_module
 from .errors import ConfigError
 from .registry import Bundle
 

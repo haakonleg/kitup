@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-from . import PACKAGE_NAME
+from .. import PACKAGE_NAME
 
 _counter = itertools.count()
 

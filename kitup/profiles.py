@@ -9,7 +9,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from ._importer import load_module
+from ._utils.importer import load_module
 from .config import ConfigSource, mapping_key_error
 from .errors import ProfileError
 from .registry import Bundle, bundle_of
