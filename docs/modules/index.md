@@ -24,5 +24,6 @@ modules. Resources are reached through `ctx.bundle`.
 - [flatpak](flatpak.md) — Flatpak remotes, applications, and runtimes
 - [files](files.md) — files, directories, and symlinks
 - [commands](commands.md) — guarded one-off commands
+- [download](download.md) — remote file download over HTTP(S)
 - [systemd](systemd.md) — systemd units
 - [gsettings](gsettings.md) — GNOME settings

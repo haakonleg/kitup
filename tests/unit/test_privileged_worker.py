@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import stat
 import threading
@@ -107,6 +108,40 @@ def test_worker_file_actions(ctx, tmp_path):
 
         assert worker.request(Request("remove", {"path": str(path)})) == {}
         assert not path.exists()
+    finally:
+        worker.close()
+
+
+def test_worker_copy_and_digest_actions(ctx, tmp_path):
+    source = tmp_path / "source"
+    source.write_bytes(b"data\n")
+    destination = tmp_path / "destination"
+    worker = PrivilegedWorker(ctx)
+
+    try:
+        assert (
+            worker.request(
+                Request(
+                    "copy",
+                    {
+                        "source": str(source),
+                        "path": str(destination),
+                        "mode": 0o600,
+                    },
+                )
+            )
+            == {}
+        )
+        assert destination.read_bytes() == b"data\n"
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+        result = worker.request(
+            Request(
+                "digest",
+                {"path": str(destination), "algorithm": "sha256"},
+            )
+        )
+        assert result["digest"] == hashlib.sha256(b"data\n").hexdigest()
     finally:
         worker.close()
 

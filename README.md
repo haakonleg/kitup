@@ -357,6 +357,7 @@ All built-in modules are idempotent and report changes through `ctx.changed()`:
 - `flatpak` — remotes, applications, and runtimes.
 - `files` — files, directories, symlinks, lines, and blocks.
 - `commands` — guarded one-off commands.
+- `download` — remote file download over HTTP(S).
 - `systemd` — units and daemon reloads.
 - `gsettings` — GNOME settings.
 

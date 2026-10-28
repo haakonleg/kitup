@@ -61,6 +61,37 @@ def require_texts(values: Iterable[str], label: str) -> None:
         require_text(value, label)
 
 
+def require_identity(value: str | int | None, label: str) -> None:
+    """Validate an optional user or group name or numeric ID."""
+    if value is None:
+        return
+    if isinstance(value, bool):
+        raise TaskFailed(f"{label} must be a name or numeric ID")
+    if isinstance(value, int):
+        if value < 0:
+            raise TaskFailed(f"{label} must be non-negative")
+        return
+    if not isinstance(value, str):
+        raise TaskFailed(f"{label} must be a name or numeric ID")
+    require_text(value, label)
+
+
+def require_metadata(owner: str | int | None, group: str | int | None) -> None:
+    """Validate optional owner and group identities."""
+    require_identity(owner, "owner")
+    require_identity(group, "group")
+
+
+def require_mode(mode: int | None) -> None:
+    """Validate an optional file mode."""
+    if mode is None:
+        return
+    if isinstance(mode, bool) or not isinstance(mode, int):
+        raise TaskFailed("mode must be an integer")
+    if not 0 <= mode <= 0o7777:
+        raise TaskFailed("mode must be between 0 and 0o7777")
+
+
 def require_state(
     state: str,
     label: str,

@@ -5,12 +5,14 @@ standard-library-only and avoid package imports.
 """
 
 import grp
+import hashlib
 import os
 import pwd
 import shutil
 import stat
 import tempfile
-from typing import Any
+from collections.abc import Callable
+from typing import Any, BinaryIO
 
 
 def resolve_owner(owner: str | int | None) -> int | None:
@@ -86,23 +88,40 @@ def apply_metadata(
         os.chmod(path, info["mode"])
 
 
-def write_path(
+def _resolve_file_mode(
+    info: dict[str, Any] | None,
+    mode: int | None,
+    *,
+    default: int = 0o644,
+) -> int:
+    """Resolve an explicit mode, an existing file mode, or a default."""
+    if mode is not None:
+        return mode
+    if info is not None and not info["is_symlink"]:
+        return int(info["mode"])
+    return default
+
+
+def atomic_write_path(
     path: str | os.PathLike[str],
-    data: bytes,
+    writer: Callable[[BinaryIO], None],
     *,
     mode: int | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
+    default_mode: int = 0o644,
 ) -> None:
-    """Atomically write bytes, preserving metadata unless overridden."""
+    """Atomically replace a path using a callback that writes a binary stream.
+
+    Existing metadata is preserved unless overridden. The temporary file is
+    created beside the destination and replaced into place after ``writer``
+    returns and the stream is flushed.
+    """
     info = stat_path(path)
     if info is not None and info["is_dir"]:
         raise IsADirectoryError(path)
 
-    if mode is None:
-        preserve = info is not None and not info["is_symlink"]
-        mode = info["mode"] if preserve and info is not None else 0o644
-
+    resolved_mode = _resolve_file_mode(info, mode, default=default_mode)
     parent = os.path.dirname(path) or "."
     handle, temp_name = tempfile.mkstemp(
         dir=parent,
@@ -112,15 +131,10 @@ def write_path(
     temp = temp_name
     try:
         with os.fdopen(handle, "wb") as stream:
-            stream.write(data)
+            writer(stream)
             stream.flush()
             os.fsync(stream.fileno())
-        if info is not None and not info["is_symlink"]:
-            try:
-                shutil.copystat(path, temp, follow_symlinks=False)
-            except OSError:
-                pass
-        apply_metadata(temp, mode, owner, group, info, preserve=True)
+        _apply_replacement_metadata(path, temp, info, resolved_mode, owner, group)
         os.replace(temp, path)
     except BaseException:
         try:
@@ -128,6 +142,86 @@ def write_path(
         except OSError:
             pass
         raise
+
+
+def write_path(
+    path: str | os.PathLike[str],
+    data: bytes,
+    *,
+    mode: int | None = None,
+    owner: str | int | None = None,
+    group: str | int | None = None,
+) -> None:
+    """Atomically write bytes, preserving metadata unless overridden."""
+
+    def write(stream: BinaryIO) -> None:
+        stream.write(data)
+
+    atomic_write_path(path, write, mode=mode, owner=owner, group=group)
+
+
+def copy_path(
+    source: str | os.PathLike[str],
+    destination: str | os.PathLike[str],
+    *,
+    mode: int | None = None,
+    owner: str | int | None = None,
+    group: str | int | None = None,
+) -> None:
+    """Atomically copy a regular file.
+
+    Existing destination metadata is preserved unless overridden. New
+    destinations use the source mode. The source is streamed into a temporary
+    file beside the destination. Symlink and non-regular sources are rejected.
+    """
+    source_info = stat_path(source)
+    if source_info is None or source_info["is_symlink"] or not source_info["is_file"]:
+        raise ValueError(f"copy source is not a regular file: {source}")
+
+    with open(source, "rb") as source_stream:
+        def copy(stream: BinaryIO) -> None:
+            shutil.copyfileobj(source_stream, stream)
+
+        atomic_write_path(
+            destination,
+            copy,
+            mode=mode,
+            owner=owner,
+            group=group,
+            default_mode=int(source_info["mode"]),
+        )
+
+
+def _apply_replacement_metadata(
+    path: str | os.PathLike[str],
+    temp: str,
+    info: dict[str, Any] | None,
+    mode: int,
+    owner: str | int | None,
+    group: str | int | None,
+) -> None:
+    if info is not None and not info["is_symlink"]:
+        try:
+            shutil.copystat(path, temp, follow_symlinks=False)
+        except OSError:
+            pass
+        apply_metadata(temp, mode, owner, group, info, preserve=True)
+        return
+    apply_metadata(temp, mode, owner, group)
+
+
+def digest_path(path: str | os.PathLike[str], algorithm: str) -> str:
+    """Return a hex digest for a file, streaming its contents."""
+    try:
+        digest = hashlib.new(algorithm)
+    except ValueError as exc:
+        raise ValueError(f"unsupported checksum algorithm: {algorithm}") from exc
+    if digest.digest_size <= 0:
+        raise ValueError(f"unsupported checksum algorithm: {algorithm}")
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def mkdir_path(

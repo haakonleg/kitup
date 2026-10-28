@@ -11,6 +11,8 @@ metadata, then moved into place with `os.replace`. Parent directories are not
 created automatically; use `directory()` first. Recursive copies are left to task
 code using `directory()`, `copy()`, and `symlink()`.
 
+For remote file download over HTTP(S), use the [download](download.md) module.
+
 ## `file(ctx, path, *, state="present", content=None, mode=None, owner=None, group=None, sudo=False)`
 
 Ensure a text file exists with optional content, or is absent.

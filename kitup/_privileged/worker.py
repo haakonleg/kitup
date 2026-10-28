@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .._utils.file_helper import (
         apply_metadata,
+        copy_path,
+        digest_path,
         mkdir_path,
         remove_path,
         stat_path,
@@ -122,6 +124,24 @@ def write_action(params: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def copy_action(params: dict[str, Any]) -> dict[str, Any]:
+    copy_path(
+        _path(params, "source"),
+        _path(params),
+        mode=_optional_mode(params),
+        owner=_identity(params, "owner"),
+        group=_identity(params, "group"),
+    )
+    return {}
+
+
+def digest_action(params: dict[str, Any]) -> dict[str, Any]:
+    algorithm = params.get("algorithm")
+    if not isinstance(algorithm, str) or not algorithm:
+        raise ValueError("algorithm must be a non-empty string")
+    return {"digest": digest_path(_path(params), algorithm)}
+
+
 def mkdir_action(params: dict[str, Any]) -> dict[str, Any]:
     mkdir_path(
         _path(params),
@@ -156,6 +176,8 @@ ACTIONS = {
     "stat": stat_action,
     "read": read_action,
     "write": write_action,
+    "copy": copy_action,
+    "digest": digest_action,
     "mkdir": mkdir_action,
     "metadata": metadata_action,
     "symlink": symlink_action,
