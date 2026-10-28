@@ -91,10 +91,6 @@ def test_collect_mounts_adds_capacity_and_skips_unreadable_mounts(tmp_path):
         raise AssertionError("mounts should be read-only")
 
 
-def test_missing_mountinfo_omits_mounts(tmp_path):
-    assert collect_mounts(tmp_path / "missing") == ()
-
-
 def test_collect_facts_from_os_release(tmp_path):
     path = tmp_path / "os-release"
     path.write_text(
@@ -113,12 +109,11 @@ def test_collect_facts_from_os_release(tmp_path):
     assert facts["kernel"]
 
 
-def test_missing_os_release_omits_optional_facts(tmp_path):
-    facts = collect_facts(tmp_path / "missing")
+def test_missing_sources_omit_optional_facts(tmp_path):
+    assert collect_mounts(tmp_path / "missing-mountinfo") == ()
 
+    facts = collect_facts(tmp_path / "missing-os-release")
     assert "os_release" not in facts
     assert "distro_id" not in facts
     assert "version_id" not in facts
     assert "hostname" in facts
-
-

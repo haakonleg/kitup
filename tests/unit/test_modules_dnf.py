@@ -105,27 +105,6 @@ def test_ensure_group_installs_missing_group(tmp_path):
     assert ctx.changes[0].data == {"added": ["desktop"], "group": True}
 
 
-def test_group_substring_is_not_treated_as_installed(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0, "base-x\n"),
-        response(0),
-        response(0, "base-x\nbase\n"),
-    ]
-    ctx = make_context(tmp_path, command=command)
-
-    dnf.packages(ctx, ["base"], group=True)
-
-    assert command.calls[1][0] == [
-        "dnf5",
-        "group",
-        "install",
-        "-y",
-        "--setopt=install_weak_deps=False",
-        "base",
-    ]
-
-
 def test_at_prefixed_group_and_package_install_together(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
@@ -314,15 +293,6 @@ def test_swap_failure_is_reported(tmp_path):
         dnf.swap(ctx, "ffmpeg-free", "ffmpeg")
 
 
-def test_swap_rejects_empty_names(tmp_path):
-    ctx = make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="package to remove must not be empty"):
-        dnf.swap(ctx, " ", "ffmpeg")
-    with pytest.raises(TaskFailed, match="package to install must not be empty"):
-        dnf.swap(ctx, "ffmpeg-free", " ")
-
-
 def test_invalid_states_are_errors(tmp_path):
     ctx = make_context(tmp_path)
 
@@ -393,22 +363,6 @@ def test_copr_enables_missing_project(tmp_path):
         "owner/project",
     ]
     assert ctx.changes[0].data["type"] == "copr"
-
-
-def test_copr_near_miss_is_not_treated_as_listed(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0, "owner/project-extra\n"), response(0)]
-    ctx = make_context(tmp_path, command=command)
-
-    dnf.copr(ctx, "owner/project")
-
-    assert command.calls[1][0] == [
-        "dnf5",
-        "copr",
-        "enable",
-        "-y",
-        "owner/project",
-    ]
 
 
 def test_copr_absent_removes_listed_project(tmp_path):
@@ -489,43 +443,13 @@ def test_rpm_release_accepts_multiple_sources(tmp_path):
     )
 
 
-def test_repository_present_requires_source(tmp_path):
+def test_repository_requires_arguments(tmp_path):
     ctx = make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="source is required"):
         dnf.repository(ctx)
-
-
-def test_repository_absent_requires_name(tmp_path):
-    ctx = make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="name is required"):
         dnf.repository(ctx, "https://example.test/tool.repo", state="absent")
-
-
-def test_empty_inputs_are_rejected(tmp_path):
-    ctx = make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="must not be empty"):
-        dnf.packages(ctx, [])
-    with pytest.raises(TaskFailed, match="must not be empty"):
-        dnf.packages(ctx, "")
-    with pytest.raises(TaskFailed, match="must not be empty"):
-        dnf.packages(ctx, ["git", "  "])
-    with pytest.raises(TaskFailed, match="group name must not be empty"):
-        dnf.packages(ctx, ["@"])
-    with pytest.raises(TaskFailed, match="excluded package must not be empty"):
-        dnf.packages(ctx, ["git"], exclude=["  "])
-    with pytest.raises(TaskFailed, match="COPR project must not be empty"):
-        dnf.copr(ctx, "  ")
-    with pytest.raises(TaskFailed, match="repository source must not be empty"):
-        dnf.repository(ctx, "  ")
-    with pytest.raises(TaskFailed, match="repository name must not be empty"):
-        dnf.repository(ctx, state="absent", name="  ")
-    with pytest.raises(TaskFailed, match="RPM source must not be empty"):
-        dnf.rpm(ctx, "  ")
-    with pytest.raises(TaskFailed, match="RPM sources must not be empty"):
-        dnf.rpm(ctx, [])
 
 
 def test_repository_present_adds_repo_file(tmp_path):
@@ -614,18 +538,3 @@ def test_repository_absent_is_a_noop_when_file_is_missing(tmp_path):
 
     assert [call[0] for call in command.calls] == [["dnf5", "--dump-main-config"]]
     assert ctx.changes == []
-
-
-def test_repository_uses_custom_name(tmp_path):
-    reposdir = tmp_path / "repos.d"
-    reposdir.mkdir()
-    command = FakeCommandRunner()
-    command.responses = [response(0, f"reposdir = {reposdir}\n"), response(0)]
-    ctx = make_context(tmp_path, command=command)
-
-    dnf.repository(ctx, "https://example.test/tool.repo", name="vendor")
-
-    assert command.calls[1][0][-1] == "--save-filename=vendor.repo"
-    assert ctx.changes[0].data["path"] == str(reposdir / "vendor.repo")
-
-

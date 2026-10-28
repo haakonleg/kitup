@@ -11,6 +11,7 @@ from .._utils import file_ops
 from .._utils.file_helper import (
     apply_metadata,
     mkdir_path,
+    move_path,
     read_path,
     remove_path,
     symlink_path,
@@ -128,6 +129,93 @@ def copy(
         data={"path": str(target), "source": str(source), "action": "copy"},
         sudo=sudo,
     )
+
+
+def move(
+    ctx: TaskContext,
+    src: str | Path,
+    dest: str | Path,
+    *,
+    mode: int | None = None,
+    owner: str | int | None = None,
+    group: str | int | None = None,
+    sudo: bool = False,
+) -> None:
+    """Move one regular file, preserving its mode and ownership when renamed.
+
+    Unlike :func:`copy`, ``src`` is used as given and is not resolved against
+    the bundle. When ``dest`` ends with a slash it is treated as a directory
+    and the source filename is appended. If ``src`` is already gone and
+    ``dest`` exists, the move is treated as complete. ``mode``, ``owner``, and
+    ``group`` are applied to the destination after the move.
+    """
+    require_path(src, "move source")
+    require_path(dest, "move destination")
+    require_metadata(owner, group)
+    require_mode(mode)
+    source = Path(src)
+    target = Path(dest)
+    if str(dest).endswith("/"):
+        target /= source.name
+
+    source_info = file_ops.stat(ctx, source, sudo=sudo)
+    target_info = file_ops.stat(ctx, target, sudo=sudo)
+    if source_info is None:
+        if target_info is not None and not target_info.is_dir and not target_info.is_symlink:
+            _reconcile_metadata(
+                ctx,
+                target,
+                target_info,
+                mode=mode,
+                owner=owner,
+                group=group,
+                sudo=sudo,
+            )
+            return
+        raise TaskFailed(f"move source does not exist: {source}")
+    if source_info.is_symlink or not source_info.is_file:
+        raise TaskFailed(f"move source is not a regular file: {source}")
+    if target_info is not None and target_info.is_dir and not target_info.is_symlink:
+        raise TaskFailed(f"destination is a directory: {target}")
+    if target_info is not None and target_info.is_symlink:
+        raise TaskFailed(f"refusing to replace symlink: {target}")
+    if source.absolute() == target.absolute():
+        _reconcile_metadata(
+            ctx,
+            target,
+            target_info,
+            mode=mode,
+            owner=owner,
+            group=group,
+            sudo=sudo,
+        )
+        return
+
+    file_ops.require_parent(ctx, target, sudo=sudo)
+    ctx.changed(
+        {"path": str(target), "source": str(source), "action": "move"},
+        f"move {source} -> {target}",
+    )
+    if ctx.dry_run:
+        if mode is not None or owner is not None or group is not None:
+            file_ops.resolve_metadata(owner, group)
+        return
+    _move(ctx, source, target, sudo=sudo)
+    if mode is None and owner is None and group is None:
+        return
+    moved_info = file_ops.stat(ctx, target, sudo=sudo)
+    if moved_info is None:
+        raise TaskFailed(f"move destination is missing after moving: {target}")
+    resolved_mode = moved_info.mode if mode is None else mode
+    if file_ops.metadata_differs(moved_info, resolved_mode, owner, group):
+        _apply_metadata_ctx(
+            ctx,
+            target,
+            resolved_mode,
+            owner,
+            group,
+            sudo=sudo,
+        )
 
 
 def line(
@@ -448,6 +536,44 @@ def _write_bytes(
         raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not write {path}: {exc}") from exc
+
+
+def _move(ctx: TaskContext, source: Path, target: Path, *, sudo: bool) -> None:
+    if file_ops.privileged(ctx, sudo):
+        file_ops.worker_request(ctx, "move", source=str(source), path=str(target))
+        return
+    try:
+        move_path(source, target)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
+    except OSError as exc:
+        raise TaskFailed(f"could not move {source} to {target}: {exc}") from exc
+
+
+def _reconcile_metadata(
+    ctx: TaskContext,
+    target: Path,
+    info: file_ops.FileInfo | None,
+    *,
+    mode: int | None,
+    owner: str | int | None,
+    group: str | int | None,
+    sudo: bool,
+) -> None:
+    if info is None or (mode is None and owner is None and group is None):
+        return
+    resolved_mode = info.mode if mode is None else mode
+    if not file_ops.metadata_differs(info, resolved_mode, owner, group):
+        return
+    if ctx.dry_run:
+        file_ops.resolve_metadata(owner, group)
+    ctx.changed(
+        {"path": str(target), "action": "metadata"},
+        f"update metadata for {target}",
+    )
+    if ctx.dry_run:
+        return
+    _apply_metadata_ctx(ctx, target, resolved_mode, owner, group, sudo=sudo)
 
 
 def _mkdir(

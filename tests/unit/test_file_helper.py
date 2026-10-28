@@ -9,11 +9,12 @@ import pytest
 from kitup._utils.file_helper import (
     apply_metadata,
     atomic_write_path,
-    copy_path,
     digest_path,
     mkdir_path,
+    move_path,
     read_path,
     remove_path,
+    replace_path,
     stat_path,
     symlink_path,
     write_path,
@@ -91,40 +92,83 @@ def test_atomic_write_path_uses_callback_and_preserves_metadata(tmp_path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-def test_copy_path_preserves_existing_metadata(tmp_path):
+def test_move_path_moves_a_file_and_removes_the_source(tmp_path):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    source.chmod(0o600)
+    destination = tmp_path / "destination"
+
+    move_path(source, destination)
+
+    assert not source.exists()
+    assert destination.read_text() == "data\n"
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+
+def test_move_path_rejects_invalid_sources_and_destinations(tmp_path):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(source)
+
+    with pytest.raises(ValueError, match="regular file"):
+        move_path(tmp_path, tmp_path / "destination")
+    with pytest.raises(ValueError, match="regular file"):
+        move_path(link, tmp_path / "destination")
+    with pytest.raises(IsADirectoryError):
+        move_path(source, directory)
+    with pytest.raises(ValueError, match="symlink"):
+        move_path(source, link)
+
+
+def test_replace_path_moves_content_and_preserves_metadata(tmp_path):
     source = tmp_path / "source"
     source.write_text("new\n")
     destination = tmp_path / "destination"
     destination.write_text("old\n")
     destination.chmod(0o600)
 
-    copy_path(source, destination)
+    replace_path(source, destination)
 
     assert destination.read_text() == "new\n"
     assert stat.S_IMODE(destination.stat().st_mode) == 0o600
-    assert source.exists()
+    assert not source.exists()
 
 
-def test_copy_path_defaults_new_file_mode_to_source_mode(tmp_path):
+def test_replace_path_uses_default_mode_for_new_destinations(tmp_path):
     source = tmp_path / "source"
     source.write_text("new\n")
-    source.chmod(0o755)
-    destination = tmp_path / "destination"
 
-    copy_path(source, destination)
+    replace_path(source, tmp_path / "destination", default_mode=0o640)
 
-    assert destination.read_text() == "new\n"
-    assert stat.S_IMODE(destination.stat().st_mode) == 0o755
+    assert stat.S_IMODE((tmp_path / "destination").stat().st_mode) == 0o640
 
 
-def test_copy_path_rejects_invalid_sources_and_destinations(tmp_path):
+def test_replace_path_replaces_symlinks_without_following(tmp_path):
+    source = tmp_path / "source"
+    source.write_text("new\n")
+    target = tmp_path / "target"
+    target.write_text("keep\n")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+
+    replace_path(source, link)
+
+    assert not link.is_symlink()
+    assert link.read_text() == "new\n"
+    assert target.read_text() == "keep\n"
+
+
+def test_replace_path_rejects_invalid_sources_and_destinations(tmp_path):
     source = tmp_path / "source"
     source.write_text("new\n")
 
     with pytest.raises(ValueError, match="regular file"):
-        copy_path(tmp_path, tmp_path / "destination")
+        replace_path(tmp_path, tmp_path / "destination")
     with pytest.raises(IsADirectoryError):
-        copy_path(source, tmp_path)
+        replace_path(source, tmp_path)
 
 
 def test_digest_path_streams_file_content(tmp_path):

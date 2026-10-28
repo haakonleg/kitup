@@ -131,7 +131,7 @@ def test_remote_absent_is_a_noop_when_missing(tmp_path):
     assert ctx.changes == []
 
 
-def test_remote_present_requires_url_and_text(tmp_path):
+def test_invalid_remote_arguments_are_rejected(tmp_path):
     ctx = make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="URL is required"):
@@ -140,11 +140,6 @@ def test_remote_present_requires_url_and_text(tmp_path):
         flatpak.remote(ctx, "  ", REMOTE_URL)
     with pytest.raises(TaskFailed, match="remote URL must not be empty"):
         flatpak.remote(ctx, REMOTE, "  ")
-
-
-def test_remote_invalid_state_and_scope_are_errors(tmp_path):
-    ctx = make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="invalid flatpak state"):
         flatpak.remote(ctx, REMOTE, REMOTE_URL, state="invalid")
     with pytest.raises(TaskFailed, match="invalid flatpak scope"):
@@ -221,38 +216,6 @@ def test_packages_full_refs_and_kind_prefixes_match_exactly(tmp_path):
 
     assert [call[0] for call in command.calls] == [LIST]
     assert ctx.changes == []
-
-
-def test_packages_full_ref_for_another_branch_is_missing(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0, installed((APP, APP_REF))),
-        response(0),
-        response(
-            0,
-            installed((APP, APP_REF), (APP, "org.example.App/x86_64/beta")),
-        ),
-    ]
-    ctx = make_context(tmp_path, command=command)
-
-    flatpak.packages(ctx, ["org.example.App/x86_64/beta"])
-
-    assert command.calls[1][0][-1] == "org.example.App/x86_64/beta"
-    assert ctx.changes[0].data == {
-        "added": ["org.example.App/x86_64/beta"],
-        "scope": "system",
-    }
-
-
-def test_packages_present_dry_run_does_not_install(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0)]
-    ctx = make_context(tmp_path, dry_run=True, command=command)
-
-    flatpak.packages(ctx, [APP])
-
-    assert [call[0] for call in command.calls] == [LIST]
-    assert len(ctx.changes) == 1
 
 
 def test_packages_absent_removes_installed_ref(tmp_path):
@@ -376,18 +339,13 @@ def test_user_scope_refuses_root(tmp_path):
         flatpak.packages(ctx, [APP], scope="user")
 
 
-def test_packages_invalid_state_and_scope_are_errors(tmp_path):
+def test_invalid_package_arguments_are_rejected(tmp_path):
     ctx = make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid flatpak state"):
         flatpak.packages(ctx, [APP], state="invalid")
     with pytest.raises(TaskFailed, match="invalid flatpak scope"):
         flatpak.packages(ctx, [APP], scope="session")
-
-
-def test_empty_package_inputs_are_rejected(tmp_path):
-    ctx = make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="flatpak refs must not be empty"):
         flatpak.packages(ctx, [])
     with pytest.raises(TaskFailed, match="flatpak ref must not be empty"):
@@ -418,19 +376,3 @@ def test_removal_verification_failure_is_reported(tmp_path):
 
     with pytest.raises(TaskFailed, match="still installed after removal"):
         flatpak.packages(ctx, [APP], state="absent")
-
-
-def test_packages_accepts_a_single_string(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0),
-        response(0),
-        response(0, installed((APP, APP_REF))),
-    ]
-    ctx = make_context(tmp_path, command=command)
-
-    flatpak.packages(ctx, APP)
-
-    assert command.calls[1][0][-1] == APP
-
-

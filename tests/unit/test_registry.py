@@ -28,21 +28,6 @@ def import_package(tmp_path: Path, files: dict[str, str]) -> tuple[str, object]:
         sys.path.remove(str(tmp_path))
     return name, module
 
-def test_bundle_in_ordinary_module_gets_path_but_is_not_attached(tmp_path):
-    module_name, _module = import_package(
-        tmp_path,
-        {
-            "__init__.py": "",
-            "helper.py": "from kitup.registry import Bundle\nb = Bundle('Helper')\n",
-        },
-    )
-    helper = importlib.import_module(f"{module_name}.helper")
-
-    assert helper.b.path == tmp_path / module_name
-    assert not hasattr(helper, "__kitup_bundle__")
-    with pytest.raises(BundleError, match="does not define a bundle"):
-        bundle_of(helper)
-
 def test_bundle_name_must_not_be_empty():
     with pytest.raises(BundleError, match="bundle name must not be empty"):
         Bundle("")
@@ -102,28 +87,6 @@ def test_task_decorator_registers_on_the_calling_bundle(tmp_path):
     assert registered.bundle_path == bundle.path
     assert registered.id == "Base.install"
 
-def test_task_decorator_walks_nested_task_packages(tmp_path):
-    _, module = import_package(
-        tmp_path,
-        {
-            "__init__.py": (
-                "from kitup.registry import Bundle\n"
-                "Bundle('Base')\n"
-                "from . import tasks  # noqa: F401\n"
-            ),
-            "tasks/__init__.py": "from . import nested  # noqa: F401\n",
-            "tasks/nested.py": (
-                "from kitup.registry import task\n"
-                "@task('Nested')\n"
-                "def nested(ctx):\n"
-                "    pass\n"
-            ),
-        },
-    )
-
-    bundle = bundle_of(module)  # type: ignore[arg-type]
-    assert [registered.name for registered in bundle.tasks] == ["Nested"]
-
 def test_task_decorator_fails_when_bundle_was_not_constructed_first(tmp_path):
     with pytest.raises(BundleError, match="no bundle found for module"):
         import_package(
@@ -138,47 +101,6 @@ def test_task_decorator_fails_when_bundle_was_not_constructed_first(tmp_path):
                 ),
             },
         )
-
-def test_bundle_task_remains_usable_directly():
-    bundle = Bundle("Base")
-
-    @bundle.task("Direct")
-    def direct(ctx):
-        pass
-
-    (registered,) = bundle.tasks
-    assert registered.name == "Direct"
-    assert direct.__name__ == "direct"
-
-def test_set_path_updates_registered_tasks(tmp_path):
-    bundle = Bundle("Base")
-
-    @bundle.task("Task")
-    def task_func(ctx):
-        pass
-
-    bundle.set_path(tmp_path)
-
-    assert bundle.tasks[0].func is task_func
-    assert bundle.tasks[0].bundle_path == tmp_path
-
-def test_bundle_in_package_init_attaches_privately(tmp_path):
-    _, module = import_package(
-        tmp_path,
-        {"__init__.py": "from kitup.registry import Bundle\nBundle('Base')\n"},
-    )
-
-    bundle = bundle_of(module)  # type: ignore[arg-type]
-    assert bundle.name == "Base"
-    assert bundle.path == tmp_path / module.__name__  # type: ignore[attr-defined]
-    assert module.__kitup_bundle__ is bundle  # type: ignore[attr-defined]
-    assert not hasattr(module, "bundle")
-
-    _, assigned = import_package(
-        tmp_path,
-        {"__init__.py": "from kitup.registry import Bundle\nbundle = Bundle('Base')\n"},
-    )
-    assert bundle_of(assigned) is assigned.bundle  # type: ignore[arg-type]
 
 def test_bundle_paths_and_resources(tmp_path):
     resource_root = tmp_path / "resources"

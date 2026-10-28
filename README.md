@@ -81,7 +81,7 @@ from kitup.registry import Bundle
 
 Bundle("Workstation")
 
-from . import tasks  # noqa: F401
+from . import tasks
 ```
 
 Tasks use the `task` decorator. The name is required and must be a non-empty
@@ -251,7 +251,7 @@ from kitup.registry import Bundle
 
 Bundle("Workstation")
 
-from . import packages, services  # noqa: F401
+from . import packages, services
 ```
 
 Bundles can depend on other bundles:
@@ -264,7 +264,7 @@ from kitup.registry import Bundle
 
 Bundle("Workstation", depends_on=[base, repos])
 
-from . import tasks  # noqa: F401
+from . import tasks
 ```
 
 Dependencies run first, and each bundle runs at most once.
@@ -351,13 +351,14 @@ ctx.fail("reason")                  # fail the task
 
 ## Built-in modules
 
-All built-in modules are idempotent and report changes through `ctx.changed()`:
+All built-in modules are idempotent:
 
 - `dnf` — packages, groups, release RPMs, repositories, and COPR.
 - `flatpak` — remotes, applications, and runtimes.
-- `files` — files, directories, symlinks, lines, and blocks.
+- `files` — files, directories, symlinks, lines, blocks, and moves.
 - `commands` — guarded one-off commands.
 - `download` — remote file download over HTTP(S).
+- `decompress` — tar/zip extraction and single-file decompression.
 - `systemd` — units and daemon reloads.
 - `gsettings` — GNOME settings.
 
@@ -381,9 +382,8 @@ files.file(
 Package, system service, and system Flatpak operations request sudo
 automatically.
 
-kitup handles sudo prompts itself and reuses cached credentials. User-scoped
-operations and home-directory dotfiles should run as the target user, not as
-root.
+kitup handles sudo prompts itself. User-scoped operations and home-directory
+dotfiles should run as the target user, not as root.
 
 ## Examples
 

@@ -1,18 +1,17 @@
 # Facts
 
 `ctx.facts` is a read-only snapshot of the host, collected once at startup and
-shared by all tasks. It is a `Mapping[str, Any]`; optional facts are omitted when
-their source is unavailable.
+shared by all tasks. Optional facts are omitted when unavailable.
 
-| Key | Type | Source |
+| Key | Type | Description |
 | --- | --- | --- |
-| `hostname` | `str` | `socket.gethostname()` |
-| `os_release` | `Mapping[str, str]` | `/etc/os-release` |
-| `distro_id` | `str` | `os_release["ID"]` |
-| `version_id` | `str` | `os_release["VERSION_ID"]` |
-| `arch` | `str` | `platform.machine()` |
-| `kernel` | `str` | `platform.release()` |
-| `mounts` | `tuple[Mapping[str, Any], ...]` | `/proc/self/mountinfo`, `os.statvfs()` |
+| `hostname` | `str` | Host name of the machine. |
+| `os_release` | `Mapping[str, str]` | Parsed operating-system release metadata, for example `ID`, `NAME`, and `VERSION_ID`. |
+| `distro_id` | `str` | Distribution identifier from `os_release`, such as `fedora`. |
+| `version_id` | `str` | Distribution version from `os_release`, such as `44`. |
+| `arch` | `str` | Machine architecture, such as `x86_64`. |
+| `kernel` | `str` | Release identifier of the running kernel. |
+| `mounts` | `tuple[Mapping[str, Any], ...]` | Mounted filesystems and their capacity; see the fields below. |
 
 Each mount contains:
 
@@ -28,18 +27,14 @@ Each mount contains:
 
 ## Details
 
-- `hostname` is omitted if the system call fails.
-- `os_release` contains the parsed `KEY=value` entries from `/etc/os-release`.
-  Comments and blank lines are ignored, and quoted values are unquoted.
-- `os_release` is omitted when the file is missing or contains no entries.
 - `distro_id` and `version_id` are present only when the corresponding
   `os_release` field exists.
-- `arch` and `kernel` are omitted when the platform reports an empty value.
-- `mounts` is omitted when `/proc/self/mountinfo` is unavailable. Mounts whose
+- `os_release` is omitted when the host does not provide release data.
+- `arch` and `kernel` are omitted when unavailable.
+- `mounts` is omitted when mount information is unavailable. Mounts whose
   capacity cannot be read are skipped.
 - `bytes_free` is the filesystem's free space, so
   `bytes_used + bytes_free == bytes_total`.
-- The mapping, nested `os_release` mapping, and mount mappings are immutable.
 - Values are snapshots, not live state. Tasks needing current information should
   query it directly.
 

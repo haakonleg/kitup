@@ -18,7 +18,7 @@ Run `argv` unless a guard is already satisfied.
 - `cwd` — working directory for the command and guards.
 - `env` — additional environment variables.
 - `changed` — when `False`, execute without recording a change.
-- `sudo` — run through sudo; cached credentials are revalidated on use.
+- `sudo` — run through sudo.
 - `timeout` — command timeout in seconds.
 
 ```python
@@ -35,12 +35,8 @@ def create_marker(ctx):
 
 Run a command string through a shell. Other arguments match `run()`.
 
-- `shell` — shell executable. Defaults to `$SHELL`, then the current user's
-  passwd shell, then `/bin/sh`.
-- The shell is invoked as `<shell> -c <command>`.
+- `shell` — shell executable. Defaults to `$SHELL`, then the user's login shell.
 - `unless` is a shell command string, evaluated with the same shell.
-
-`env["SHELL"]` sets the variable inside the command but does not select the shell.
 
 ```python
 @task("Install via shell pipeline", tags={"config"})
@@ -58,6 +54,5 @@ def install_with_pipeline(ctx):
 - Guards are evaluated in dry-run mode; mutating commands are not executed.
 - Arguments may be a sequence or a single string; a single string is one
   argument and is not split. Commands never receive interactive stdin.
-- A nonzero exit raises `TaskFailed` with captured stdout and stderr.
-- Commands run in their own process group; timeouts terminate the whole group.
+- A nonzero exit fails the task.
 - Prefer a dedicated module when one exists.

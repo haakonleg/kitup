@@ -6,7 +6,7 @@ Remote file download over HTTP(S).
 from kitup.modules import download
 ```
 
-## `to_file(ctx, url, dest, *, checksum=None, force=False, headers=None, timeout=30, validate_certs=True, mode=None, owner=None, group=None, sudo=False)`
+## `to_file(ctx, url, dest, *, checksum=None, force=False, headers=None, timeout=30, validate_certs=True, mode=None)`
 
 Download a URL to a destination file.
 
@@ -16,31 +16,41 @@ Download a URL to a destination file.
   and does not match.
 - `checksum` uses `algorithm:digest` format, for example
   `sha256:b5bb9d...`. The digest is verified before the destination is replaced.
-- `headers` adds request headers. kitup does not add any headers by default.
+- `headers` adds request headers.
 - `timeout` is the network timeout in seconds.
 - `validate_certs=False` disables TLS certificate verification. Use it only for
   trusted hosts with self-signed certificates.
 - `mode=None` preserves an existing mode; new files default to `0o644`.
-- `owner` and `group` accept a name or numeric ID and preserve existing values
-  unless specified.
-- `sudo=True` installs the file through the privileged worker.
+  Ownership is never changed.
 
 ```python
+from pathlib import Path
+
+from kitup.modules import files
+
+
 @task("Install example repository key", tags={"repos"})
 def install_example_key(ctx):
+    key = Path("/tmp/example-key.asc")
     download.to_file(
         ctx,
         "https://example.test/repo/key.asc",
-        "/etc/pki/rpm-gpg/RPM-GPG-KEY-example",
+        key,
         checksum="sha256:...",
+    )
+    files.move(
+        ctx,
+        key,
+        "/etc/pki/rpm-gpg/RPM-GPG-KEY-example",
         mode=0o644,
+        owner="root",
+        group="root",
         sudo=True,
     )
 ```
 
-Downloads are written to a temporary file and installed atomically. Existing
-destination symlinks are rejected rather than followed. Parent directories are
-not created automatically; use `files.directory()` first.
+Existing destination symlinks are rejected rather than followed. Parent
+directories are not created automatically; use `files.directory()` first.
 
 With `force=False` and no checksum, an existing file is never re-downloaded.
 Use `force=True` to check the remote content on each run; the file is reported
@@ -53,7 +63,6 @@ Download a URL into memory and return its raw bytes.
 - `checksum` is verified before returning.
 - `max_bytes` limits the response size. Set it to `None` to disable the limit.
   The default is 10 MiB.
-- No destination file is created.
 
 ```python
 @task("Read example metadata")
@@ -66,10 +75,11 @@ Prefer `to_file()` for large files.
 
 ## Notes
 
-- Only `http` and `https` URLs are supported.
-- Redirects are followed.
-- Environment proxy settings are honored.
-- Responses are returned or written as received; content encoding is not
-  automatically decompressed.
-- Checksum URLs, backup files, HTTP basic authentication, client certificates,
-  and FTP or `file://` URLs are not supported.
+- Downloads run as the current user and never use sudo. Move a downloaded file
+  into a privileged location with [`files.move(..., sudo=True)`](files.md), or
+  use `files.copy(...)` when the destination should be owned by the privileged
+  user.
+- Only `http` and `https` URLs are supported. Redirects are followed.
+- Content encoding is not automatically decompressed.
+- Checksum URLs, authentication, client certificates, and non-HTTP(S) URLs are
+  not supported.

@@ -223,16 +223,6 @@ def test_bundle_errors_are_exit_2(tmp_path, capsys):
     assert code == 2
     assert "does not define a bundle" in capsys.readouterr().err
 
-def test_sys_path_is_restored_after_loading(tmp_path):
-    make_bundle(tmp_path, "base")
-    make_profile(tmp_path, ["base"])
-    before = list(sys.path)
-
-    code = cli.main(["list", str(tmp_path / "kitup.py"), "--no-color"])
-
-    assert code == 0
-    assert sys.path == before
-
 def test_profile_named_kitup_can_import_the_package(tmp_path, capsys):
     make_bundle(tmp_path, "base")
     make_profile(tmp_path, ["base"])

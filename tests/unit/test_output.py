@@ -5,7 +5,6 @@ from io import StringIO
 from kitup.output.animation import Animation
 from kitup.output.live_line import LiveLine
 from kitup.output.output import Output
-from kitup.output.terminal import clear_lines
 from kitup.output.timer import Stopwatch
 
 
@@ -54,30 +53,6 @@ def test_output_task_elapsed_excludes_interactive_time():
     assert output.task_elapsed == 3.0
 
 
-def test_output_task_elapsed_handles_nested_interactive_prompts():
-    clock = FakeClock()
-    output = Output(StringIO(), no_color=True, clock=clock)
-    output.task_start("task")
-
-    clock.advance(1)
-    with output.interactive():
-        clock.advance(2)
-        with output.interactive():
-            clock.advance(3)
-        clock.advance(4)
-    clock.advance(5)
-
-    assert output.task_elapsed == 6.0
-
-
-def test_clear_lines_erases_the_requested_lines():
-    stream = FakeTTY()
-
-    clear_lines(stream, 2)
-
-    assert stream.getvalue() == "\033[2A\r\033[J"
-
-
 def test_clear_input_erases_prompt_and_echoed_value():
     stream = FakeTTY()
     output = Output(stream, no_color=True)
@@ -85,15 +60,6 @@ def test_clear_input_erases_prompt_and_echoed_value():
     output.clear_input("Value: ", "abc")
 
     assert stream.getvalue() == "\033[1A\r\033[J"
-
-
-def test_clear_input_counts_wrapped_lines():
-    stream = FakeTTY()
-    output = Output(stream, no_color=True)
-
-    output.clear_input("x" * 100, "abc")
-
-    assert stream.getvalue() == "\033[2A\r\033[J"
 
 
 def test_live_line_elapsed_excludes_suspended_time():

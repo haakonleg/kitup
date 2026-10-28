@@ -19,9 +19,8 @@ Manage a Flatpak remote repository.
   Useful for unsigned local repositories.
 
 `"present"` adds the remote only when the name is missing. An existing remote is
-left unchanged, including its URL. `"absent"` deletes the remote without
-`--force`; if installed applications still use it, Flatpak fails and the task
-reports the error.
+left unchanged, including its URL. `"absent"` removes the remote; if installed
+applications still use it, the task fails.
 
 ```python
 @task("Add Flathub", tags={"flatpak"})
@@ -57,10 +56,9 @@ A bare ID such as `org.gnome.Calculator` matches any installed branch. A full
 ref such as `org.gnome.Calculator/x86_64/stable` or
 `app/org.gnome.Calculator/x86_64/stable` matches that exact ref.
 
-`"present"` installs only missing refs and then verifies the result. `"absent"`
-removes only installed refs and then verifies the result. `remote` only selects
-the source for new installs; an already-installed app is not moved or
-reinstalled.
+`"present"` installs only missing refs. `"absent"` removes only installed refs.
+`remote` only selects the source for new installs; an already-installed app is
+not moved or reinstalled.
 
 ```python
 @task("Install Flatpak apps", tags={"flatpak"})
@@ -80,13 +78,7 @@ def remove_flatpak_app(ctx):
 ## Notes
 
 - `flatpak` must be installed.
-- Flatpak treats the system installation as the default. `scope="system"`
-  requests sudo so kitup controls authentication, caching, and prompts. This
-  also works over SSH, in headless sessions, and in containers.
-- `scope="user"` never uses sudo and fails clearly when kitup runs as root.
-  Flatpak itself refuses `sudo flatpak --user`.
-- State is read with `flatpak list --columns=application,ref`. Read-only probes
-  do not request sudo.
-- `--dry-run` reports changes without mutating anything.
+- `scope="system"` requests sudo. `scope="user"` never uses sudo and fails when
+  kitup runs as root.
 - Updates, permission overrides, bundles, and `.flatpakref` files are out of
   scope.

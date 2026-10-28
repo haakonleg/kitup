@@ -10,7 +10,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import download
 
-from .helpers import PassthroughSudo, make_context
+from .helpers import make_context
 
 
 class ServerState:
@@ -160,20 +160,6 @@ def test_to_file_uses_url_basename_for_directory_destination(tmp_path, http_serv
 
     assert (directory / "file.txt").read_bytes() == state.payload
 
-def test_to_file_sends_custom_headers_without_default_user_agent(tmp_path, http_server):
-    state, base = http_server
-
-    download.to_file(
-        make_context(tmp_path),
-        f"{base}/file.txt",
-        tmp_path / "file.txt",
-        headers={"X-Kitup-Test": "yes"},
-    )
-
-    headers = {name.lower(): value for name, value in state.headers[-1].items()}
-    assert headers["x-kitup-test"] == "yes"
-    assert "user-agent" not in headers
-
 def test_to_file_http_error_is_a_task_failure(tmp_path, http_server):
     _, base = http_server
     target = tmp_path / "file.txt"
@@ -244,20 +230,14 @@ def test_to_file_validates_arguments_without_fetching(tmp_path, http_server):
 
     assert state.requests == 0
 
-def test_to_file_uses_privileged_worker_for_install(tmp_path, http_server):
+def test_to_file_creates_new_files_with_the_requested_mode(tmp_path, http_server):
     state, base = http_server
     target = tmp_path / "file.txt"
-    sudo = PassthroughSudo()
-    ctx = make_context(tmp_path, sudo=sudo)
 
-    try:
-        download.to_file(ctx, f"{base}/file.txt", target, mode=0o600, sudo=True)
-    finally:
-        ctx.close()
+    download.to_file(make_context(tmp_path), f"{base}/file.txt", target, mode=0o600)
 
     assert target.read_bytes() == state.payload
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
-    assert sudo.refresh_count > 0
 
 def test_to_bytes_returns_content_and_verifies_checksum(tmp_path, http_server):
     state, base = http_server
@@ -275,4 +255,3 @@ def test_to_bytes_enforces_max_bytes(tmp_path, http_server):
 
     with pytest.raises(TaskFailed, match="max_bytes"):
         download.to_bytes(make_context(tmp_path), f"{base}/file.txt", max_bytes=4)
-

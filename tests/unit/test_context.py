@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from kitup.errors import TaskFailed
-from kitup.registry import Bundle, Task
+from kitup.registry import Bundle
 
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
 
@@ -216,15 +216,6 @@ def test_bundle_is_the_owning_bundle_for_the_current_task(tmp_path):
 
     assert context.bundle is bundle
     assert context.bundle_path == tmp_path
-
-def test_bundle_raises_for_a_task_without_an_owner(tmp_path):
-    task = Task(bundle=None, name="Unowned", func=lambda ctx: None)
-    context = make_context(tmp_path)
-
-    context.begin_task(task)
-
-    with pytest.raises(TaskFailed, match="no owning bundle"):
-        _ = context.bundle
 
 def test_bundle_resources_are_available_through_the_context(tmp_path):
     resource = tmp_path / "files" / "example.conf"

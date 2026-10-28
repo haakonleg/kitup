@@ -54,10 +54,7 @@ profile(
 )
 ```
 
-Each call returns a `RunDefinition`.
-
-`profile.of(module)` returns a profile's definition without selecting it. This
-is useful for inspection:
+`profile.of(module)` returns a profile's definition without selecting it:
 
 ```python
 base_run = profile.of(base_profile)
@@ -138,12 +135,10 @@ from kitup.registry import Bundle
 
 Bundle("Base system")
 
-from . import packages  # noqa: F401
+from . import packages
 ```
 
-Bundle names must be unique within a run. Folder names only determine import
-paths and default resource locations, so a folder such as `base-system` may
-declare `Bundle("Base system")`.
+Bundle names must be unique within a run.
 
 Bundles can depend on other bundles:
 
@@ -184,9 +179,6 @@ def install_packages(ctx):
 ```
 
 The task name is required and must be a non-empty string.
-
-Construct the bundle before importing its task modules. The usual
-`Bundle(...)` followed by `from . import tasks` order handles this.
 
 Resources are available through `ctx.bundle`:
 
@@ -239,5 +231,3 @@ cannot be declared in a profile.
 
 - The invoked profile's directory is the configuration root.
 - Relative config paths resolve against the file that declared them.
-- The profile directory is on `sys.path` while the profile runs.
-- Bundle imports follow normal Python rules.

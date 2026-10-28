@@ -1,4 +1,4 @@
-"""Low-level filesystem operations shared by the files module and worker.
+"""Low-level filesystem operations shared by built-in modules and the worker.
 
 The privileged worker embeds this module's source, so keep the imports
 standard-library-only and avoid package imports.
@@ -160,41 +160,55 @@ def write_path(
     atomic_write_path(path, write, mode=mode, owner=owner, group=group)
 
 
-def copy_path(
+def move_path(
+    source: str | os.PathLike[str],
+    destination: str | os.PathLike[str],
+) -> None:
+    """Move a regular file, copying across filesystems when necessary.
+
+    Symlink sources, directories, and symlink destinations are rejected.
+    """
+    source_info = stat_path(source)
+    if source_info is None or source_info["is_symlink"] or not source_info["is_file"]:
+        raise ValueError(f"move source is not a regular file: {source}")
+    info = stat_path(destination)
+    if info is not None:
+        if info["is_dir"]:
+            raise IsADirectoryError(destination)
+        if info["is_symlink"]:
+            raise ValueError(f"move destination is a symlink: {destination}")
+    shutil.move(source, destination)
+
+
+def replace_path(
     source: str | os.PathLike[str],
     destination: str | os.PathLike[str],
     *,
     mode: int | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
+    default_mode: int = 0o644,
 ) -> None:
-    """Atomically copy a regular file.
+    """Atomically replace ``destination`` with ``source``.
 
-    Existing destination metadata is preserved unless overridden. New
-    destinations use the source mode. The source is streamed into a temporary
-    file beside the destination. Symlink and non-regular sources are rejected.
+    ``source`` must be on the same filesystem as ``destination``. Existing
+    destination metadata is preserved unless overridden. New destinations use
+    ``default_mode`` when no mode is given.
     """
     source_info = stat_path(source)
     if source_info is None or source_info["is_symlink"] or not source_info["is_file"]:
-        raise ValueError(f"copy source is not a regular file: {source}")
-
-    with open(source, "rb") as source_stream:
-        def copy(stream: BinaryIO) -> None:
-            shutil.copyfileobj(source_stream, stream)
-
-        atomic_write_path(
-            destination,
-            copy,
-            mode=mode,
-            owner=owner,
-            group=group,
-            default_mode=int(source_info["mode"]),
-        )
+        raise ValueError(f"replace source is not a regular file: {source}")
+    info = stat_path(destination)
+    if info is not None and info["is_dir"]:
+        raise IsADirectoryError(destination)
+    resolved_mode = _resolve_file_mode(info, mode, default=default_mode)
+    _apply_replacement_metadata(destination, source, info, resolved_mode, owner, group)
+    os.replace(source, destination)
 
 
 def _apply_replacement_metadata(
     path: str | os.PathLike[str],
-    temp: str,
+    temp: str | os.PathLike[str],
     info: dict[str, Any] | None,
     mode: int,
     owner: str | int | None,

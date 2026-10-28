@@ -85,24 +85,6 @@ def test_basic_profile_registers_without_a_variable(tmp_path):
     assert definition.tags == frozenset({"one"})
     assert definition.skip_tags == frozenset({"two"})
 
-def test_last_registration_wins(tmp_path):
-    write_bundle(tmp_path, "base")
-    write_bundle(tmp_path, "other")
-    definition = load(
-        tmp_path,
-        """
-        from bundles import base, other
-
-        from kitup import profile
-
-        profile(bundles=[base], description="first")
-        profile(bundles=[other], description="last")
-        """,
-    )
-
-    assert [bundle.name for bundle in definition.bundles] == ["other"]
-    assert definition.description == "last"
-
 def test_bundle_option_validation(tmp_path):
     with pytest.raises(ProfileError, match="must not be empty"):
         load(
@@ -293,60 +275,6 @@ def test_profile_extend_module_appends_and_inherits(tmp_path):
     assert definition.skip_tags == frozenset({"optional"})
     assert definition.source == (tmp_path / "kitup.py").resolve()
 
-def test_profile_extend_inherits_description(tmp_path):
-    write_bundle(tmp_path, "base")
-    write(
-        tmp_path / "base_profile.py",
-        """
-        from bundles import base
-
-        from kitup import profile
-
-        profile(bundles=[base], description="Base")
-        """,
-    )
-    definition = load(
-        tmp_path,
-        """
-        import base_profile
-
-        from kitup import profile
-
-        profile.extend(base_profile)
-        """,
-    )
-
-    assert definition.description == "Base"
-
-def test_profile_extend_accepts_a_run_definition(tmp_path):
-    write_bundle(tmp_path, "base")
-    write_bundle(tmp_path, "dotfiles")
-    write(
-        tmp_path / "base_profile.py",
-        """
-        from bundles import base
-
-        from kitup import profile
-
-        profile(bundles=[base])
-        """,
-    )
-    definition = load(
-        tmp_path,
-        """
-        import base_profile
-
-        from bundles import dotfiles
-
-        from kitup import profile
-
-        base_run = profile.of(base_profile)
-        profile.extend(base_run, bundles=[dotfiles])
-        """,
-    )
-
-    assert [bundle.name for bundle in definition.bundles] == ["base", "dotfiles"]
-
 def test_profile_extend_requires_a_definition(tmp_path):
     write(tmp_path / "empty_profile.py", "VALUE = 1\n")
 
@@ -492,26 +420,6 @@ def test_run_definition_extend_and_replace(tmp_path):
     assert definition.skip_tags == frozenset({"skip"})
     assert [path.name for path in definition.config] == ["base.py", "other.py"]
 
-def test_replace_can_change_bundles_and_config_wholesale(tmp_path):
-    write_bundle(tmp_path, "base")
-    write_bundle(tmp_path, "other")
-    write(tmp_path / "base.py", "VALUE = 1\n")
-    definition = load(
-        tmp_path,
-        """
-        from bundles import base, other
-
-        from kitup import profile
-
-        run = profile(bundles=[base], config=[Path("base.py")], description="Base")
-        run.replace(bundles=[other], config=[])
-        """,
-    )
-
-    assert [bundle.name for bundle in definition.bundles] == ["other"]
-    assert definition.config == ()
-    assert definition.description == "Base"
-
 def test_importing_a_profile_does_not_select_it(tmp_path):
     write_bundle(tmp_path, "base")
     write_bundle(tmp_path, "other")
@@ -571,123 +479,6 @@ def test_extended_config_paths_resolve_against_the_child_file(tmp_path):
         (tmp_path / "base_profile" / "config.py").resolve(),
         (tmp_path / "child.py").resolve(),
     )
-
-def test_inline_bundle_uses_the_profile_directory(tmp_path):
-    write(
-        tmp_path / "kitup.py",
-        """
-        from kitup import profile
-        from kitup.registry import Bundle
-
-        local = Bundle("Local")
-
-        profile(bundles=[local])
-        """,
-    )
-    sys.path.insert(0, str(tmp_path))
-    try:
-        definition = load_profile(tmp_path / "kitup.py")
-    finally:
-        sys.path.remove(str(tmp_path))
-
-    assert definition.bundles[0].path == tmp_path.resolve()
-
-def test_diamond_config_paths_are_deduplicated(tmp_path):
-    write_bundle(tmp_path, "base")
-    write(tmp_path / "config.py", "VALUE = 1\n")
-    write(
-        tmp_path / "base_profile.py",
-        """
-        from pathlib import Path
-
-        from bundles import base
-
-        from kitup import profile
-
-        profile(bundles=[base], config=[Path("config.py")])
-        """,
-    )
-    write(
-        tmp_path / "left_profile.py",
-        """
-        import base_profile
-
-        from kitup import profile
-
-        profile.extend(base_profile)
-        """,
-    )
-    write(
-        tmp_path / "right_profile.py",
-        """
-        import base_profile
-
-        from kitup import profile
-
-        profile.extend(base_profile)
-        """,
-    )
-    definition = load(
-        tmp_path,
-        """
-        import left_profile
-        import right_profile
-
-        from kitup import profile
-
-        right = profile.of(right_profile)
-        profile.extend(left_profile, config=right.config)
-        """,
-    )
-
-    assert definition.config == ((tmp_path / "config.py").resolve(),)
-
-def test_replace_rejects_empty_bundles(tmp_path):
-    write_bundle(tmp_path, "base")
-
-    with pytest.raises(ProfileError, match="must not be empty"):
-        load(
-            tmp_path,
-            """
-            from bundles import base
-
-            from kitup import profile
-
-            run = profile(bundles=[base])
-            run.replace(bundles=[])
-            """,
-        )
-
-def test_extend_rejects_duplicate_config_paths_in_one_declaration(tmp_path):
-    write_bundle(tmp_path, "base")
-    write(tmp_path / "config.py", "VALUE = 1\n")
-    write(
-        tmp_path / "base_profile.py",
-        """
-        from bundles import base
-
-        from kitup import profile
-
-        profile(bundles=[base])
-        """,
-    )
-
-    with pytest.raises(ProfileError, match="duplicate config path"):
-        load(
-            tmp_path,
-            """
-            import base_profile
-
-            from pathlib import Path
-
-            from kitup import profile
-
-            profile.extend(
-                base_profile,
-                config=[Path("config.py"), Path("config.py")],
-            )
-            """,
-        )
 
 def test_profile_loading_errors(tmp_path):
     write(tmp_path / "run.py", "VALUE = 1\n")

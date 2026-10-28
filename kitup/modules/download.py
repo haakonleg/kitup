@@ -21,10 +21,10 @@ from urllib.request import HTTPSHandler, build_opener
 from urllib.request import Request as URLRequest
 
 from .._utils import file_ops
-from .._utils.file_helper import apply_metadata, copy_path, digest_path
+from .._utils.file_helper import apply_metadata, digest_path, replace_path
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_metadata, require_mode, require_path
+from ..validation import require_mode, require_path
 
 _CHUNK_SIZE = 1024 * 1024
 _DEFAULT_MAX_BYTES = 10 * 1024 * 1024
@@ -49,9 +49,6 @@ def to_file(
     timeout: float = 30,
     validate_certs: bool = True,
     mode: int | None = None,
-    owner: str | int | None = None,
-    group: str | int | None = None,
-    sudo: bool = False,
 ) -> None:
     """Download ``url`` to ``dest``, replacing it only when needed.
 
@@ -67,21 +64,19 @@ def to_file(
     request_headers = _build_headers(headers)
     _validate_timeout(timeout)
     _validate_boolean(validate_certs, "validate_certs")
-    require_metadata(owner, group)
     require_mode(mode)
     _validate_boolean(force, "force")
 
-    target, info = _resolve_destination(ctx, dest, parts, sudo=sudo)
+    target, info = _resolve_destination(dest, parts)
     _validate_destination_info(target, info)
     display = _display_url(parts)
 
-    if not _needs_download(ctx, target, info, force=force, checksum=expected, sudo=sudo):
-        _reconcile_metadata(ctx, target, info, mode, owner, group, sudo=sudo)
+    if not _needs_download(target, info, force=force, checksum=expected):
+        _reconcile_metadata(ctx, target, info, mode)
         return
 
-    file_ops.require_parent(ctx, target, sudo=sudo)
+    file_ops.require_parent_local(target)
     if ctx.dry_run:
-        file_ops.resolve_metadata(owner, group)
         _record_download(ctx, display, target, expected)
         return
 
@@ -92,14 +87,19 @@ def to_file(
         timeout,
         validate_certs,
         expected,
+        target.parent,
     )
     try:
-        if info is not None and _content_matches(ctx, target, temporary, sudo=sudo):
-            _reconcile_metadata(ctx, target, info, mode, owner, group, sudo=sudo)
+        if info is not None and _content_matches(target, temporary):
+            _reconcile_metadata(ctx, target, info, mode)
             return
-        install_mode = mode if mode is not None else (0o644 if info is None else None)
         _record_download(ctx, display, target, expected)
-        _install(ctx, temporary, target, install_mode, owner, group, sudo=sudo)
+        try:
+            replace_path(temporary, target, mode=mode)
+        except ValueError as exc:
+            raise TaskFailed(str(exc)) from exc
+        except OSError as exc:
+            raise TaskFailed(f"could not install {target}: {exc}") from exc
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -140,8 +140,16 @@ def _download_to_temp(
     timeout: float,
     validate_certs: bool,
     expected: _Checksum | None,
+    directory: Path,
 ) -> Path:
-    handle, name = tempfile.mkstemp(prefix="kitup-download-", suffix=".tmp")
+    try:
+        handle, name = tempfile.mkstemp(
+            dir=directory,
+            prefix=".kitup-download-",
+            suffix=".tmp",
+        )
+    except OSError as exc:
+        raise TaskFailed(f"could not create a temporary file in {directory}: {exc}") from exc
     temporary = Path(name)
     try:
         with os.fdopen(handle, "wb") as stream:
@@ -268,21 +276,18 @@ def _ssl_context(validate_certs: bool) -> ssl.SSLContext:
 
 
 def _resolve_destination(
-    ctx: TaskContext,
     dest: str | Path,
     parts: SplitResult,
-    *,
-    sudo: bool,
 ) -> tuple[Path, file_ops.FileInfo | None]:
     require_path(dest, "download destination")
     target = Path(dest)
     if isinstance(dest, str) and dest.endswith("/"):
         target = target / _url_filename(parts)
-        return target, file_ops.stat(ctx, target, sudo=sudo)
-    info = file_ops.stat(ctx, target, sudo=sudo)
+        return target, file_ops.stat_local(target)
+    info = file_ops.stat_local(target)
     if info is not None and info.is_dir and not info.is_symlink:
         target = target / _url_filename(parts)
-        return target, file_ops.stat(ctx, target, sudo=sudo)
+        return target, file_ops.stat_local(target)
     return target, info
 
 
@@ -408,43 +413,27 @@ def _validate_destination_info(target: Path, info: file_ops.FileInfo | None) -> 
 
 
 def _needs_download(
-    ctx: TaskContext,
     target: Path,
     info: file_ops.FileInfo | None,
     *,
     force: bool,
     checksum: _Checksum | None,
-    sudo: bool,
 ) -> bool:
     if info is None or force:
         return True
     if checksum is None:
         return False
-    return _digest(ctx, target, checksum.algorithm, sudo=sudo) != checksum.digest
-
-
-def _content_matches(
-    ctx: TaskContext,
-    target: Path,
-    temporary: Path,
-    *,
-    sudo: bool,
-) -> bool:
     try:
-        remote_digest = digest_path(temporary, "sha256")
+        return digest_path(target, checksum.algorithm) != checksum.digest
+    except (OSError, ValueError) as exc:
+        raise TaskFailed(f"could not checksum {target}: {exc}") from exc
+
+
+def _content_matches(target: Path, temporary: Path) -> bool:
+    try:
+        return digest_path(target, "sha256") == digest_path(temporary, "sha256")
     except (OSError, ValueError) as exc:
         raise TaskFailed(f"could not checksum downloaded file: {exc}") from exc
-    return _digest(ctx, target, "sha256", sudo=sudo) == remote_digest
-
-
-def _digest(ctx: TaskContext, path: Path, algorithm: str, *, sudo: bool) -> str:
-    if file_ops.privileged(ctx, sudo):
-        result = file_ops.worker_request(ctx, "digest", path=str(path), algorithm=algorithm)
-        return str(result["digest"]).lower()
-    try:
-        return digest_path(path, algorithm).lower()
-    except (OSError, ValueError) as exc:
-        raise TaskFailed(f"could not checksum {path}: {exc}") from exc
 
 
 def _reconcile_metadata(
@@ -452,75 +441,19 @@ def _reconcile_metadata(
     target: Path,
     info: file_ops.FileInfo | None,
     mode: int | None,
-    owner: str | int | None,
-    group: str | int | None,
-    *,
-    sudo: bool,
 ) -> None:
-    if info is None or (mode is None and owner is None and group is None):
+    if info is None or mode is None or info.mode == mode:
         return
-    resolved_mode = info.mode if mode is None else mode
-    if not file_ops.metadata_differs(info, resolved_mode, owner, group):
-        return
-    if ctx.dry_run:
-        file_ops.resolve_metadata(owner, group)
     ctx.changed(
         {"path": str(target), "action": "metadata"},
         f"update metadata for {target}",
     )
     if ctx.dry_run:
         return
-    if file_ops.privileged(ctx, sudo):
-        file_ops.worker_request(
-            ctx,
-            "metadata",
-            path=str(target),
-            mode=resolved_mode,
-            owner=owner,
-            group=group,
-        )
-        return
     try:
-        apply_metadata(target, resolved_mode, owner, group, info.as_dict(), preserve=True)
-    except ValueError as exc:
-        raise TaskFailed(str(exc)) from exc
+        apply_metadata(target, mode, None, None, info.as_dict(), preserve=True)
     except OSError as exc:
         raise TaskFailed(f"could not update metadata for {target}: {exc}") from exc
-
-
-def _install(
-    ctx: TaskContext,
-    source: Path,
-    target: Path,
-    mode: int | None,
-    owner: str | int | None,
-    group: str | int | None,
-    *,
-    sudo: bool,
-) -> None:
-    if file_ops.privileged(ctx, sudo):
-        file_ops.worker_request(
-            ctx,
-            "copy",
-            source=str(source),
-            path=str(target),
-            mode=mode,
-            owner=owner,
-            group=group,
-        )
-        return
-    try:
-        copy_path(
-            source,
-            target,
-            mode=mode,
-            owner=owner,
-            group=group,
-        )
-    except ValueError as exc:
-        raise TaskFailed(str(exc)) from exc
-    except OSError as exc:
-        raise TaskFailed(f"could not install {target}: {exc}") from exc
 
 
 def _record_download(

@@ -1,15 +1,14 @@
 # `files`
 
-Idempotent file, directory, and symlink management.
+Idempotent file, directory, symlink, and file-move management.
 
 ```python
 from kitup.modules import files
 ```
 
-Writes are atomic: content goes to a temporary file, is flushed and given its
-metadata, then moved into place with `os.replace`. Parent directories are not
-created automatically; use `directory()` first. Recursive copies are left to task
-code using `directory()`, `copy()`, and `symlink()`.
+Parent directories are not created automatically; use `directory()` first.
+Recursive copies are left to task code using `directory()`, `copy()`, and
+`symlink()`.
 
 For remote file download over HTTP(S), use the [download](download.md) module.
 
@@ -22,7 +21,7 @@ Ensure a text file exists with optional content, or is absent.
 - `state="absent"` removes the file or symlink, but not a directory.
 - `mode=None` preserves an existing mode; new files default to `0o644`.
 - `owner` and `group` accept a name or numeric ID.
-- `sudo=True` performs the operation through a privileged worker.
+- `sudo=True` performs the operation as root.
 
 ```python
 files.file(ctx, "/etc/example.conf", content="enabled=true\n", mode=0o644, sudo=True)
@@ -45,6 +44,36 @@ refused.
 files.copy(ctx, "example.conf", "/etc/example.conf", sudo=True)
 files.copy(ctx, "dotfiles/.zshrc", Path.home() / ".zshrc")
 files.copy(ctx, "example.conf", "/etc/example.d/", sudo=True)
+```
+
+## `move(ctx, src, dest, *, mode=None, owner=None, group=None, sudo=False)`
+
+Move one regular file, preserving its mode and ownership when renamed.
+
+- Unlike `copy()`, `src` is used as given and is not resolved against the bundle.
+- If `dest` ends with `/`, it is treated as a directory and the source filename
+  is appended.
+- When both paths are on the same filesystem, the file is moved without copying.
+  Across filesystems, kitup copies the file and removes the source.
+- `mode`, `owner`, and `group` override the destination metadata after the move.
+  Without them, a rename preserves the source metadata; a cross-filesystem copy
+  is owned by the moving process.
+- If `src` is already missing and `dest` exists, the move is treated as
+  complete and only requested metadata is reconciled.
+- Directories, symlink sources, and symlink destinations are rejected.
+- `sudo=True` performs the move and metadata changes as root.
+
+```python
+files.move(
+    ctx,
+    "/tmp/example.key",
+    "/etc/pki/rpm-gpg/RPM-GPG-KEY-example",
+    mode=0o644,
+    owner="root",
+    group="root",
+    sudo=True,
+)
+files.move(ctx, "/tmp/example.conf", "/etc/example.d/", sudo=True)
 ```
 
 ## `line(ctx, path, line, *, match=None, state="present", sudo=False)`
@@ -89,12 +118,6 @@ are never replaced.
 - Writes never follow a destination symlink; the symlink itself is replaced.
 - Only regular files are read or written. Non-UTF-8 files are rejected when
   editing lines or blocks.
-- `sudo=True` routes every read, write, and metadata operation in that call
-  through the privileged worker. Without it, operations run as the current
-  user.
-- Privileged worker messages are limited to 64 MiB. Because content is
-  base64-encoded, privileged writes are practically limited to about 48 MiB,
-  and privileged reads are limited to 32 MiB. Larger files must be handled by
-  task code using commands or split operations.
-- `mode` values must be between `0` and `0o7777`. Numeric `owner` and `group`
-  IDs must be non-negative; names may also be used.
+- `sudo=True` runs the operation as root; otherwise it runs as the current user.
+- Very large privileged reads and writes are rejected. Use `commands` for very
+  large files.

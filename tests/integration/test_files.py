@@ -23,6 +23,7 @@ DRY_FILE = Path("/etc/kitup-integration-dry.conf")
 DRY_LINK = Path("/etc/kitup-integration-dry.link")
 NONEMPTY_DIR = WORKER_ROOT / "nonempty"
 NONEMPTY_FILE = NONEMPTY_DIR / "keep.conf"
+MOVE_PATH = Path("/etc/kitup-integration-move.conf")
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +34,7 @@ def managed_paths_absent() -> Iterator[None]:
 
 
 def _cleanup() -> None:
-    for path in (MANAGED_PATH, WORKER_ROOT, DRY_FILE, DRY_LINK):
+    for path in (MANAGED_PATH, WORKER_ROOT, DRY_FILE, DRY_LINK, MOVE_PATH):
         run(["sudo", "-n", "rm", "-rf", str(path)], check=False)
 
 
@@ -86,32 +87,41 @@ def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
     assert not MANAGED_PATH.exists()
 
 
-def test_privileged_worker_handles_multiple_operations(tmp_path: Path) -> None:
+def test_privileged_move_is_idempotent(tmp_path: Path) -> None:
+    source = Path.home() / "kitup-move-source.conf"
+    source.write_text("moved\n", encoding="utf-8")
+    source.chmod(0o600)
     root = write_bundle(
-        tmp_path / "worker",
-        "files_worker",
+        tmp_path / "move",
+        "files_move",
         f"""
         from kitup.modules import files
 
-        @task("exercise privileged worker")
-        def exercise(ctx):
-            path = {str(MANAGED_PATH)!r}
-            files.file(ctx, path, content="one\\n", mode=0o600, sudo=True)
-            files.line(ctx, path, "two", sudo=True)
-            files.file(ctx, path, mode=0o640, sudo=True)
-
-            content = ctx.probe(["cat", path], sudo=True).stdout
-            assert content == "one\\ntwo\\n"
-
-            mode = ctx.probe(["stat", "-c", "%a", path], sudo=True).stdout.strip()
-            assert mode == "640"
-
-            files.file(ctx, path, state="absent", sudo=True)
+        @task("move privileged file")
+        def move_file(ctx):
+            files.move(
+                ctx,
+                {str(source)!r},
+                {str(MOVE_PATH)!r},
+                mode=0o640,
+                owner="root",
+                group="root",
+                sudo=True,
+            )
         """,
     )
 
-    assert run_kitup("apply", root) == 0
-    assert not MANAGED_PATH.exists()
+    try:
+        assert run_kitup("apply", root) == 0
+        assert not source.exists()
+        assert run(["sudo", "-n", "cat", str(MOVE_PATH)]).stdout == "moved\n"
+        details = run(["sudo", "-n", "stat", "-c", "%a %u %g", str(MOVE_PATH)])
+        assert details.stdout.strip() == "640 0 0"
+
+        assert run_kitup("apply", root) == 0
+        assert run(["sudo", "-n", "cat", str(MOVE_PATH)]).stdout == "moved\n"
+    finally:
+        source.unlink(missing_ok=True)
 
 
 def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None:

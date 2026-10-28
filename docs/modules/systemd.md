@@ -28,7 +28,5 @@ Reload systemd manager configuration.
 
 ## Notes
 
-- State is queried first; only differences produce commands.
-- System scope requests sudo itself. User scope uses `systemctl --user` and
-  fails clearly when kitup runs as root.
-- Dry-run reports changes without acting.
+- System scope requests sudo. User scope runs without sudo and fails when kitup
+  runs as root.

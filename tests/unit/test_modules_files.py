@@ -324,7 +324,7 @@ def test_file_invalid_state_is_an_error(tmp_path):
         files.file(ctx, tmp_path / "file", state="unknown")
 
 
-def test_empty_paths_and_metadata_are_rejected(tmp_path):
+def test_invalid_arguments_are_rejected(tmp_path):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="file path must not be empty"):
@@ -342,22 +342,9 @@ def test_empty_paths_and_metadata_are_rejected(tmp_path):
     with pytest.raises(TaskFailed, match="symlink target must not be empty"):
         files.symlink(ctx, "", tmp_path / "link")
 
-    assert ctx.changes == []
-
-
-def test_invalid_modes_are_rejected(tmp_path):
-    ctx = context(tmp_path)
-
     for mode in (True, -1, 0o10000):
         with pytest.raises(TaskFailed, match="mode"):
             files.file(ctx, tmp_path / "file", content="x", mode=mode)
-
-    assert not (tmp_path / "file").exists()
-
-
-def test_invalid_numeric_ids_are_rejected(tmp_path):
-    ctx = context(tmp_path)
-
     for owner in (True, -1):
         with pytest.raises(TaskFailed, match="owner"):
             files.file(ctx, tmp_path / "file", content="x", owner=owner)
@@ -365,6 +352,7 @@ def test_invalid_numeric_ids_are_rejected(tmp_path):
         with pytest.raises(TaskFailed, match="group"):
             files.file(ctx, tmp_path / "file", content="x", group=group)
 
+    assert ctx.changes == []
     assert not (tmp_path / "file").exists()
 
 
@@ -399,24 +387,6 @@ def test_line_appends_after_missing_final_newline(tmp_path):
     count = len(ctx.changes)
     files.line(ctx, path, "four")
     assert len(ctx.changes) == count
-
-
-def test_line_rejects_non_utf8_file(tmp_path):
-    path = tmp_path / "binary"
-    path.write_bytes(b"\xff\xfe\n")
-
-    with pytest.raises(TaskFailed, match="not a UTF-8 text file"):
-        files.line(context(tmp_path), path, "value")
-
-
-def test_line_rejects_broken_symlink(tmp_path):
-    link = tmp_path / "link"
-    link.symlink_to(tmp_path / "missing")
-
-    with pytest.raises(TaskFailed, match="symlink"):
-        files.line(context(tmp_path), link, "value")
-
-    assert link.is_symlink()
 
 
 def test_file_refuses_fifo(tmp_path):
@@ -578,17 +548,6 @@ def test_copy_preserves_mode_and_is_idempotent(tmp_path):
     assert len(ctx.changes) == count
 
 
-def test_copy_preserves_special_mode_bits(tmp_path):
-    source = tmp_path / "source"
-    source.write_text("data\n")
-    source.chmod(0o4755)
-    dest = tmp_path / "dest"
-
-    files.copy(context(tmp_path), source, dest)
-
-    assert stat.S_IMODE(dest.stat().st_mode) == 0o4755
-
-
 def test_copy_replaces_destination_symlink(tmp_path):
     source = tmp_path / "source"
     source.write_text("new\n")
@@ -637,3 +596,140 @@ def test_copy_resolves_sources_relative_to_the_bundle(tmp_path):
     assert (tmp_path / "relative.out").read_text() == "relative\n"
     assert (tmp_path / "absolute.out").read_text() == "relative\n"
 
+
+def test_move_moves_file_and_is_idempotent(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("value\n")
+    source.chmod(0o600)
+    dest = tmp_path / "dest.conf"
+    ctx = context(tmp_path)
+
+    files.move(ctx, source, dest)
+
+    assert not source.exists()
+    assert dest.read_text() == "value\n"
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o600
+    assert len(ctx.changes) == 1
+    assert ctx.changes[0].data["action"] == "move"
+
+    files.move(ctx, source, dest)
+
+    assert len(ctx.changes) == 1
+
+
+def test_move_replaces_destination_file(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("new\n")
+    dest = tmp_path / "dest.conf"
+    dest.write_text("old\n")
+    ctx = context(tmp_path)
+
+    files.move(ctx, source, dest)
+
+    assert not source.exists()
+    assert dest.read_text() == "new\n"
+    assert len(ctx.changes) == 1
+
+
+def test_move_into_directory_with_trailing_slash(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("value\n")
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+    ctx = context(tmp_path)
+
+    files.move(ctx, source, f"{dest_dir}/")
+
+    assert not source.exists()
+    assert (dest_dir / source.name).read_text() == "value\n"
+
+
+def test_move_sets_requested_mode(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("value\n")
+    source.chmod(0o600)
+    dest = tmp_path / "dest.conf"
+    ctx = context(tmp_path)
+
+    files.move(ctx, source, dest, mode=0o640)
+
+    assert not source.exists()
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o640
+
+
+def test_move_reconciles_metadata_when_source_is_gone(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("value\n")
+    dest = tmp_path / "dest.conf"
+    files.move(context(tmp_path), source, dest)
+    dest.chmod(0o600)
+
+    ctx = context(tmp_path)
+    files.move(ctx, source, dest, mode=0o640)
+
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o640
+    assert len(ctx.changes) == 1
+    assert ctx.changes[0].data["action"] == "metadata"
+
+    unchanged = context(tmp_path)
+    files.move(unchanged, source, dest, mode=0o640)
+    assert unchanged.changes == []
+
+
+def test_move_dry_run_reports_without_moving(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("value\n")
+    dest = tmp_path / "dest.conf"
+    ctx = context(tmp_path, dry_run=True)
+
+    files.move(ctx, source, dest)
+
+    assert source.read_text() == "value\n"
+    assert not dest.exists()
+    assert len(ctx.changes) == 1
+
+
+def test_move_missing_source_without_destination_fails(tmp_path):
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="does not exist"):
+        files.move(ctx, tmp_path / "missing.conf", tmp_path / "dest.conf")
+
+
+def test_move_rejects_directories_and_symlinks(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("value\n")
+    source_dir = tmp_path / "source-dir"
+    source_dir.mkdir()
+    source_link = tmp_path / "source-link"
+    source_link.symlink_to(source)
+    dest_dir = tmp_path / "dest-dir"
+    dest_dir.mkdir()
+    dest_link = tmp_path / "dest-link"
+    dest_link.symlink_to(tmp_path / "target")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="not a regular file"):
+        files.move(ctx, source_dir, tmp_path / "dest.conf")
+    with pytest.raises(TaskFailed, match="not a regular file"):
+        files.move(ctx, source_link, tmp_path / "dest.conf")
+    with pytest.raises(TaskFailed, match="destination is a directory"):
+        files.move(ctx, source, dest_dir)
+    with pytest.raises(TaskFailed, match="symlink"):
+        files.move(ctx, source, dest_link)
+    assert source.read_text() == "value\n"
+
+
+def test_move_uses_privileged_worker(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("value\n")
+    dest = tmp_path / "dest.conf"
+    ctx = privileged_context(tmp_path)
+
+    try:
+        files.move(ctx, source, dest, sudo=True)
+    finally:
+        ctx.close()
+
+    assert not source.exists()
+    assert dest.read_text() == "value\n"

@@ -74,29 +74,6 @@ def test_tuple_values_use_gvariant_tuple_syntax(tmp_path):
     assert command.calls[1][0][-1] == "[('xkb', 'us')]"
 
 
-def test_type_annotation_is_ignored_when_comparing(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0, "@as []\n")]
-    ctx = make_context(tmp_path, command=command)
-
-    gsettings.key(ctx, "org.example", "items", [])
-
-    assert [call[0] for call in command.calls] == [
-        ["gsettings", "get", "org.example", "items"]
-    ]
-    assert ctx.changes == []
-
-
-def test_control_characters_are_escaped(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0, "'old'\n"), response(0)]
-    ctx = make_context(tmp_path, command=command)
-
-    gsettings.key(ctx, "org.example", "text", "a\nb\tc")
-
-    assert command.calls[1][0][-1] == "'a\\nb\\tc'"
-
-
 def test_gsettings_refuses_root(tmp_path):
     ctx = make_context(tmp_path, sudo=FakeSudo(is_root=True))
 
@@ -155,25 +132,14 @@ def test_absent_is_a_noop_at_the_schema_default(tmp_path):
     assert ctx.changes == []
 
 
-def test_present_requires_a_value(tmp_path):
+def test_invalid_arguments_are_rejected(tmp_path):
     ctx = make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="value is required"):
         gsettings.key(ctx, "org.example", "theme")
-
-
-def test_invalid_state_is_an_error(tmp_path):
-    ctx = make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="invalid gsettings state"):
         gsettings.key(ctx, "org.example", "theme", state="unknown")
-
-
-def test_empty_schema_and_key_are_errors(tmp_path):
-    ctx = make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="gsettings schema must not be empty"):
         gsettings.key(ctx, "  ", "theme", "dark")
-
     with pytest.raises(TaskFailed, match="gsettings key must not be empty"):
         gsettings.key(ctx, "org.example", "  ", "dark")

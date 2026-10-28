@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import os
 import stat
 import threading
@@ -112,36 +111,21 @@ def test_worker_file_actions(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_copy_and_digest_actions(ctx, tmp_path):
+def test_worker_move_action(ctx, tmp_path):
     source = tmp_path / "source"
-    source.write_bytes(b"data\n")
+    source.write_text("data\n")
     destination = tmp_path / "destination"
     worker = PrivilegedWorker(ctx)
 
     try:
         assert (
             worker.request(
-                Request(
-                    "copy",
-                    {
-                        "source": str(source),
-                        "path": str(destination),
-                        "mode": 0o600,
-                    },
-                )
+                Request("move", {"source": str(source), "path": str(destination)})
             )
             == {}
         )
-        assert destination.read_bytes() == b"data\n"
-        assert stat.S_IMODE(destination.stat().st_mode) == 0o600
-
-        result = worker.request(
-            Request(
-                "digest",
-                {"path": str(destination), "algorithm": "sha256"},
-            )
-        )
-        assert result["digest"] == hashlib.sha256(b"data\n").hexdigest()
+        assert not source.exists()
+        assert destination.read_text() == "data\n"
     finally:
         worker.close()
 
@@ -189,7 +173,7 @@ def test_worker_rejects_unknown_action_and_stays_alive(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_returns_error_for_malformed_request(ctx):
+def test_worker_reports_malformed_request_lines(ctx):
     worker = PrivilegedWorker(ctx)
     worker.start()
     process = worker._process
@@ -198,25 +182,13 @@ def test_worker_returns_error_for_malformed_request(ctx):
     try:
         process.stdin.write("not json\n")
         process.stdin.flush()
-        line = worker._read_line(worker.timeout)
-        response = Response.decode(line)
+        response = Response.decode(worker._read_line(worker.timeout))
         assert response.error is not None
         assert "invalid JSON" in response.error
-    finally:
-        worker.close()
 
-
-def test_worker_rejects_empty_request_line(ctx):
-    worker = PrivilegedWorker(ctx)
-    worker.start()
-    process = worker._process
-    assert process is not None and process.stdin is not None
-
-    try:
         process.stdin.write("\n")
         process.stdin.flush()
-        line = worker._read_line(worker.timeout)
-        response = Response.decode(line)
+        response = Response.decode(worker._read_line(worker.timeout))
         assert response.error == "empty request line"
         assert response.fatal is True
     finally:

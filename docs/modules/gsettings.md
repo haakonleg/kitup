@@ -12,8 +12,7 @@ from kitup.registry import task
 Set a key, or reset it to its schema default.
 
 - `state="present"` requires `value` and sets the key only when it differs.
-- `state="absent"` runs `gsettings reset` when the value differs from the schema
-  default.
+- `state="absent"` resets the key to its schema default when it differs.
 
 ```python
 @task("Configure GNOME", tags={"desktop"})
@@ -26,13 +25,9 @@ def reset_gnome_theme(ctx):
     gsettings.key(ctx, "org.gnome.desktop.interface", "color-scheme", state="absent")
 ```
 
-Supported value types: `str` (quoted, control characters escaped), `bool`, `int`,
-`float`, `list` (GVariant array), and `tuple` (GVariant tuple).
+Supported value types: `str`, `bool`, `int`, `float`, `list`, and `tuple`.
 
 ## Notes
 
-- The current value is read with `gsettings get` first; leading type annotations
-  such as `@as` are ignored when comparing.
-- gsettings always runs as the target user, never through sudo, and fails clearly
-  when kitup runs as root.
-- Dry-run reports the change without setting or resetting the key.
+- `gsettings` always runs as the target user, never through sudo, and fails when
+  kitup runs as root.

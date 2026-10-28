@@ -57,16 +57,26 @@ def worker_request(ctx: TaskContext, action: str, **params: Any) -> dict[str, An
 
 def stat(ctx: TaskContext, path: Path, *, sudo: bool) -> FileInfo | None:
     """Return path metadata, using the privileged worker when needed."""
-    result: dict[str, Any] | None
-    if privileged(ctx, sudo):
-        result = worker_request(ctx, "stat", path=str(path))
-    else:
-        try:
-            result = stat_path(path)
-        except OSError as exc:
-            raise TaskFailed(f"could not stat {path}: {exc}") from exc
+    if not privileged(ctx, sudo):
+        return stat_local(path)
+    result = worker_request(ctx, "stat", path=str(path))
     if not result or not result.get("exists"):
         return None
+    return _file_info(result)
+
+
+def stat_local(path: Path) -> FileInfo | None:
+    """Return path metadata for the current process."""
+    try:
+        result = stat_path(path)
+    except OSError as exc:
+        raise TaskFailed(f"could not stat {path}: {exc}") from exc
+    if not result:
+        return None
+    return _file_info(result)
+
+
+def _file_info(result: dict[str, Any]) -> FileInfo:
     return FileInfo(
         mode=result["mode"],
         uid=result["uid"],
@@ -80,11 +90,16 @@ def stat(ctx: TaskContext, path: Path, *, sudo: bool) -> FileInfo | None:
 
 def require_parent(ctx: TaskContext, path: Path, *, sudo: bool) -> None:
     """Raise when the parent directory of ``path`` does not exist."""
-    if privileged(ctx, sudo):
-        result = worker_request(ctx, "stat", path=str(path.parent), follow=True)
-        if not result.get("exists") or not result.get("is_dir"):
-            raise TaskFailed(f"parent directory does not exist: {path.parent}")
+    if not privileged(ctx, sudo):
+        require_parent_local(path)
         return
+    result = worker_request(ctx, "stat", path=str(path.parent), follow=True)
+    if not result.get("exists") or not result.get("is_dir"):
+        raise TaskFailed(f"parent directory does not exist: {path.parent}")
+
+
+def require_parent_local(path: Path) -> None:
+    """Raise when the parent directory of ``path`` does not exist locally."""
     if not path.parent.is_dir():
         raise TaskFailed(f"parent directory does not exist: {path.parent}")
 
