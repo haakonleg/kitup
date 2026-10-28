@@ -180,7 +180,6 @@ def _open_url(
     validate_certs: bool,
 ) -> Any:
     opener = build_opener(HTTPSHandler(context=_ssl_context(validate_certs)))
-    opener.addheaders = []
     request = URLRequest(url, headers=dict(headers), method="GET")
     try:
         return opener.open(request, timeout=timeout)
