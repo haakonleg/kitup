@@ -119,5 +119,5 @@ are never replaced.
 - Only regular files are read or written. Non-UTF-8 files are rejected when
   editing lines or blocks.
 - `sudo=True` runs the operation as root; otherwise it runs as the current user.
-- Very large privileged reads and writes are rejected. Use `commands` for very
-  large files.
+- Very large privileged reads and writes are rejected. Use `command` for very large
+  files.

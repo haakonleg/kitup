@@ -1,9 +1,9 @@
-# `commands`
+# `command`
 
 Run guarded one-off commands.
 
 ```python
-from kitup.modules import commands
+from kitup.modules import command
 from kitup.registry import task
 ```
 
@@ -24,7 +24,7 @@ Run `argv` unless a guard is already satisfied.
 ```python
 @task("Create marker", tags={"config"})
 def create_marker(ctx):
-    commands.run(
+    command.run(
         ctx,
         ["install", "-m", "0644", "/dev/null", "/var/lib/example/ready"],
         creates="/var/lib/example/ready",
@@ -41,7 +41,7 @@ Run a command string through a shell. Other arguments match `run()`.
 ```python
 @task("Install via shell pipeline", tags={"config"})
 def install_with_pipeline(ctx):
-    commands.shell(
+    command.shell(
         ctx,
         "cat data.txt | grep useful > /var/lib/example/result.txt",
         shell="/bin/bash",
