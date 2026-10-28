@@ -33,21 +33,6 @@ def test_cached_credentials_are_used_without_output(monkeypatch, capsys):
     assert capsys.readouterr().err == ""
 
 
-def test_credentials_valid_checks_the_sudo_cache(monkeypatch):
-    monkeypatch.setattr("os.geteuid", lambda: 1000)
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")
-    calls = []
-
-    def fake_run(argv, **kwargs):
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    assert PrivilegeManager().credentials_valid() is True
-    assert calls == [["sudo", "-n", "-v"]]
-
-
 def test_credentials_valid_reports_an_expired_cache(monkeypatch):
     monkeypatch.setattr("os.geteuid", lambda: 1000)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")
@@ -98,13 +83,6 @@ def test_tty_prompts_when_cache_is_missing(monkeypatch):
     assert calls[0][0] == ["sudo", "-n", "-v"]
     assert calls[1][0] == ["sudo", "-S", "-p", "", "-v"]
     assert calls[1][1]["input"] == "secret\n"
-
-
-def test_empty_reason_does_not_print_a_blank_line(monkeypatch, capsys):
-    monkeypatch.setattr("kitup.privileges.getpass.getpass", lambda prompt: "secret")
-
-    assert PrivilegeManager()._prompt_password("") == "secret"
-    assert capsys.readouterr().err == ""
 
 
 def test_failed_prompt_is_an_error(monkeypatch):

@@ -357,6 +357,7 @@ All built-in modules are idempotent:
 - `flatpak` — remotes, applications, and runtimes.
 - `files` — files, directories, symlinks, lines, blocks, and moves.
 - `command` — guarded one-off commands.
+- `github_release` — public GitHub release metadata and assets.
 - `download` — remote file download over HTTP(S).
 - `decompress` — tar/zip extraction and single-file decompression.
 - `systemd` — units and daemon reloads.

@@ -12,6 +12,7 @@ from kitup.registry import task
 - [flatpak](flatpak.md) — Flatpak remotes, applications, and runtimes
 - [files](files.md) — files, directories, symlinks, lines, blocks, and moves
 - [command](command.md) — guarded one-off commands
+- [github_release](github_release.md) — public GitHub release metadata and assets
 - [download](download.md) — remote file download over HTTP(S)
 - [decompress](decompress.md) — archive extraction and single-file decompression
 - [systemd](systemd.md) — systemd units

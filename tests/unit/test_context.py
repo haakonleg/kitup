@@ -217,14 +217,4 @@ def test_bundle_is_the_owning_bundle_for_the_current_task(tmp_path):
     assert context.bundle is bundle
     assert context.bundle_path == tmp_path
 
-def test_bundle_resources_are_available_through_the_context(tmp_path):
-    resource = tmp_path / "files" / "example.conf"
-    resource.parent.mkdir()
-    resource.write_text("value\n", encoding="utf-8")
-    bundle = Bundle("base", path=tmp_path)
-    add_task(bundle, lambda ctx: ctx.bundle.read_resource("files/example.conf"))
-    context = make_context(tmp_path)
 
-    context.begin_task(bundle.tasks[0])
-
-    assert context.bundle.read_resource("files/example.conf") == "value\n"

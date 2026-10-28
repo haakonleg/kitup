@@ -3,30 +3,25 @@
 from __future__ import annotations
 
 import hashlib
-import http.client
 import io
-import math
 import os
 import posixpath
 import re
-import ssl
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
-from urllib.request import HTTPSHandler, build_opener
-from urllib.request import Request as URLRequest
 
 from .._utils import file_ops
 from .._utils.file_helper import apply_metadata, digest_path, replace_path
+from .._utils.http import open_url, read_response, validate_timeout
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..validation import require_mode, require_path
 
-_CHUNK_SIZE = 1024 * 1024
 _DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 _HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _HEX_DIGEST = re.compile(r"^[0-9a-f]+$")
@@ -62,7 +57,7 @@ def to_file(
         raise TaskFailed("download destination must be a path")
     expected = _parse_checksum(checksum)
     request_headers = _build_headers(headers)
-    _validate_timeout(timeout)
+    validate_timeout(timeout)
     _validate_boolean(validate_certs, "validate_certs")
     require_mode(mode)
     _validate_boolean(force, "force")
@@ -122,7 +117,7 @@ def to_bytes(
     url, parts = _validate_url(url)
     expected = _parse_checksum(checksum)
     request_headers = _build_headers(headers)
-    _validate_timeout(timeout)
+    validate_timeout(timeout)
     _validate_boolean(validate_certs, "validate_certs")
     limit = _validate_max_bytes(max_bytes)
     display = _display_url(parts)
@@ -179,23 +174,18 @@ def _open_url(
     timeout: float,
     validate_certs: bool,
 ) -> Any:
-    opener = build_opener(HTTPSHandler(context=_ssl_context(validate_certs)))
-    request = URLRequest(url, headers=dict(headers), method="GET")
     try:
-        return opener.open(request, timeout=timeout)
+        return open_url(
+            url,
+            headers=headers,
+            timeout=timeout,
+            validate_certs=validate_certs,
+            label="download",
+            context=display,
+        )
     except HTTPError as exc:
         exc.close()
         raise TaskFailed(f"download failed for {display}: HTTP {exc.code} {exc.reason}") from exc
-    except URLError as exc:
-        if isinstance(exc.reason, TimeoutError):
-            raise TaskFailed(f"download timed out after {timeout:g}s: {display}") from exc
-        raise TaskFailed(f"download failed for {display}: {exc.reason}") from exc
-    except TimeoutError as exc:
-        raise TaskFailed(f"download timed out after {timeout:g}s: {display}") from exc
-    except OSError as exc:
-        raise TaskFailed(f"download failed for {display}: {exc}") from exc
-    except ValueError as exc:
-        raise TaskFailed(f"invalid download request for {display}: {exc}") from exc
 
 
 def _read_response(
@@ -207,42 +197,15 @@ def _read_response(
     display: str,
 ) -> None:
     hasher = hashlib.new(expected.algorithm) if expected is not None else None
-    content_length = _content_length(response)
-    if (
-        max_bytes is not None
-        and content_length is not None
-        and content_length > max_bytes
-    ):
-        raise TaskFailed(
-            f"download exceeds max_bytes ({content_length} > {max_bytes}): {display}"
-        )
+    read_response(
+        response,
+        sink,
+        max_bytes=max_bytes,
+        label="download",
+        context=display,
+        on_chunk=hasher.update if hasher is not None else None,
+    )
 
-    total = 0
-    while True:
-        try:
-            chunk = response.read(_CHUNK_SIZE)
-        except TimeoutError as exc:
-            raise TaskFailed(f"download timed out while reading: {display}") from exc
-        except http.client.IncompleteRead as exc:
-            raise TaskFailed(f"incomplete download for {display}: {exc}") from exc
-        except (OSError, http.client.HTTPException) as exc:
-            raise TaskFailed(f"download failed for {display}: {exc}") from exc
-        if not chunk:
-            break
-        total += len(chunk)
-        if max_bytes is not None and total > max_bytes:
-            raise TaskFailed(f"download exceeds max_bytes ({max_bytes}): {display}")
-        try:
-            sink.write(chunk)
-        except OSError as exc:
-            raise TaskFailed(f"could not write download for {display}: {exc}") from exc
-        if hasher is not None:
-            hasher.update(chunk)
-
-    if content_length is not None and total != content_length:
-        raise TaskFailed(
-            f"incomplete download for {display}: expected {content_length} bytes, got {total}"
-        )
     if expected is not None:
         if hasher is None:
             raise TaskFailed(f"could not verify checksum for {display}")
@@ -252,26 +215,6 @@ def _read_response(
                 f"checksum mismatch for {display}: expected {expected.algorithm}:"
                 f"{expected.digest}, got {expected.algorithm}:{actual}"
             )
-
-
-def _content_length(response: Any) -> int | None:
-    value = response.headers.get("Content-Length")
-    if value is None:
-        return None
-    try:
-        length = int(value)
-    except ValueError:
-        return None
-    return length if length >= 0 else None
-
-
-def _ssl_context(validate_certs: bool) -> ssl.SSLContext:
-    if validate_certs:
-        return ssl.create_default_context()
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-    return context
 
 
 def _resolve_destination(
@@ -376,13 +319,6 @@ def _build_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
                 raise TaskFailed(f"header {name!r} value must not contain control characters")
             values[name] = value
     return values
-
-
-def _validate_timeout(timeout: float) -> None:
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        raise TaskFailed("timeout must be a positive number")
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise TaskFailed("timeout must be a positive number")
 
 
 def _validate_max_bytes(max_bytes: int | None) -> int | None:
