@@ -8,7 +8,7 @@ container=kitup-integration-$$
 cd -- "$root"
 
 echo "==> building dist/kitup"
-python3 tools/build_zipapp.py
+python3 tools/zipapp/build.py
 
 echo "==> building $image"
 podman build -t "$image" -f tests/integration/Containerfile .

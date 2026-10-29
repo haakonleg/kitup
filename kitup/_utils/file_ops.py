@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import difflib
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +12,14 @@ from typing import Any
 from .._privileged.protocol import Request
 from ..context import TaskContext
 from ..errors import TaskFailed
-from .file_helper import resolve_group, resolve_owner, stat_path
+from .file_helper import (
+    apply_metadata,
+    read_path,
+    resolve_group,
+    resolve_owner,
+    stat_path,
+    write_path,
+)
 
 
 @dataclass(frozen=True)
@@ -130,3 +139,159 @@ def metadata_differs(
     if uid is not None and info.uid != uid:
         return True
     return gid is not None and info.gid != gid
+
+
+def read_bytes(
+    ctx: TaskContext,
+    path: Path,
+    info: FileInfo | None,
+    *,
+    sudo: bool,
+) -> bytes:
+    """Read a path as bytes, using the privileged worker when needed."""
+    if info is None:
+        return b""
+    if privileged(ctx, sudo):
+        result = worker_request(ctx, "read", path=str(path))
+        if not result.get("exists"):
+            return b""
+        return base64.b64decode(result.get("content", ""))
+    try:
+        return read_path(path)
+    except OSError as exc:
+        raise TaskFailed(f"could not read {path}: {exc}") from exc
+
+
+def apply_bytes(
+    ctx: TaskContext,
+    path: Path,
+    content: bytes,
+    *,
+    mode: int | None,
+    owner: str | int | None,
+    group: str | int | None,
+    summary: str,
+    data: dict[str, object],
+    sudo: bool,
+) -> None:
+    """Write bytes idempotently, reporting content and metadata changes.
+
+    Existing symlinks are replaced rather than followed. ``mode=None``
+    preserves an existing mode and uses ``0o644`` for new files.
+    """
+    info = stat(ctx, path, sudo=sudo)
+    is_link = info.is_symlink if info is not None else False
+    if info is not None and info.is_dir and not is_link:
+        raise TaskFailed(f"path is a directory: {path}")
+    if info is not None and not is_link and not info.is_file:
+        raise TaskFailed(f"path is not a regular file: {path}")
+
+    old = read_bytes(ctx, path, info, sudo=sudo) if info is not None and not is_link else None
+    content_differs = is_link or old != content
+    resolved = mode
+    if resolved is None:
+        resolved = info.mode if info is not None and not is_link else 0o644
+    metadata_changed = (
+        info is None
+        or is_link
+        or metadata_differs(
+            info,
+            resolved,
+            owner,
+            group,
+        )
+    )
+    if not content_differs and not metadata_changed:
+        return
+
+    require_parent(ctx, path, sudo=sudo)
+    if content_differs:
+        _emit_diff(ctx, path, old, content)
+    if ctx.dry_run:
+        resolve_metadata(owner, group)
+    ctx.changed(data, summary)
+    if ctx.dry_run:
+        return
+
+    if content_differs:
+        _write_bytes(ctx, path, content, resolved, owner, group, sudo=sudo)
+    else:
+        apply_metadata_ctx(ctx, path, resolved, owner, group, sudo=sudo)
+
+
+def apply_metadata_ctx(
+    ctx: TaskContext,
+    path: Path,
+    mode: int,
+    owner: str | int | None,
+    group: str | int | None,
+    *,
+    sudo: bool,
+) -> None:
+    """Apply file metadata, using the privileged worker when needed."""
+    if privileged(ctx, sudo):
+        worker_request(
+            ctx,
+            "metadata",
+            path=str(path),
+            mode=mode,
+            owner=owner,
+            group=group,
+        )
+        return
+    try:
+        apply_metadata(path, mode, owner, group, preserve=False)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
+    except OSError as exc:
+        raise TaskFailed(f"could not update metadata for {path}: {exc}") from exc
+
+
+def _write_bytes(
+    ctx: TaskContext,
+    path: Path,
+    content: bytes,
+    mode: int,
+    owner: str | int | None,
+    group: str | int | None,
+    *,
+    sudo: bool,
+) -> None:
+    if privileged(ctx, sudo):
+        worker_request(
+            ctx,
+            "write",
+            path=str(path),
+            content=base64.b64encode(content).decode(),
+            mode=mode,
+            owner=owner,
+            group=group,
+        )
+        return
+
+    require_parent(ctx, path, sudo=False)
+    try:
+        write_path(path, content, mode=mode, owner=owner, group=group)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
+    except OSError as exc:
+        raise TaskFailed(f"could not write {path}: {exc}") from exc
+
+
+def _emit_diff(ctx: TaskContext, path: Path, old: bytes | None, new: bytes) -> None:
+    if not ctx.diff or ctx.output is None:
+        return
+    try:
+        old_text = (old or b"").decode()
+        new_text = new.decode()
+    except UnicodeDecodeError:
+        return
+    diff = difflib.unified_diff(
+        old_text.splitlines(),
+        new_text.splitlines(),
+        fromfile=f"{path} (current)",
+        tofile=f"{path} (new)",
+        lineterm="",
+    )
+    for item in diff:
+        ctx.output.write(item)

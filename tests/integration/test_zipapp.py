@@ -27,11 +27,12 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
     assert ZIPAPP.is_file(), f"prebuilt zipapp is missing: {ZIPAPP}"
     assert os.access(ZIPAPP, os.X_OK), f"zipapp is not executable: {ZIPAPP}"
 
+    rendered_path = tmp_path / "rendered.txt"
     root = write_bundle(
         tmp_path / "config",
         "zipapp_bundle",
         f"""
-        from kitup.modules import files
+        from kitup.modules import files, template
 
         @task("write privileged marker")
         def write_privileged(ctx):
@@ -44,7 +45,23 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
         @task("write marker")
         def write_marker(ctx):
             files.file(ctx, {str(tmp_path / "marker.txt")!r}, content="applied\\n")
+
+        @task("render template")
+        def render_template(ctx):
+            template.file(
+                ctx,
+                "message.j2",
+                {str(rendered_path)!r},
+                variables={{"name": "zipapp"}},
+                mode=0o600,
+            )
         """,
+    )
+    files = root / "bundles" / "zipapp_bundle" / "files"
+    files.mkdir()
+    (files / "message.j2").write_text(
+        "name={{ name }}\nhost={{ facts.hostname }}\n",
+        encoding="utf-8",
     )
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -63,6 +80,7 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
     )
     assert dry_run.returncode == 0
     assert not (tmp_path / "marker.txt").exists()
+    assert not rendered_path.exists()
 
     applied = run(
         [str(ZIPAPP), "apply", str(root / "kitup.py"), "--no-color"],
@@ -71,4 +89,7 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
     )
     assert applied.returncode == 0
     assert (tmp_path / "marker.txt").read_text(encoding="utf-8") == "applied\n"
+    rendered = rendered_path.read_text(encoding="utf-8")
+    assert rendered.startswith("name=zipapp\nhost=")
+    assert rendered.endswith("\n")
     assert not Path(WORKER_PATH).exists()

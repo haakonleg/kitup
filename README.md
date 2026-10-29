@@ -33,6 +33,10 @@ A standalone zipapp can also be built:
 ./dist/kitup --version
 ```
 
+The build creates a temporary virtualenv, installs kitup's runtime
+dependencies into it, and bundles them into the resulting archive. The system
+Python only needs the standard library.
+
 ## Quick start
 
 Create a configuration directory:
@@ -360,6 +364,7 @@ All built-in modules are idempotent:
 - `github_release` — public GitHub release metadata and assets.
 - `download` — remote file download over HTTP(S).
 - `decompress` — tar/zip extraction and single-file decompression.
+- `template` — Jinja2 templates rendered into managed files.
 - `systemd` — units and daemon reloads.
 - `gsettings` — GNOME settings.
 
@@ -383,8 +388,8 @@ files.file(
 Package, system service, and system Flatpak operations request sudo
 automatically.
 
-kitup handles sudo prompts itself. User-scoped operations and home-directory
-dotfiles should run as the target user, not as root.
+kitup handles sudo prompts and authenticates itself when privileged operations
+are required.
 
 ## Examples
 

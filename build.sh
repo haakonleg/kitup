@@ -3,4 +3,4 @@ set -euo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
-exec "${PYTHON:-python3}" tools/build_zipapp.py
+exec "${PYTHON:-python3}" tools/zipapp/build.py
