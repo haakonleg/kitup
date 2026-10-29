@@ -367,6 +367,7 @@ All built-in modules are idempotent:
 - `template` — Jinja2 templates rendered into managed files.
 - `systemd` — units and daemon reloads.
 - `gsettings` — GNOME settings.
+- `git` — repository clones and checkouts.
 
 See [docs/modules/index.md](docs/modules/index.md) for the full API.
 

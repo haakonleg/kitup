@@ -18,3 +18,4 @@ from kitup.registry import task
 - [template](template.md) — Jinja2 templates rendered into managed files
 - [systemd](systemd.md) — systemd units
 - [gsettings](gsettings.md) — GNOME settings
+- [git](git.md) — repository clones and checkouts
