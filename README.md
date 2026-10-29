@@ -368,6 +368,7 @@ All built-in modules are idempotent:
 - `systemd` — units and daemon reloads.
 - `gsettings` — GNOME settings.
 - `git` — repository clones and checkouts.
+- `sysctl` — kernel parameters, set at runtime and optionally persisted in a sysctl file.
 
 See [docs/modules/index.md](docs/modules/index.md) for the full API.
 

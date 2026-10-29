@@ -7,6 +7,11 @@ container=kitup-integration-$$
 
 cd -- "$root"
 
+if [ "$(id -u)" -eq 0 ]; then
+    echo "error: run as a non-root user; --privileged as root exposes the host" >&2
+    exit 1
+fi
+
 echo "==> building dist/kitup"
 python3 tools/zipapp/build.py
 
@@ -17,15 +22,7 @@ echo "==> starting $container"
 podman run -d --rm \
     --name "$container" \
     --systemd=always \
-    --cap-drop=ALL \
-    --cap-add=CHOWN \
-    --cap-add=DAC_OVERRIDE \
-    --cap-add=FOWNER \
-    --cap-add=FSETID \
-    --cap-add=KILL \
-    --cap-add=SETGID \
-    --cap-add=SETPCAP \
-    --cap-add=SETUID \
+    --privileged \
     --network=none \
     --memory=2g \
     --memory-swap=2g \

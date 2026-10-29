@@ -3,7 +3,6 @@ FROM registry.fedoraproject.org/fedora:44
 RUN dnf5 install -y \
         createrepo_c \
         dbus-daemon \
-        dbus-tools \
         dconf \
         dnf5 \
         flatpak \
@@ -11,6 +10,7 @@ RUN dnf5 install -y \
         gsettings-desktop-schemas \
         python3 \
         python3-pytest \
+        procps-ng \
         rpm-build \
         sudo \
         systemd \

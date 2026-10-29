@@ -19,3 +19,4 @@ from kitup.registry import task
 - [systemd](systemd.md) — systemd units
 - [gsettings](gsettings.md) — GNOME settings
 - [git](git.md) — repository clones and checkouts
+- [sysctl](sysctl.md) — kernel parameters at runtime and in sysctl files
