@@ -126,17 +126,24 @@ Importing a profile or bundle does not select it. Use the `bundles` argument,
 
 ## Bundles
 
-A bundle is an importable package whose `__init__.py` constructs a `Bundle` and
-imports its task modules:
+A bundle is an importable package whose `__init__.py` constructs a `Bundle`.
+Tasks are registered either by importing task modules and passing them to
+`Bundle(..., modules=[...])`, or by decorating functions with `@bundle.task`:
 
 ```python
 # bundles/base/__init__.py
 from kitup.registry import Bundle
 
-Bundle("Base system")
-
 from . import packages
+
+Bundle("Base system", modules=[packages])
 ```
+
+The `modules` list defines task order: modules run in list order, and tasks
+within a module run in declaration order.
+
+Every listed module must declare at least one task with `@task`. A module
+without tasks is an error rather than silently ignored.
 
 Bundle names must be unique within a run.
 
@@ -145,7 +152,9 @@ Bundles can depend on other bundles:
 ```python
 from bundles import base, repos
 
-Bundle("Workstation", depends_on=[base, repos])
+from . import tasks
+
+Bundle("Workstation", depends_on=[base, repos], modules=[tasks])
 ```
 
 Dependencies run first, and each bundle runs at most once.
@@ -163,6 +172,7 @@ def write_marker(ctx):
     content = ctx.bundle.read_resource("local-bundle/marker.txt")
 ```
 
+Inline bundles do not need `modules`; `@bundle.task` registers tasks directly.
 Pass `path=` to use another resource root.
 
 ## Task modules
@@ -178,7 +188,9 @@ def install_packages(ctx):
     ...
 ```
 
-The task name is required and must be a non-empty string.
+The task name is required and must be a non-empty string. The decorator records
+the task on its module; the task is registered when that module is listed in a
+bundle's `modules` argument.
 
 Resources are available through `ctx.bundle`:
 

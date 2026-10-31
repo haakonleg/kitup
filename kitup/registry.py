@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import ModuleType
@@ -12,10 +12,13 @@ from typing import Any
 from .errors import BundleError
 from .validation import normalize_string_sequence
 
+_TASKS_ATTR = "__kitup_tasks__"
+_CLAIMED_ATTR = "__kitup_bundle_owner__"
+
 
 @dataclass(frozen=True)
 class Task:
-    """A single named unit of work inside a bundle."""
+    """A named unit of work, or a declaration awaiting its bundle."""
 
     bundle: Bundle | None
     name: str
@@ -38,6 +41,10 @@ class Bundle:
     ``__init__.py`` attaches it privately to that module as
     ``__kitup_bundle__``. Elsewhere, pass the object directly to a profile or
     to another bundle's ``depends_on``.
+
+    Task modules listed in ``modules`` must be imported before the bundle is
+    constructed. Tasks declared with ``@task`` are recorded on their module and
+    adopted by the bundle in list order.
     """
 
     def __init__(
@@ -45,7 +52,8 @@ class Bundle:
         name: str,
         description: str = "",
         *,
-        depends_on: Iterable[ModuleType | Bundle] = (),
+        modules: Sequence[ModuleType] = (),
+        depends_on: Sequence[ModuleType | Bundle] = (),
         path: Path | None = None,
     ) -> None:
         if not isinstance(name, str) or not name.strip():
@@ -53,21 +61,75 @@ class Bundle:
 
         caller = sys._getframe(1).f_globals
         caller_file = caller.get("__file__")
+        is_package = bool(caller_file and Path(caller_file).name == "__init__.py")
 
         self.name = name.strip()
         self.description = description
         self.path = _resolve_path(path) if path is not None else _caller_dir(caller_file)
         self.tasks: list[Task] = []
+        task_modules = self._normalize_modules(modules)
         self.depends_on = self._normalize_dependencies(depends_on)
 
-        if caller_file and Path(caller_file).name == "__init__.py":
+        if is_package:
             caller["__kitup_bundle__"] = self
+
+        self._adopt_modules(task_modules)
 
     def __repr__(self) -> str:
         return f"Bundle({self.name!r}, tasks={len(self.tasks)})"
 
+    def _normalize_modules(
+        self, modules: Sequence[ModuleType]
+    ) -> tuple[ModuleType, ...]:
+        if modules is None:
+            raise BundleError(
+                "bundle modules must be a sequence of task modules, not None"
+            )
+        if isinstance(modules, ModuleType):
+            raise BundleError(
+                "bundle modules must be a sequence of task modules, not a single module"
+            )
+        try:
+            values = tuple(modules)
+        except TypeError as exc:
+            raise BundleError(
+                "bundle modules must be a sequence of task modules"
+            ) from exc
+
+        normalized: list[ModuleType] = []
+        seen: set[ModuleType] = set()
+        for value in values:
+            if not isinstance(value, ModuleType):
+                raise BundleError(
+                    "bundle modules must contain task modules, "
+                    f"not {type(value).__name__}"
+                )
+            if value in seen:
+                raise BundleError(f"duplicate task module: {value.__name__}")
+            seen.add(value)
+            normalized.append(value)
+        return tuple(normalized)
+
+    def _adopt_modules(self, modules: tuple[ModuleType, ...]) -> None:
+        for module in modules:
+            specs = vars(module).pop(_TASKS_ATTR, None)
+            if not specs:
+                owner = vars(module).get(_CLAIMED_ATTR)
+                if isinstance(owner, str):
+                    raise BundleError(
+                        f"task module {module.__name__!r} is already registered "
+                        f"by bundle {owner!r}"
+                    )
+                raise BundleError(
+                    f"task module {module.__name__!r} does not register any tasks"
+                )
+            self.tasks.extend(
+                replace(spec, bundle=self, bundle_path=self.path) for spec in specs
+            )
+            vars(module)[_CLAIMED_ATTR] = self.name
+
     def _normalize_dependencies(
-        self, depends_on: Iterable[ModuleType | Bundle]
+        self, depends_on: Sequence[ModuleType | Bundle]
     ) -> tuple[Bundle, ...]:
         if isinstance(depends_on, str):
             raise BundleError(
@@ -139,10 +201,7 @@ class Bundle:
 
 
 def bundle_of(value: ModuleType | Bundle) -> Bundle:
-    """Return a module's bundle, binding its resource path if needed.
-
-    Bundle objects are returned unchanged.
-    """
+    """Return a module's bundle, binding its resource path if needed."""
     if isinstance(value, Bundle):
         return value
     if isinstance(value, ModuleType):
@@ -170,39 +229,29 @@ def task(
     tags: Iterable[str] = (),
     description: str = "",
 ) -> Callable[[Callable[[Any], None]], Callable[[Any], None]]:
-    """Register a task on the bundle of the calling package.
+    """Declare a task for the module's bundle.
 
-    The bundle must already be constructed in the caller's module or in one of
-    its parent packages.
+    The task is recorded on the calling module and registered when the module
+    is listed in a bundle's ``modules`` argument.
     """
     name = _validate_task_name(name)
+    tag_values = normalize_string_sequence(tags, "task tags")
     caller = sys._getframe(1).f_globals
-    bundle = _bundle_for_module(caller)
-    return bundle.task(name, tags=tags, description=description)
 
+    def register(func: Callable[[Any], None]) -> Callable[[Any], None]:
+        specs = caller.setdefault(_TASKS_ATTR, [])
+        specs.append(
+            Task(
+                bundle=None,
+                name=name,
+                func=func,
+                tags=frozenset(tag_values),
+                description=description,
+            )
+        )
+        return func
 
-def _bundle_for_module(caller: dict[str, Any]) -> Bundle:
-    bundle = caller.get("__kitup_bundle__")
-    if isinstance(bundle, Bundle):
-        return bundle
-    if bundle is not None:
-        raise BundleError("__kitup_bundle__ is not a Bundle")
-
-    module_name = caller.get("__name__")
-    while isinstance(module_name, str) and "." in module_name:
-        module_name = module_name.rpartition(".")[0]
-        module = sys.modules.get(module_name)
-        candidate = getattr(module, "__kitup_bundle__", None) if module else None
-        if isinstance(candidate, Bundle):
-            return candidate
-        if candidate is not None:
-            raise BundleError(f"{module_name!r}.__kitup_bundle__ is not a Bundle")
-
-    label = caller.get("__name__", "<unknown module>")
-    raise BundleError(
-        f"no bundle found for module {label!r}; "
-        "construct Bundle(...) before importing task modules"
-    )
+    return register
 
 
 def _caller_dir(caller_file: str | None) -> Path | None:

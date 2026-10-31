@@ -26,9 +26,9 @@ def test_composed_profiles_merge_config_and_dependencies(
         """
         from kitup.registry import Bundle
 
-        Bundle("Base")
+        from . import tasks
 
-        from . import tasks  # noqa: E402,F401
+        Bundle("Base", modules=[tasks])
         """,
     )
     write(
@@ -49,9 +49,9 @@ def test_composed_profiles_merge_config_and_dependencies(
 
         from kitup.registry import Bundle
 
-        Bundle("Extra", depends_on=[base])
+        from . import tasks
 
-        from . import tasks  # noqa: E402,F401
+        Bundle("Extra", depends_on=[base], modules=[tasks])
         """,
     )
     write(

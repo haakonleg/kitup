@@ -1,5 +1,9 @@
 from kitup.registry import Bundle
 
-Bundle("Base system", "Core packages, services, and SSH hardening")
+from . import packages, security, services
 
-from . import packages, security, services  # noqa: E402,F401
+Bundle(
+    "Base system",
+    "Core packages, services, and SSH hardening",
+    modules=[packages, security, services],
+)

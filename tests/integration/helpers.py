@@ -46,8 +46,8 @@ def write_bundle(root: Path, name: str, source: str) -> Path:
     (folder / "__init__.py").write_text(
         "from __future__ import annotations\n\n"
         "from kitup.registry import Bundle\n\n"
-        f"Bundle({name!r}, 'integration test bundle')\n\n"
-        "from . import tasks  # noqa: E402,F401\n",
+        "from . import tasks\n\n"
+        f"Bundle({name!r}, 'integration test bundle', modules=[tasks])\n",
         encoding="utf-8",
     )
 

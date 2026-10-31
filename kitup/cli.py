@@ -93,11 +93,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             facts = collect_facts()
             output.banner(facts)
             if args.command == "list":
-                _print_environment(profile_path, definition, output)
+                _print_environment(
+                    profile_path, definition, output, verbose=args.verbose
+                )
                 _print_plan(plan, output, verbose=args.verbose)
                 return 0
             if args.verbose:
-                _print_environment(profile_path, definition, output)
+                _print_environment(
+                    profile_path, definition, output, verbose=args.verbose
+                )
             return _apply(args, profile_path, definition, plan, config, facts, output)
         finally:
             sys.path[:] = old_path
@@ -151,22 +155,35 @@ def _apply(
 
 
 def _print_environment(
-    profile_path: Path, definition: RunDefinition, output: Output
+    profile_path: Path,
+    definition: RunDefinition,
+    output: Output,
+    *,
+    verbose: bool,
 ) -> None:
     output.write()
-    output.write(f"profile: {profile_path}")
+    output.write(f"profile: {_path_label(profile_path, verbose=verbose)}")
     if definition.description:
         output.write(f"description: {definition.description}")
     if definition.config:
-        sources = ", ".join(_config_label(source) for source in definition.config)
+        sources = ", ".join(
+            _config_label(source, verbose=verbose) for source in definition.config
+        )
         output.write(f"config: {sources}")
 
 
-def _config_label(source: object) -> str:
+def _path_label(path: Path, *, verbose: bool) -> str:
+    return str(path) if verbose else path.name
+
+
+def _config_label(source: object, *, verbose: bool) -> str:
     if isinstance(source, Path):
-        return str(source)
+        return _path_label(source, verbose=verbose)
     if isinstance(source, ModuleType):
-        return f"<module {source.__name__}>"
+        filename = getattr(source, "__file__", None)
+        if filename:
+            return _path_label(Path(filename).resolve(), verbose=verbose)
+        return source.__name__
     return "<mapping>"
 
 

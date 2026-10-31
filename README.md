@@ -76,16 +76,16 @@ PACKAGES = ["git", "ripgrep", "tmux", "neovim", "podman", "firewalld"]
 FLATPAK_APPLICATIONS = ["com.spotify.Client", "md.obsidian.Obsidian"]
 ```
 
-A bundle is a Python package. Its `__init__.py` creates the bundle and imports
-the task module:
+A bundle is a Python package. Its `__init__.py` imports its task modules and
+creates the bundle:
 
 ```python
 # bundles/workstation/__init__.py
 from kitup.registry import Bundle
 
-Bundle("Workstation")
-
 from . import tasks
+
+Bundle("Workstation", modules=[tasks])
 ```
 
 Tasks use the `task` decorator. The name is required and must be a non-empty
@@ -247,16 +247,19 @@ See [docs/profile.md](docs/profile.md) for the complete profile reference.
 
 ## Bundles
 
-Bundles group related tasks. Import task modules from the bundle's
-`__init__.py`; that import order defines task order within the bundle:
+Bundles group related tasks. Import task modules in the bundle's
+`__init__.py` and list them in `modules`; the list order defines task order
+within the bundle:
 
 ```python
 from kitup.registry import Bundle
 
-Bundle("Workstation")
-
 from . import packages, services
+
+Bundle("Workstation", modules=[packages, services])
 ```
+
+Every module listed in `modules` must declare at least one task with `@task`.
 
 Bundles can depend on other bundles:
 
@@ -266,9 +269,9 @@ from bundles import base, repos
 
 from kitup.registry import Bundle
 
-Bundle("Workstation", depends_on=[base, repos])
-
 from . import tasks
+
+Bundle("Workstation", depends_on=[base, repos], modules=[tasks])
 ```
 
 Dependencies run first, and each bundle runs at most once.

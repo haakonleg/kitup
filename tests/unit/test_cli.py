@@ -24,6 +24,9 @@ def make_bundle(
     tasks="",
 ):
     name = name or folder
+    has_tasks = bool(tasks.strip())
+    task_import = "from . import tasks\n" if has_tasks else ""
+    task_modules = ", modules=[tasks]" if has_tasks else ""
     write(root / "bundles" / "__init__.py", "")
     write(
         root / "bundles" / folder / "__init__.py",
@@ -32,9 +35,8 @@ def make_bundle(
 
         {setup}
 
-        Bundle({name!r}, "description", depends_on={depends})
-
-        from . import tasks  # noqa: E402,F401
+        {task_import}
+        Bundle({name!r}, "description", depends_on={depends}{task_modules})
         """,
     )
     write(
@@ -71,7 +73,7 @@ def purge_project_modules() -> None:
     for name in tuple(sys.modules):
         if name == "bundles" or name.startswith("bundles."):
             sys.modules.pop(name, None)
-        if name in {"base_profile", "laptop_profile"}:
+        if name in {"base_profile", "laptop_profile", "config"}:
             sys.modules.pop(name, None)
         if name.startswith(("_kitup_profile_", "_kitup_config_")):
             sys.modules.pop(name, None)
@@ -132,6 +134,66 @@ def test_default_profile_is_kitup_py_in_cwd(tmp_path, monkeypatch, capsys):
 
     assert code == 0
     assert "bundle: base" in capsys.readouterr().out
+
+def test_list_shows_file_names_unless_verbose(tmp_path, capsys):
+    make_bundle(tmp_path, "base")
+    write(tmp_path / "settings.py", "VALUE = 1\n")
+    write(
+        tmp_path / "kitup.py",
+        """
+        from pathlib import Path
+
+        from bundles import base
+
+        from kitup import profile
+
+        profile(bundles=[base], config=[Path("settings.py")])
+        """,
+    )
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "profile: kitup.py" in out
+    assert "config: settings.py" in out
+    assert str(tmp_path) not in out
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "--no-color", "-v"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert f"profile: {tmp_path / 'kitup.py'}" in out
+    assert f"config: {tmp_path / 'settings.py'}" in out
+
+def test_list_shows_imported_config_module_files(tmp_path, capsys):
+    make_bundle(tmp_path, "base")
+    write(tmp_path / "config.py", "VALUE = 1\n")
+    write(
+        tmp_path / "kitup.py",
+        """
+        import config
+
+        from bundles import base
+
+        from kitup import profile
+
+        profile(bundles=[base], config=[config])
+        """,
+    )
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "config: config.py" in out
+    assert "<module" not in out
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "--no-color", "-v"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert f"config: {tmp_path / 'config.py'}" in out
 
 def test_apply_closes_context_on_success(tmp_path, monkeypatch):
     contexts = []
