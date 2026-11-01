@@ -83,6 +83,18 @@ def require_metadata(owner: str | int | None, group: str | int | None) -> None:
     require_identity(group, "group")
 
 
+def require_bool(value: object, label: str) -> None:
+    """Reject a non-boolean value."""
+    if not isinstance(value, bool):
+        raise TaskFailed(f"{label} must be a boolean")
+
+
+def require_non_negative_int(value: int, label: str) -> None:
+    """Reject a negative or non-integer value."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise TaskFailed(f"{label} must be a non-negative integer")
+
+
 def require_mode(mode: int | None) -> None:
     """Validate an optional file mode."""
     if mode is None:
@@ -91,6 +103,12 @@ def require_mode(mode: int | None) -> None:
         raise TaskFailed("mode must be an integer")
     if not 0 <= mode <= 0o7777:
         raise TaskFailed("mode must be between 0 and 0o7777")
+
+
+def require_choice(value: str, choices: Collection[str], label: str) -> None:
+    """Reject a value outside the allowed choices."""
+    if value not in choices:
+        raise TaskFailed(f"invalid {label}: {value!r}")
 
 
 def require_state(

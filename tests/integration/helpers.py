@@ -25,6 +25,8 @@ def run(
     *,
     check: bool = True,
     cwd: Path | None = None,
+    timeout: float = 120,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
@@ -32,6 +34,8 @@ def run(
         cwd=cwd,
         text=True,
         capture_output=True,
+        timeout=timeout,
+        env=env,
     )
 
 

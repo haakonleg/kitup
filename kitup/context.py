@@ -85,8 +85,8 @@ class TaskContext:
     def resolve_source(self, path: str | Path) -> Path:
         """Resolve a source path against the current bundle.
 
-        Absolute paths are returned unchanged. A bare filename resolves under
-        the bundle's ``files`` directory, while other relative paths resolve
+        Absolute paths are returned unchanged. A bare name resolves under the
+        bundle's ``files`` directory, while other relative paths resolve
         against the bundle directory.
         """
         source = Path(path)
@@ -136,11 +136,13 @@ class TaskContext:
         sudo: bool = False,
         timeout: float = 600,
         record: bool = True,
+        stdin: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run a command, honoring guards and dry-run.
 
         Only commands run with ``sudo=True`` request sudo credentials. Cached
         credentials are checked again before every privileged operation.
+        ``stdin`` is passed to the command but never to an ``unless`` probe.
         """
         command = [str(part) for part in normalize_strings(argv)]
         if not command:
@@ -180,14 +182,14 @@ class TaskContext:
             return _skipped(command)
 
         if mutates:
-            result = self.command.run(command, **run_options)
+            result = self.command.run(command, stdin=stdin, **run_options)
             if record:
                 self._changes.append(Change({"argv": command}, " ".join(command)))
             return result
 
         # Probes are queries: a nonzero exit is data for the caller, not a
         # task failure.
-        return self.command.run(command, check=False, **run_options)
+        return self.command.run(command, check=False, stdin=stdin, **run_options)
 
     def probe(self, argv: str | Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         """Run a query command without recording a change."""

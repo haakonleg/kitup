@@ -13,6 +13,7 @@ from ..errors import TaskFailed
 from .file_helper import (
     apply_metadata,
     read_path,
+    remove_path,
     resolve_group,
     resolve_owner,
     stat_path,
@@ -243,6 +244,47 @@ def apply_metadata_ctx(
         raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not update metadata for {path}: {exc}") from exc
+
+
+def remove(
+    ctx: TaskContext,
+    path: Path,
+    info: FileInfo | None,
+    *,
+    force: bool,
+    sudo: bool,
+    summary: str | None = None,
+    data: dict[str, object] | None = None,
+    allow_directory: bool = True,
+) -> None:
+    """Remove a file, symlink, or directory idempotently.
+
+    ``info`` is the result of :func:`stat`; pass ``None`` when the path is
+    missing. When ``summary`` or ``data`` are omitted, record a generic
+    ``rmdir``/``remove`` change.
+    """
+    if info is None:
+        return
+    is_dir = info.is_dir and not info.is_symlink
+    if is_dir and not allow_directory:
+        raise TaskFailed(f"path is a directory: {path}")
+    action = "rmdir" if is_dir and not force else "remove"
+    if data is None:
+        data = {"path": str(path), "action": action}
+    if summary is None:
+        summary = f"{action} {path}"
+    ctx.changed(data, summary)
+    if ctx.dry_run:
+        return
+    if privileged(ctx, sudo=sudo):
+        worker_request(ctx, "remove", path=str(path), force=force)
+        return
+    try:
+        remove_path(path, force=force)
+    except OSError as exc:
+        if is_dir and not force:
+            raise TaskFailed(f"directory is not empty: {path}") from exc
+        raise TaskFailed(f"could not remove {path}: {exc}") from exc
 
 
 def _write_bytes(

@@ -4,12 +4,7 @@ import re
 from pathlib import Path
 
 from .._utils import file_ops
-from .._utils.file_helper import (
-    mkdir_path,
-    move_path,
-    remove_path,
-    symlink_path,
-)
+from .._utils.file_helper import mkdir_path, move_path, symlink_path
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..validation import (
@@ -48,7 +43,7 @@ def file(
         info = file_ops.stat(ctx, target, sudo=sudo)
         if info is not None and info.is_dir and not info.is_symlink:
             raise TaskFailed(f"path is a directory: {target}")
-        _remove_path(ctx, target, force=False, sudo=sudo)
+        file_ops.remove(ctx, target, info, force=False, sudo=sudo)
         return
 
     info = file_ops.stat(ctx, target, sudo=sudo)
@@ -323,7 +318,7 @@ def directory(
             return
         if info.is_symlink or not info.is_dir:
             raise TaskFailed(f"path is not a directory: {target}")
-        _remove_path(ctx, target, force=force, sudo=sudo)
+        file_ops.remove(ctx, target, info, force=force, sudo=sudo)
         return
 
     info = file_ops.stat(ctx, target, sudo=sudo)
@@ -493,25 +488,6 @@ def _mkdir(
         raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not create directory {path}: {exc}") from exc
-
-
-def _remove_path(ctx: TaskContext, path: Path, *, force: bool, sudo: bool) -> None:
-    info = file_ops.stat(ctx, path, sudo=sudo)
-    if info is None:
-        return
-    action = "rmdir" if info.is_dir and not info.is_symlink and not force else "remove"
-    ctx.changed({"path": str(path), "action": action}, f"{action} {path}")
-    if ctx.dry_run:
-        return
-    if file_ops.privileged(ctx, sudo=sudo):
-        file_ops.worker_request(ctx, "remove", path=str(path), force=force)
-        return
-    try:
-        remove_path(path, force=force)
-    except OSError as exc:
-        if info.is_dir and not info.is_symlink and not force:
-            raise TaskFailed(f"directory is not empty: {path}") from exc
-        raise TaskFailed(f"could not remove {path}: {exc}") from exc
 
 
 def _matching_line(lines: list[str], desired: str, match: str | None) -> int | None:

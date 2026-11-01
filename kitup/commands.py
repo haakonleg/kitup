@@ -34,8 +34,12 @@ class CommandRunner:
         timeout: float = 600,
         check: bool = True,
         refresh_sudo: bool = True,
+        stdin: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        """Run an argv-style command and return its completed process."""
+        """Run an argv-style command and return its completed process.
+
+        When ``stdin`` is set, it is written to the command's standard input.
+        """
         command = [str(part) for part in normalize_strings(argv)]
         if not command:
             raise TaskFailed("empty command")
@@ -55,7 +59,7 @@ class CommandRunner:
                 command,
                 cwd=cwd,
                 env=command_env,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -73,7 +77,7 @@ class CommandRunner:
             ) from exc
 
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
+            stdout, stderr = process.communicate(input=stdin, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             _kill_process_group(process)
             tail_out, tail_err = _drain(process)

@@ -24,34 +24,57 @@ def _sibling_imports(path: Path) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.startswith(f"{PACKAGE_NAME}.modules."):
-                    imported.add(alias.name.removeprefix(f"{PACKAGE_NAME}.modules."))
+                prefix = f"{PACKAGE_NAME}.modules."
+                if alias.name.startswith(prefix):
+                    imported.add(alias.name.removeprefix(prefix).split(".")[0])
         elif isinstance(node, ast.ImportFrom):
-            if node.level == 1:
+            if node.level == 0:
+                prefix = f"{PACKAGE_NAME}.modules"
+                if node.module == prefix:
+                    imported.update(alias.name.split(".")[0] for alias in node.names)
+                elif node.module and node.module.startswith(f"{prefix}."):
+                    imported.add(node.module.removeprefix(f"{prefix}.").split(".")[0])
+            elif node.level == 1:
                 if node.module:
-                    imported.add(node.module)
+                    imported.add(node.module.split(".")[0])
                 else:
-                    imported.update(alias.name for alias in node.names)
-            elif node.level == 2 and node.module == "modules":
-                imported.update(alias.name for alias in node.names)
-            elif node.level == 2 and node.module and node.module.startswith("modules."):
-                imported.add(node.module.removeprefix("modules."))
-            elif node.level == 0 and node.module == f"{PACKAGE_NAME}.modules":
-                imported.update(alias.name for alias in node.names)
-            elif node.level == 0 and node.module and node.module.startswith(f"{PACKAGE_NAME}.modules."):
-                imported.add(node.module.removeprefix(f"{PACKAGE_NAME}.modules."))
+                    imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif node.level == 2:
+                if node.module == "modules":
+                    imported.update(alias.name.split(".")[0] for alias in node.names)
+                elif node.module and node.module.startswith("modules."):
+                    imported.add(node.module.removeprefix("modules.").split(".")[0])
+                elif node.module:
+                    imported.add(node.module.split(".")[0])
+            elif node.level == 3:
+                if node.module == "modules":
+                    imported.update(alias.name.split(".")[0] for alias in node.names)
+                elif node.module and node.module.startswith("modules."):
+                    imported.add(node.module.removeprefix("modules.").split(".")[0])
 
     return imported
 
 
+def _module_names() -> set[str]:
+    names = {path.stem for path in MODULES_DIR.glob("*.py") if path.stem != "__init__"}
+    names.update(path.name for path in MODULES_DIR.iterdir() if path.is_dir() and (path / "__init__.py").is_file())
+    return names
+
+
+def _module_owner(path: Path) -> str:
+    """Return the top-level module that owns a file under ``kitup.modules``."""
+    first = path.relative_to(MODULES_DIR).parts[0]
+    return Path(first).stem
+
+
 def test_modules_do_not_import_each_other():
-    module_names = {path.stem for path in MODULES_DIR.glob("*.py") if path.stem != "__init__"}
+    module_names = _module_names()
 
     violations = [
-        f"{path.name} imports {imported}"
-        for path in sorted(MODULES_DIR.glob("*.py"))
+        f"{path.relative_to(MODULES_DIR)} imports {imported}"
+        for path in sorted(MODULES_DIR.rglob("*.py"))
         for imported in _sibling_imports(path)
-        if imported in module_names - {path.stem}
+        if imported in module_names - {_module_owner(path)}
     ]
 
     assert not violations, "modules must remain standalone: " + ", ".join(violations)
@@ -59,7 +82,7 @@ def test_modules_do_not_import_each_other():
 
 def test_modules_have_documentation():
     """Every built-in module has a matching page in ``docs/modules``."""
-    module_names = {path.stem for path in MODULES_DIR.glob("*.py") if path.stem != "__init__"}
+    module_names = _module_names()
     documented = {path.stem for path in DOCS_DIR.glob("*.md") if path.stem != "index"}
 
     missing = sorted(module_names - documented)

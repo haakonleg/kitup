@@ -18,7 +18,14 @@ dev = ["pytest", "pytest-randomly", "ruff", "mypy"]
 kitup = "kitup.cli:main"
 
 [tool.setuptools]
-packages = ["kitup", "kitup._privileged", "kitup._utils", "kitup.modules", "kitup.output"]
+packages = [
+    "kitup",
+    "kitup._privileged",
+    "kitup._utils",
+    "kitup.modules",
+    "kitup.modules.podman",
+    "kitup.output",
+]
 
 [tool.setuptools.package-data]
 kitup = ["py.typed"]

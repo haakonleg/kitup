@@ -24,7 +24,7 @@ class FakeProcess:
         self.stdout = stdout
         self.stderr = stderr
 
-    def communicate(self, timeout=None):
+    def communicate(self, input=None, timeout=None):
         return self.stdout, self.stderr
 
 
@@ -32,7 +32,7 @@ class TimeoutProcess:
     pid = 12345
     returncode = None
 
-    def communicate(self, timeout=None):
+    def communicate(self, input=None, timeout=None):
         if timeout is not None:
             raise subprocess.TimeoutExpired(
                 ["tool"],
@@ -103,6 +103,23 @@ def test_commands_use_a_process_group_without_a_new_session(monkeypatch):
 
     assert calls[0][1]["process_group"] == 0
     assert "start_new_session" not in calls[0][1]
+
+
+def test_stdin_is_piped_to_the_process(monkeypatch):
+    received = []
+
+    class StdinProcess(FakeProcess):
+        def communicate(self, input=None, timeout=None):
+            received.append(input)
+            return "", ""
+
+    calls = patch_popen(monkeypatch, StdinProcess())
+    runner = CommandRunner(PrivilegeManager())
+
+    runner.run(["tool"], stdin="secret\n")
+
+    assert calls[0][1]["stdin"] == subprocess.PIPE
+    assert received == ["secret\n"]
 
 
 def test_sudo_is_refreshed_and_wrapped(monkeypatch):

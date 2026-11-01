@@ -16,7 +16,7 @@ echo "==> building dist/kitup"
 python3 tools/zipapp/build.py
 
 echo "==> building $image"
-podman build -t "$image" -f tests/integration/Containerfile .
+podman build --squash-all -t "$image" -f tests/integration/Containerfile .
 
 echo "==> starting $container"
 podman run -d --rm \

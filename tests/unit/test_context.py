@@ -213,6 +213,17 @@ def test_dry_run_mutating_command_requests_sudo_but_does_not_execute(tmp_path):
     assert len(context.changes) == 1
 
 
+def test_stdin_is_only_passed_to_the_real_command(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [lambda argv: 1, lambda argv: 0]
+    context = make_context(tmp_path, command=command)
+
+    context.run(["login"], unless=["check"], stdin="secret\n")
+
+    assert "stdin" not in command.calls[0][1]
+    assert command.calls[1][1]["stdin"] == "secret\n"
+
+
 def test_guard_can_run_against_nonzero_result(tmp_path):
     command = FakeCommandRunner()
     command.responses = [lambda argv: 1, lambda argv: 0]

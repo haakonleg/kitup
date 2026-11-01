@@ -1,0 +1,189 @@
+"""Podman container lifecycle management."""
+
+from collections.abc import Mapping, Sequence
+
+from ...context import TaskContext
+from ...errors import TaskFailed
+from ...validation import require_bool, require_non_negative_int, require_state, require_text
+from ._common import (
+    CONTAINER_STATES,
+    CONTAINER_STATUSES,
+    ContainerState,
+    PodmanOption,
+    container_command,
+    container_status,
+    option_args,
+    podman,
+    require_object_name,
+)
+
+
+def container(
+    ctx: TaskContext,
+    name: str,
+    *,
+    state: ContainerState = "started",
+    image: str | None = None,
+    command: str | Sequence[str] | None = None,
+    options: Mapping[str, PodmanOption] | None = None,
+    recreate: bool = False,
+    stop_timeout: int | None = None,
+    timeout: float = 600,
+    sudo: bool = False,
+) -> None:
+    """Ensure a container is created, started, stopped, or absent.
+
+    Existing containers are never modified. Use ``recreate=True`` to apply a
+    changed image, command, or options. ``state="started"`` verifies that the
+    container is running immediately after start; it is not suitable for
+    one-shot containers.
+    """
+    require_object_name(name, "container name")
+    require_state(state, "container", CONTAINER_STATES)
+    require_bool(recreate, "container recreate")
+    if stop_timeout is not None:
+        require_non_negative_int(stop_timeout, "container stop_timeout")
+    if recreate and state not in ("present", "started"):
+        raise TaskFailed("recreate is only supported when state is 'present' or 'started'")
+    if image is not None:
+        require_text(image, "container image")
+
+    podman_command = podman(ctx)
+    status = container_status(ctx, podman_command, name, sudo=sudo)
+    if status == "paused":
+        raise TaskFailed(f"container is paused and cannot be managed: {name}")
+    if status is not None and status not in CONTAINER_STATUSES:
+        raise TaskFailed(f"unexpected container status for {name}: {status!r}")
+
+    if recreate:
+        if image is None:
+            raise TaskFailed("container image is required when recreate is True")
+        if status is not None:
+            _remove_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
+        status = None
+
+    if status is None:
+        if state in ("present", "started"):
+            if image is None:
+                raise TaskFailed(f"container image is required to create {name}")
+            _create_container(
+                ctx,
+                podman_command,
+                name,
+                image,
+                command=command,
+                options=options,
+                stop_timeout=stop_timeout,
+                timeout=timeout,
+                sudo=sudo,
+            )
+            if state == "started":
+                _start_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
+        return
+
+    if state == "present":
+        return
+    if state == "started":
+        if status != "running":
+            _start_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
+        return
+    if state == "stopped":
+        if status == "running":
+            _stop_container(
+                ctx,
+                podman_command,
+                name,
+                stop_timeout=stop_timeout,
+                timeout=timeout,
+                sudo=sudo,
+            )
+        return
+    _remove_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
+
+
+def _create_container(
+    ctx: TaskContext,
+    podman_command: str,
+    name: str,
+    image: str,
+    *,
+    command: str | Sequence[str] | None,
+    options: Mapping[str, PodmanOption] | None,
+    stop_timeout: int | None,
+    timeout: float,
+    sudo: bool,
+) -> None:
+    arguments = [podman_command, "create", "--name", name]
+    if stop_timeout is not None:
+        arguments.append(f"--stop-timeout={stop_timeout}")
+    arguments.extend(option_args(options))
+    arguments.append(image)
+    arguments.extend(container_command(command))
+
+    ctx.changed(
+        {"container": name, "image": image, "action": "create"},
+        f"create container {name}",
+    )
+    ctx.run(arguments, timeout=timeout, sudo=sudo, record=False)
+    if not ctx.dry_run and container_status(ctx, podman_command, name, sudo=sudo) is None:
+        raise TaskFailed(f"container is missing after create: {name}")
+
+
+def _start_container(
+    ctx: TaskContext,
+    podman_command: str,
+    name: str,
+    *,
+    timeout: float,
+    sudo: bool,
+) -> None:
+    ctx.changed({"container": name, "action": "start"}, f"start container {name}")
+    ctx.run([podman_command, "start", name], timeout=timeout, sudo=sudo, record=False)
+    if ctx.dry_run:
+        return
+    status = container_status(ctx, podman_command, name, sudo=sudo)
+    if status is None:
+        raise TaskFailed(f"container is missing after start: {name}")
+    if status != "running":
+        raise TaskFailed(
+            f"container is not running after start: {name} (status: {status}); "
+            "if this is a one-shot container, use state='present'"
+        )
+
+
+def _stop_container(
+    ctx: TaskContext,
+    podman_command: str,
+    name: str,
+    *,
+    stop_timeout: int | None,
+    timeout: float,
+    sudo: bool,
+) -> None:
+    ctx.changed({"container": name, "action": "stop"}, f"stop container {name}")
+    arguments = [podman_command, "stop"]
+    if stop_timeout is not None:
+        arguments.append(f"--time={stop_timeout}")
+    arguments.append(name)
+    ctx.run(arguments, timeout=timeout, sudo=sudo, record=False)
+    if not ctx.dry_run and container_status(ctx, podman_command, name, sudo=sudo) == "running":
+        raise TaskFailed(f"container did not stop: {name}")
+
+
+def _remove_container(
+    ctx: TaskContext,
+    podman_command: str,
+    name: str,
+    *,
+    timeout: float,
+    sudo: bool,
+) -> None:
+    ctx.changed({"container": name, "action": "remove"}, f"remove container {name}")
+    ctx.run(
+        [podman_command, "rm", "--force", name],
+        timeout=timeout,
+        sudo=sudo,
+        record=False,
+    )
+    if not ctx.dry_run and container_status(ctx, podman_command, name, sudo=sudo) is not None:
+        raise TaskFailed(f"container is still present after removal: {name}")

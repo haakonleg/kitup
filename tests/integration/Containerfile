@@ -1,20 +1,13 @@
-FROM registry.fedoraproject.org/fedora:44
+FROM registry.fedoraproject.org/fedora-minimal:44 AS builder
 
 RUN dnf5 install -y \
+        --setopt=install_weak_deps=False \
+        --setopt=tsflags=nodocs \
         createrepo_c \
-        dbus-daemon \
-        dconf \
         dnf5 \
         flatpak \
         glib2 \
-        gsettings-desktop-schemas \
-        python3 \
-        python3-pytest \
-        procps-ng \
         rpm-build \
-        sudo \
-        systemd \
-        util-linux \
     && dnf5 clean all
 
 # Build a local, unsigned package repository. Tests run with no network, so
@@ -37,7 +30,39 @@ RUN mkdir -p /srv/flatpak-repo \
     && flatpak build-update-repo /srv/flatpak-repo \
     && rm -rf /tmp/flatpak-fixture
 
+FROM registry.fedoraproject.org/fedora-minimal:44
+
+# Weak dependencies are disabled to keep the image small: Flatpak and systemd
+# otherwise pull in large desktop, audio, and udev stacks that the tests do
+# not use. dnf5-plugins is explicit because it provides config-manager.
+RUN dnf5 install -y \
+        --setopt=install_weak_deps=False \
+        --setopt=tsflags=nodocs \
+        busybox \
+        dbus-daemon \
+        dconf \
+        dnf5 \
+        dnf5-plugins \
+        flatpak \
+        fuse-overlayfs \
+        glib2 \
+        passt \
+        podman \
+        procps-ng \
+        python3 \
+        python3-pytest \
+        shadow-utils \
+        sudo \
+        systemd \
+        util-linux \
+    && dnf5 clean all \
+    && rm -rf /usr/share/locale /usr/share/licenses
+
+COPY --from=builder /srv/kitup-repo /srv/kitup-repo
+COPY --from=builder /srv/flatpak-repo /srv/flatpak-repo
+
 RUN rm -f /etc/yum.repos.d/*.repo \
+    && mkdir -p /etc/sysctl.d \
     && printf '%s\n' \
         '[kitup-test]' \
         'name=kitup integration fixture' \
@@ -56,13 +81,50 @@ COPY tests/integration/fixtures/org.kitup.IntegrationTest.gschema.xml \
     /usr/share/glib-2.0/schemas/
 RUN glib-compile-schemas /usr/share/glib-2.0/schemas
 
+# Keep the subordinate ID range inside the container's mapped UID space so
+# nested rootless Podman works when the integration container is itself
+# rootless.
 RUN useradd --create-home --shell /bin/bash kitup \
+    && sed -i '/^kitup:/d' /etc/subuid /etc/subgid \
+    && usermod --add-subuids 2000-65535 --add-subgids 2000-65535 kitup \
     && install -d -o kitup -g kitup -m 0700 /home/kitup/.runtime \
+    && mkdir -p /home/kitup/.config/containers \
+    && printf '%s\n' \
+        '[engine]' \
+        'cgroup_manager = "cgroupfs"' \
+        'events_logger = "file"' \
+        > /home/kitup/.config/containers/containers.conf \
+    && chown -R kitup:kitup /home/kitup/.config \
     && printf '%s\n' 'kitup ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/kitup \
-    && chmod 0440 /etc/sudoers.d/kitup
+    && chmod 0440 /etc/sudoers.d/kitup \
+    && chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap
+
+# Build an offline Podman fixture image. The static busybox binary sleeps until
+# stopped and exits immediately when invoked as "/init exit".
+RUN mkdir -p /srv/podman-fixture/build \
+    && cp /usr/bin/busybox /srv/podman-fixture/build/busybox \
+    && printf '%s\n' \
+        '#!/busybox sh' \
+        'trap "exit 0" TERM INT' \
+        'if [ "$1" = "exit" ]; then' \
+        '    exit 0' \
+        'fi' \
+        'while :; do' \
+        '    /busybox sleep 0.1' \
+        'done' \
+        > /srv/podman-fixture/build/init \
+    && chmod +x /srv/podman-fixture/build/init \
+    && printf '%s\n' \
+        'FROM scratch' \
+        'COPY busybox /busybox' \
+        'COPY init /init' \
+        'CMD ["/init"]' \
+        > /srv/podman-fixture/build/Containerfile \
+    && chmod -R a+rX /srv/podman-fixture
 
 # Mask units that cannot work in this container (no udev devices, no network,
 # no memory-pressure daemon) so it boots cleanly instead of waiting on them.
+# dbus-broker provides the system bus, so the dbus-daemon service is masked.
 RUN systemctl mask \
         systemd-udevd.service \
         systemd-udevd-control.socket \
@@ -74,6 +136,7 @@ RUN systemctl mask \
         systemd-resolved-monitor.socket \
         systemd-oomd.service \
         systemd-oomd.socket \
+        dbus-daemon.service \
     && systemd-machine-id-setup
 
 CMD ["/sbin/init"]

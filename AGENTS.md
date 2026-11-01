@@ -22,8 +22,8 @@ kitup/             # application package and run orchestration
 ├── _utils/        # shared internal helpers (files, HTTP, security)
 └── output/        # terminal output and progress rendering
 tests/
-├── unit/          # default suite; no root, network, or host changes
-└── integration/   # opt-in Fedora container suite
+├── unit/          # default suite
+└── integration/   # Fedora container suite
 tools/             # integration runner and zipapp builder
 docs/              # profile, facts, and per-module API reference
 examples/          # example profiles and bundles
@@ -31,8 +31,7 @@ examples/          # example profiles and bundles
 
 Execution flow: the CLI loads a profile, resolves bundle dependencies into a
 plan, then runs the plan sequentially with a shared `TaskContext`. Put new
-built-in task APIs in `kitup/modules/`; privileged filesystem operations go
-through `kitup/_privileged/`.
+built-in task APIs in `kitup/modules/`.
 
 ## Setup
 
@@ -55,13 +54,7 @@ Re-run `.venv/bin/python -m pip install -e '.[dev]'` after changing
 
 ### Unit tests (required)
 
-Run the full unit suite before finishing any change:
-
-```bash
-.venv/bin/python -m pytest tests/unit
-```
-
-Useful focused runs:
+Run the full suite via the quality gates below. Useful focused runs:
 
 ```bash
 .venv/bin/python -m pytest tests/unit/test_modules_files.py
@@ -71,7 +64,7 @@ Useful focused runs:
 Unit tests MUST NOT require root, sudo, network access, or mutate the host.
 Use `tmp_path`, `monkeypatch`, and the shared doubles in
 `tests/unit/helpers.py` (`FakeCommandRunner`, `FakeSudo`, `PassthroughSudo`,
-`make_context`).
+`make_context`); prefer exercising real files under `tmp_path` over mocks.
 
 Tests run in random order via `pytest-randomly`. If a failure looks
 order-dependent, rerun with `--randomly-seed=last`; use `-p no:randomly` for
@@ -115,8 +108,8 @@ When changing packaging or the zipapp builder:
 - Do not annotate local variables unless inference is unclear. Annotate
   module-level constants with `Final` when they are public or their type is
   non-obvious.
-- Tests and examples are exempt from mandatory annotations; annotate test
-  helpers and fakes where it improves clarity.
+- Tests and examples are exempt from mandatory annotations and docstrings;
+  annotate test helpers and fakes where it improves clarity.
 - Use built-in generics (`list[str]`, `dict[str, Any]`), `X | None` instead of
   `Optional[X]`, and `collections.abc` for abstract types (`Callable`,
   `Iterable`, `Mapping`, `Sequence`).
@@ -129,7 +122,6 @@ When changing packaging or the zipapp builder:
 - Add docstrings to public classes, functions, and methods. Keep them concise
   and imperative. Use reStructuredText double backticks for code references,
   e.g. ``sudo=True``.
-- Tests and examples are exempt from mandatory docstrings.
 - Add inline comments for edge cases and non-obvious decisions. Keep all
   comments brief and limited to useful information; do not overexplain or
   include unnecessary details.
@@ -138,28 +130,19 @@ When changing packaging or the zipapp builder:
   Tests use absolute imports (`from kitup.modules import files`).
 - Name functions and variables `snake_case`, classes `PascalCase`, private
   helpers and module-private constants with a leading underscore
-  (`_remove_path`, `_PRESENT_OR_ABSENT`).
-- Raise `TaskFailed` for expected task failures and the specific
-  `KitupError` subclass (`ConfigError`, `BundleError`, `ResolutionError`,
-  `PrivilegeError`) elsewhere. Never swallow exceptions silently. Chain with
-  `raise ... from exc`.
-- Validate public API arguments at the top of the function using the helpers
-  in `kitup/validation.py` (`require_path`, `require_text`, `require_state`,
-  `require_collection`, `normalize_strings`, and friends).
-- Use `pathlib.Path` internally. Accept `str | Path` at public boundaries and
-  convert immediately.
+  (`_matching_line`, `_PRESENT_OR_ABSENT`).
 
 ### Module conventions
 
-- Every public function in `kitup/modules/` takes `ctx: TaskContext` first,
-  returns `None`, and documents its behavior.
+- Every public function in `kitup/modules/` takes `ctx: TaskContext` first and
+  returns `None`.
 - Modules MUST be idempotent: inspect current state first, change only what is
-  needed, and call `ctx.changed(data, summary)` only when something actually
-  changes.
+  needed, and call `ctx.changed(data, summary)` with a short summary and useful
+  structured `data` only when something actually changes.
 - Modules MUST honor `ctx.dry_run`: report what would change without mutating
   the system.
 - Use `ctx.probe([...])` for read-only queries and `ctx.run([...])` for
-  mutations. Pass argv lists, never shell strings.
+  mutations.
 - Request privilege with `sudo=True` on `ctx.run` or the module helper. Never
   embed `sudo` in the command list.
 - Expensive per-run work belongs in `ctx.memo(key, loader)`. Use `ctx.skip()`
@@ -167,22 +150,18 @@ When changing packaging or the zipapp builder:
 
 ### Tests conventions
 
+- Add or update tests with every behavior change; for every new module behavior,
+  cover the happy path, idempotency (run twice, assert a single change), dry-run
+  behavior, and expected failures.
 - Write pytest functions named `test_<behavior>`, not test classes.
 - Test observable behavior and state transitions, not implementation details.
-- For every new module behavior, cover the happy path, idempotency (run twice,
-  assert a single change), dry-run behavior, and expected failures.
 - Use `pytest.raises(..., match="...")` for error paths.
-- Use `pytest.mark.parametrize` for input matrices.
-- Do not mock what you can exercise with `tmp_path`; use the existing fakes
-  for commands and sudo.
 
 ## Do
 
-- DO add or update tests with every behavior change.
-- DO run `pytest`, `ruff`, and `mypy` before declaring work complete.
-- DO keep modules idempotent, dry-run safe, and fail-fast friendly.
-- DO route privileged filesystem work through `kitup/_privileged/` and keep
-  `worker.py`, `protocol.py`, and `_utils/file_helper.py` in sync.
+- DO route privileged operations implemented in Python through
+  `kitup/_privileged/` and keep `worker.py`, `protocol.py`, and the shared
+  helper modules they use in sync.
 - DO keep the privileged worker standard-library-only, free of runtime package
   imports, and without a `__main__` guard; it is embedded into a `python -c`
   script.
@@ -190,26 +169,31 @@ When changing packaging or the zipapp builder:
   user-facing: document the public API and commands, and omit internal
   implementation details or unnecessary information. Update them when public
   APIs or commands change.
-- DO preserve bundle and module ordering semantics; dependencies run first and
-  each bundle runs at most once.
-- DO use `ctx.changed()` with a short summary and useful structured `data`.
-- DO prefer small, focused changes that match the surrounding code.
+- DO raise `TaskFailed` for expected task failures and the specific
+  `KitupError` subclass (`ConfigError`, `BundleError`, `ResolutionError`,
+  `PrivilegeError`) elsewhere. Never swallow exceptions silently. Chain with
+  `raise ... from exc`.
+- DO validate public API arguments at the top of the function using the helpers
+  in `kitup/validation.py` (`require_path`, `require_text`, `require_state`,
+  `require_collection`, `normalize_strings`, and friends).
+- DO use `pathlib.Path` internally. Accept `str | Path` at public boundaries
+  and convert immediately.
+- DO resolve relative source paths with `ctx.resolve_source`: a bare name maps
+  to the bundle's `files/` directory, other relative paths to the bundle
+  directory. Do not add module-specific path resolvers.
+- DO check for an existing shared helper before implementing generic
+  validation, filesystem, or similar logic. If none exists and the logic is
+  generic, add it to the appropriate shared module (for example
+  `kitup/validation.py` or `kitup/_utils/`) rather than duplicating it.
 
 ## Don't
 
-- DON'T use `shell=True`, `os.system`, or build shell command strings. Use
-  argv lists through `ctx.run` / `ctx.probe`.
-- DON'T call `subprocess` directly from task modules; use the context helpers.
-- DON'T put `sudo` in an argv list or invoke it manually; use `sudo=True`.
-- DON'T add non-idempotent operations or unconditional `ctx.changed()` calls.
-- DON'T mutate the system during a dry run.
+- DON'T use `shell=True`, `os.system`, or build shell command strings; pass
+  argv lists.
 - DON'T use `print()` in library code. Use the output layer, `ctx.note()`, or
   the CLI's error reporting.
 - DON'T add a runtime dependency without updating `pyproject.toml` and
   documenting it.
-- DON'T import third-party packages in `_privileged/worker.py`.
-- DON'T run `pytest tests/integration` directly; always use
-  `tools/integration.sh`.
 - DON'T weaken, skip, or delete tests to make a change pass.
 - DON'T use mutable default arguments (`def f(items=[])`).
 - DON'T change public APIs, task names, or CLI flags without discussing the
@@ -226,14 +210,10 @@ Run all of these before finishing. All must pass:
 .venv/bin/python -m mypy kitup tools
 ```
 
-`ruff` is configured in `pyproject.toml` for Python 3.14 with a 120-character
-line length, and formatting is enforced with `ruff format --check`. `mypy` runs
-in strict mode for `kitup/` and `tools/`. Fix type errors rather than weakening
+`ruff` and `mypy` are configured in `pyproject.toml`. `mypy` runs in strict
+mode for `kitup/` and `tools/`. Fix type errors rather than weakening
 annotations or adding blanket ignores. Use narrow, justified `# noqa` or
 `# type: ignore[...]` comments only when unavoidable.
 
-If a change touches system-facing behavior, also run:
-
-```bash
-tools/integration.sh
-```
+Also run the integration suite when applicable; see
+[Integration tests](#integration-tests-opt-in).
