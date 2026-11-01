@@ -37,6 +37,104 @@ def test_matching_runtime_and_file_is_a_noop(tmp_path):
     assert conf.read_text() == "vm.swappiness = 10\n"
 
 
+def test_matching_no_space_entry_is_a_noop(tmp_path):
+    conf = tmp_path / "99-kitup.conf"
+    conf.write_text("vm.swappiness=10\n")
+    command = FakeCommandRunner()
+    command.responses = [response(0, "10\n")]
+    ctx = make_sysctl_context(tmp_path, command=command)
+
+    sysctl.key(ctx, "vm.swappiness", 10, file=conf)
+
+    assert ctx.changes == []
+    assert conf.read_text() == "vm.swappiness=10\n"
+
+
+def test_matching_entry_keeps_its_position(tmp_path):
+    conf = tmp_path / "99-kitup.conf"
+    conf.write_text("vm.swappiness=10\nother = 1\n")
+    command = FakeCommandRunner()
+    command.responses = [response(0, "10\n")]
+    ctx = make_sysctl_context(tmp_path, command=command)
+
+    sysctl.key(ctx, "vm.swappiness", 10, file=conf)
+
+    assert ctx.changes == []
+    assert conf.read_text() == "vm.swappiness=10\nother = 1\n"
+
+
+def test_multiple_matching_keys_are_idempotent(tmp_path):
+    conf = tmp_path / "99-kitup.conf"
+    conf.write_text("vm.swappiness = 10\nkernel.panic = 3\n")
+    command = FakeCommandRunner()
+    command.responses = [response(0, "10\n"), response(0, "3\n")]
+    ctx = make_sysctl_context(tmp_path, command=command)
+
+    sysctl.key(ctx, "vm.swappiness", 10, file=conf)
+    sysctl.key(ctx, "kernel.panic", 3, file=conf)
+
+    assert ctx.changes == []
+    assert conf.read_text() == "vm.swappiness = 10\nkernel.panic = 3\n"
+
+
+def test_duplicate_matching_entries_are_collapsed(tmp_path):
+    conf = tmp_path / "99-kitup.conf"
+    conf.write_text("vm.swappiness=10\nvm.swappiness = 10\n")
+    command = FakeCommandRunner()
+    command.responses = [response(0, "10\n")]
+    ctx = make_sysctl_context(tmp_path, command=command)
+
+    sysctl.key(ctx, "vm.swappiness", 10, file=conf)
+
+    assert conf.read_text() == "vm.swappiness = 10\n"
+    assert len(ctx.changes) == 1
+
+    command.responses = [response(0, "10\n")]
+    ctx = make_sysctl_context(tmp_path, command=command)
+    sysctl.key(ctx, "vm.swappiness", 10, file=conf)
+
+    assert ctx.changes == []
+
+
+def test_no_space_entry_with_different_value_is_rewritten(tmp_path):
+    conf = tmp_path / "99-kitup.conf"
+    conf.write_text("vm.swappiness=60\n")
+    command = FakeCommandRunner()
+    command.responses = [response(0, "10\n")]  # runtime already matches
+    ctx = make_sysctl_context(tmp_path, command=command)
+
+    sysctl.key(ctx, "vm.swappiness", 10, file=conf)
+
+    assert conf.read_text() == "vm.swappiness = 10\n"
+    assert len(ctx.changes) == 1
+
+
+def test_matching_file_value_normalizes_whitespace(tmp_path):
+    conf = tmp_path / "99-kitup.conf"
+    conf.write_text("kernel.printk=4\t4\t1\t7\n")
+    command = FakeCommandRunner()
+    command.responses = [response(0, "4 4 1 7\n")]
+    ctx = make_sysctl_context(tmp_path, command=command)
+
+    sysctl.key(ctx, "kernel.printk", "4 4 1 7", file=conf)
+
+    assert ctx.changes == []
+    assert conf.read_text() == "kernel.printk=4\t4\t1\t7\n"
+
+
+def test_dry_run_with_matching_no_space_entry_reports_nothing(tmp_path):
+    conf = tmp_path / "99-kitup.conf"
+    conf.write_text("vm.swappiness=10\n")
+    command = FakeCommandRunner()
+    command.responses = [response(0, "10\n")]
+    ctx = make_sysctl_context(tmp_path, dry_run=True, command=command)
+
+    sysctl.key(ctx, "vm.swappiness", 10, file=conf)
+
+    assert ctx.changes == []
+    assert conf.read_text() == "vm.swappiness=10\n"
+
+
 def test_runtime_only_when_file_is_none(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "60\n"), response(0)]

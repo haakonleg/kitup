@@ -44,11 +44,13 @@ def forget_panic(ctx):
   key fails the task before any change is made. When the value differs,
   `sysctl -w name=value` applies it at runtime; multi-value keys (such as
   `kernel.printk`) are compared with normalized whitespace.
-- When `file` is set, all existing `name = ...` lines are removed and
-  `name = value` is appended. A missing file is created with mode `0o644`; an
-  existing file keeps its mode. Commented-out lines are left alone. The parent
-  directory must exist. `--dry-run` reports the change without writing, and
-  `--diff` prints a unified diff for the file.
+- When `file` is set, an existing entry whose value already matches is left
+  untouched, regardless of spacing around `=` or its position in the file.
+  Otherwise all existing `name = ...` lines are removed and `name = value` is
+  appended. A missing file is created with mode `0o644`; an existing file
+  keeps its mode. Commented-out lines are left alone. The parent directory
+  must exist. `--dry-run` reports the change without writing, and `--diff`
+  prints a unified diff for the file.
 - `state="absent"` requires `file` and removes every matching entry from it.
   The runtime value is not changed; it persists until the next reboot.
 

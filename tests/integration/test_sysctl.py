@@ -83,6 +83,28 @@ def test_persist_to_file(tmp_path: Path, capsys) -> None:
     assert Path(CONF).read_text(encoding="utf-8") == f"{KEY} = 1\n"
 
 
+def test_preexisting_no_space_entry_is_idempotent(tmp_path: Path, capsys) -> None:
+    root = write_bundle(
+        tmp_path / "preexisting",
+        "sysctl_preexisting",
+        f"""
+        from kitup.modules import sysctl
+
+        @task("set key and persist it")
+        def set_and_persist(ctx):
+            sysctl.key(ctx, {KEY!r}, 1, file={CONF!r})
+        """,
+    )
+    run(["sudo", "-n", "sysctl", "-w", f"{KEY}=1"])
+    seed = tmp_path / "seed.conf"
+    seed.write_text(f"{KEY}=1\n", encoding="utf-8")
+    run(["sudo", "-n", "install", "-m", "0644", str(seed), CONF])
+
+    assert run_kitup("apply", root) == 0
+    assert "0 changed" in capsys.readouterr().out
+    assert Path(CONF).read_text(encoding="utf-8") == f"{KEY}=1\n"
+
+
 def test_absent_removes_file_entry(tmp_path: Path, capsys) -> None:
     present_root = write_bundle(
         tmp_path / "present",

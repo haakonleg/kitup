@@ -23,9 +23,10 @@ def key(
     """Set a sysctl key at runtime and optionally persist it in a file.
 
     ``file=None`` changes only the runtime value. When ``file`` is an absolute
-    path, a ``name = value`` entry is also managed in that file.
-    ``state="absent"`` requires ``file`` and only edits the file. Boolean
-    values are written as ``1`` or ``0``.
+    path, a ``name = value`` entry is also managed in that file. An existing
+    entry with the desired value is left untouched. ``state="absent"``
+    requires ``file`` and only edits the file. Boolean values are written as
+    ``1`` or ``0``.
     """
     require_state(state, "sysctl")
     key_name = _normalize_name(name)
@@ -97,18 +98,28 @@ def _entry_pattern(name: str) -> re.Pattern[str]:
 def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> None:
     pattern = _entry_pattern(name)
     text = _read_text(ctx, target)
-    lines = [line for line in text.splitlines(keepends=True) if not pattern.search(line)]
-    if lines and not lines[-1].endswith("\n"):
-        lines[-1] += "\n"
-    lines.append(f"{name} = {desired}\n")
+    lines = text.splitlines(keepends=True)
+    matches = [line for line in lines if pattern.search(line)]
+    if len(matches) == 1 and _entry_value(matches[0]) == _normalize_ws(desired):
+        # Keep the existing line, including its spacing and position.
+        return
+    remaining = [line for line in lines if not pattern.search(line)]
+    if remaining and not remaining[-1].endswith("\n"):
+        remaining[-1] += "\n"
+    remaining.append(f"{name} = {desired}\n")
     _apply_text(
         ctx,
         target,
         text,
-        "".join(lines),
+        "".join(remaining),
         summary=f"set {name} in {target}",
         data={"path": str(target), "key": name, "action": "edit"},
     )
+
+
+def _entry_value(line: str) -> str:
+    _, _, value = line.partition("=")
+    return _normalize_ws(value)
 
 
 def _remove_entry(ctx: TaskContext, target: Path, name: str) -> None:
