@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 import http.server
 import stat
@@ -18,6 +16,7 @@ class ServerState:
         self.payload = b"downloaded\n"
         self.requests = 0
         self.headers: list[dict[str, str]] = []
+
 
 @pytest.fixture
 def http_server(monkeypatch):
@@ -62,6 +61,7 @@ def http_server(monkeypatch):
         server.server_close()
         thread.join(timeout=5)
 
+
 def test_to_file_downloads_and_is_idempotent(tmp_path, http_server):
     state, base = http_server
     target = tmp_path / "file.txt"
@@ -79,6 +79,7 @@ def test_to_file_downloads_and_is_idempotent(tmp_path, http_server):
 
     assert state.requests == 1
     assert second.changes == []
+
 
 def test_to_file_force_refreshes_only_changed_content(tmp_path, http_server):
     state, base = http_server
@@ -99,6 +100,7 @@ def test_to_file_force_refreshes_only_changed_content(tmp_path, http_server):
     assert target.read_bytes() == b"changed\n"
     assert len(changed.changes) == 1
 
+
 def test_to_file_checksum_skips_matching_file(tmp_path, http_server):
     state, base = http_server
     target = tmp_path / "file.txt"
@@ -110,6 +112,7 @@ def test_to_file_checksum_skips_matching_file(tmp_path, http_server):
 
     assert state.requests == 0
     assert ctx.changes == []
+
 
 def test_to_file_checksum_mismatch_replaces_file(tmp_path, http_server):
     state, base = http_server
@@ -123,6 +126,7 @@ def test_to_file_checksum_mismatch_replaces_file(tmp_path, http_server):
     assert target.read_bytes() == state.payload
     assert state.requests == 1
     assert len(ctx.changes) == 1
+
 
 def test_to_file_bad_checksum_leaves_destination_untouched(tmp_path, http_server):
     state, base = http_server
@@ -140,6 +144,7 @@ def test_to_file_bad_checksum_leaves_destination_untouched(tmp_path, http_server
     assert target.read_bytes() == b"keep\n"
     assert state.requests == 1
 
+
 def test_to_file_dry_run_does_not_fetch_or_write(tmp_path, http_server):
     state, base = http_server
     target = tmp_path / "file.txt"
@@ -151,6 +156,7 @@ def test_to_file_dry_run_does_not_fetch_or_write(tmp_path, http_server):
     assert not target.exists()
     assert len(ctx.changes) == 1
 
+
 def test_to_file_uses_url_basename_for_directory_destination(tmp_path, http_server):
     state, base = http_server
     directory = tmp_path / "downloads"
@@ -159,6 +165,7 @@ def test_to_file_uses_url_basename_for_directory_destination(tmp_path, http_serv
     download.to_file(make_context(tmp_path), f"{base}/file.txt", directory)
 
     assert (directory / "file.txt").read_bytes() == state.payload
+
 
 def test_to_file_http_error_is_a_task_failure(tmp_path, http_server):
     _, base = http_server
@@ -169,6 +176,7 @@ def test_to_file_http_error_is_a_task_failure(tmp_path, http_server):
 
     assert not target.exists()
 
+
 def test_to_file_rejects_truncated_response(tmp_path, http_server):
     _, base = http_server
     target = tmp_path / "file.txt"
@@ -177,6 +185,7 @@ def test_to_file_rejects_truncated_response(tmp_path, http_server):
         download.to_file(make_context(tmp_path), f"{base}/truncated", target)
 
     assert not target.exists()
+
 
 def test_to_file_rejects_symlink_destination(tmp_path, http_server):
     state, base = http_server
@@ -191,6 +200,7 @@ def test_to_file_rejects_symlink_destination(tmp_path, http_server):
     assert state.requests == 0
     assert link.is_symlink()
     assert target.read_bytes() == b"keep\n"
+
 
 def test_to_file_reconciles_metadata_without_download(tmp_path, http_server):
     state, base = http_server
@@ -209,6 +219,7 @@ def test_to_file_reconciles_metadata_without_download(tmp_path, http_server):
     download.to_file(second, f"{base}/file.txt", target, mode=0o640)
 
     assert second.changes == []
+
 
 def test_to_file_validates_arguments_without_fetching(tmp_path, http_server):
     state, base = http_server
@@ -230,6 +241,7 @@ def test_to_file_validates_arguments_without_fetching(tmp_path, http_server):
 
     assert state.requests == 0
 
+
 def test_to_file_creates_new_files_with_the_requested_mode(tmp_path, http_server):
     state, base = http_server
     target = tmp_path / "file.txt"
@@ -238,6 +250,7 @@ def test_to_file_creates_new_files_with_the_requested_mode(tmp_path, http_server
 
     assert target.read_bytes() == state.payload
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
 
 def test_to_bytes_returns_content_and_verifies_checksum(tmp_path, http_server):
     state, base = http_server
@@ -249,6 +262,7 @@ def test_to_bytes_returns_content_and_verifies_checksum(tmp_path, http_server):
     assert content == state.payload
     assert state.requests == 1
     assert ctx.changes == []
+
 
 def test_to_bytes_enforces_max_bytes(tmp_path, http_server):
     _, base = http_server

@@ -1,14 +1,15 @@
 """Shared argument validation for module APIs."""
 
-from __future__ import annotations
-
 import subprocess
 from collections.abc import Collection, Iterable
 from pathlib import Path
+from typing import Final, Literal
 
 from .errors import TaskFailed
 
-_PRESENT_OR_ABSENT = ("present", "absent")
+type State = Literal["present", "absent"]
+
+_PRESENT_OR_ABSENT: Final[tuple[State, ...]] = ("present", "absent")
 
 
 def normalize_strings(values: str | Iterable[str]) -> list[str]:

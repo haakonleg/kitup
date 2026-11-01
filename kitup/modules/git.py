@@ -1,17 +1,16 @@
 """Git repository checkout management."""
 
-from __future__ import annotations
-
 import re
 import shutil
 from pathlib import Path
+from typing import Final
 
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..validation import require_path, require_success, require_text
 
-_SHA = re.compile(r"[0-9a-f]{40}")
-_GIT_ENV = {"GIT_TERMINAL_PROMPT": "0"}
+_SHA: Final = re.compile(r"[0-9a-f]{40}")
+_GIT_ENV: Final = {"GIT_TERMINAL_PROMPT": "0"}
 
 
 def repo(
@@ -158,9 +157,7 @@ def _fetch(ctx: TaskContext, git: str, dest: str) -> None:
 def _resolve_version(ctx: TaskContext, git: str, dest: str, version: str) -> str:
     refs = ["origin/HEAD"] if version == "HEAD" else [f"origin/{version}", version]
     for ref in refs:
-        result = ctx.probe(
-            [git, "-C", dest, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"]
-        )
+        result = ctx.probe([git, "-C", dest, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     raise TaskFailed(f"version {version!r} not found in {dest} after fetch")

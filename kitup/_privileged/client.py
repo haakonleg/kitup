@@ -1,16 +1,14 @@
 """Unprivileged client and embedded script builder for the privileged worker."""
 
-from __future__ import annotations
-
 import contextlib
-import pkgutil
 import queue
 import subprocess
 import sys
 import threading
 from collections import deque
 from functools import lru_cache
-from typing import IO, TYPE_CHECKING, Any
+from importlib import resources
+from typing import IO, TYPE_CHECKING, Any, override
 
 from .. import PACKAGE_NAME
 from ..errors import TaskFailed
@@ -26,12 +24,11 @@ class _Reader(threading.Thread):
     def __init__(self, stream: IO[str], *, queue_lines: bool) -> None:
         super().__init__(daemon=True)
         self._stream = stream
-        self._queue: queue.Queue[str | None] | None = (
-            queue.Queue() if queue_lines else None
-        )
+        self._queue: queue.Queue[str | None] | None = queue.Queue() if queue_lines else None
         self._tail: deque[str] | None = None if queue_lines else deque(maxlen=100)
         self.done = threading.Event()
 
+    @override
     def run(self) -> None:
         try:
             for line in self._stream:
@@ -39,7 +36,7 @@ class _Reader(threading.Thread):
                     self._tail.append(line)
                 if self._queue is not None:
                     self._queue.put(line)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass
         finally:
             if self._queue is not None:
@@ -82,10 +79,7 @@ class PrivilegedWorker:
         payload = request.encode()
         size = len(payload.encode("utf-8")) + 1
         if size > MAX_MESSAGE_BYTES:
-            raise TaskFailed(
-                f"privileged worker request too large ({size} bytes; "
-                f"limit {MAX_MESSAGE_BYTES})"
-            )
+            raise TaskFailed(f"privileged worker request too large ({size} bytes; limit {MAX_MESSAGE_BYTES})")
 
         with self._lock:
             self._start_locked()
@@ -114,9 +108,7 @@ class PrivilegedWorker:
             if response.error is not None:
                 if response.fatal:
                     self._discard_locked()
-                raise TaskFailed(
-                    f"privileged worker {request.action} failed: {response.error}"
-                )
+                raise TaskFailed(f"privileged worker {request.action} failed: {response.error}")
             return response.result
 
     def start(self) -> None:
@@ -177,9 +169,7 @@ class PrivilegedWorker:
         try:
             line = self._stdout.readline(timeout)
         except queue.Empty:
-            raise TaskFailed(
-                f"timed out waiting for privileged worker after {timeout:g}s"
-            ) from None
+            raise TaskFailed(f"timed out waiting for privileged worker after {timeout:g}s") from None
         if line is None:
             if self._stderr is not None:
                 self._stderr.done.wait(timeout=0.5)
@@ -216,32 +206,30 @@ class PrivilegedWorker:
         try:
             if process.stdin is not None:
                 process.stdin.close()
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass
 
         exited = False
         try:
             process.wait(timeout=1)
             exited = True
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError, subprocess.TimeoutExpired:
             try:
                 process.terminate()
                 process.wait(timeout=1)
                 exited = True
-            except (OSError, subprocess.TimeoutExpired):
+            except OSError, subprocess.TimeoutExpired:
                 try:
                     process.kill()
                     process.wait(timeout=1)
                     exited = True
-                except (OSError, subprocess.TimeoutExpired):
+                except OSError, subprocess.TimeoutExpired:
                     pass
 
         for stream in (process.stdout, process.stderr):
             if stream is not None:
-                try:
+                with contextlib.suppress(OSError, ValueError):
                     stream.close()
-                except (OSError, ValueError):
-                    pass
         self._stdout = None
         self._stderr = None
         if not exited:
@@ -263,7 +251,7 @@ def _embedded_script() -> str:
 
 
 def _read_source(package: str, name: str) -> str:
-    data = pkgutil.get_data(package, name)
-    if data is None:
-        raise TaskFailed(f"embedded source is unavailable: {package}/{name}")
-    return data.decode("utf-8")
+    try:
+        return resources.files(package).joinpath(name).read_text(encoding="utf-8")
+    except (ImportError, OSError) as exc:
+        raise TaskFailed(f"embedded source is unavailable: {package}/{name}") from exc

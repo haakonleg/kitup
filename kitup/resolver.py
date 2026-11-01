@@ -1,7 +1,5 @@
 """Bundle dependency resolution."""
 
-from __future__ import annotations
-
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -9,7 +7,7 @@ from .errors import BundleError, ResolutionError
 from .registry import Bundle
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BundlePlan:
     """An execution plan in dependency-first, deduplicated order."""
 
@@ -35,9 +33,7 @@ def resolve(roots: Sequence[Bundle]) -> BundlePlan:
             return
         for index, active_bundle in enumerate(active):
             if active_bundle is bundle:
-                cycle = " -> ".join(
-                    [entry.name for entry in (*active[index:], bundle)]
-                )
+                cycle = " -> ".join([entry.name for entry in (*active[index:], bundle)])
                 raise ResolutionError(f"dependency cycle: {cycle}")
 
         active.append(bundle)

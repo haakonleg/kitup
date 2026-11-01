@@ -1,22 +1,20 @@
 """Task and bundle registration objects used by bundle authors."""
 
-from __future__ import annotations
-
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, Final, override
 
 from .errors import BundleError
 from .validation import normalize_string_sequence
 
-_TASKS_ATTR = "__kitup_tasks__"
-_CLAIMED_ATTR = "__kitup_bundle_owner__"
+_TASKS_ATTR: Final = "__kitup_tasks__"
+_CLAIMED_ATTR: Final = "__kitup_bundle_owner__"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Task:
     """A named unit of work, or a declaration awaiting its bundle."""
 
@@ -75,35 +73,25 @@ class Bundle:
 
         self._adopt_modules(task_modules)
 
+    @override
     def __repr__(self) -> str:
         return f"Bundle({self.name!r}, tasks={len(self.tasks)})"
 
-    def _normalize_modules(
-        self, modules: Sequence[ModuleType]
-    ) -> tuple[ModuleType, ...]:
+    def _normalize_modules(self, modules: Sequence[ModuleType]) -> tuple[ModuleType, ...]:
         if modules is None:
-            raise BundleError(
-                "bundle modules must be a sequence of task modules, not None"
-            )
+            raise BundleError("bundle modules must be a sequence of task modules, not None")
         if isinstance(modules, ModuleType):
-            raise BundleError(
-                "bundle modules must be a sequence of task modules, not a single module"
-            )
+            raise BundleError("bundle modules must be a sequence of task modules, not a single module")
         try:
             values = tuple(modules)
         except TypeError as exc:
-            raise BundleError(
-                "bundle modules must be a sequence of task modules"
-            ) from exc
+            raise BundleError("bundle modules must be a sequence of task modules") from exc
 
         normalized: list[ModuleType] = []
         seen: set[ModuleType] = set()
         for value in values:
             if not isinstance(value, ModuleType):
-                raise BundleError(
-                    "bundle modules must contain task modules, "
-                    f"not {type(value).__name__}"
-                )
+                raise BundleError(f"bundle modules must contain task modules, not {type(value).__name__}")
             if value in seen:
                 raise BundleError(f"duplicate task module: {value.__name__}")
             seen.add(value)
@@ -116,32 +104,20 @@ class Bundle:
             if not specs:
                 owner = vars(module).get(_CLAIMED_ATTR)
                 if isinstance(owner, str):
-                    raise BundleError(
-                        f"task module {module.__name__!r} is already registered "
-                        f"by bundle {owner!r}"
-                    )
-                raise BundleError(
-                    f"task module {module.__name__!r} does not register any tasks"
-                )
-            self.tasks.extend(
-                replace(spec, bundle=self, bundle_path=self.path) for spec in specs
-            )
+                    raise BundleError(f"task module {module.__name__!r} is already registered by bundle {owner!r}")
+                raise BundleError(f"task module {module.__name__!r} does not register any tasks")
+            self.tasks.extend(replace(spec, bundle=self, bundle_path=self.path) for spec in specs)
             vars(module)[_CLAIMED_ATTR] = self.name
 
-    def _normalize_dependencies(
-        self, depends_on: Sequence[ModuleType | Bundle]
-    ) -> tuple[Bundle, ...]:
+    def _normalize_dependencies(self, depends_on: Sequence[ModuleType | Bundle]) -> tuple[Bundle, ...]:
         if isinstance(depends_on, str):
             raise BundleError(
-                "bundle depends_on must be a sequence of bundle modules or Bundle "
-                "objects, not a single string"
+                "bundle depends_on must be a sequence of bundle modules or Bundle objects, not a single string"
             )
         try:
             values = tuple(depends_on)
         except TypeError as exc:
-            raise BundleError(
-                "bundle depends_on must be a sequence of bundle modules or Bundle objects"
-            ) from exc
+            raise BundleError("bundle depends_on must be a sequence of bundle modules or Bundle objects") from exc
         return tuple(bundle_of(value) for value in values)
 
     def bind(self, module: ModuleType) -> None:
@@ -150,9 +126,7 @@ class Bundle:
             return
         path = getattr(module, "__file__", None)
         if not path:
-            raise BundleError(
-                f"module {module.__name__!r} has no file; pass path= to Bundle(...)"
-            )
+            raise BundleError(f"module {module.__name__!r} has no file; pass path= to Bundle(...)")
         self.set_path(Path(path).resolve().parent)
 
     def set_path(self, path: Path) -> None:
@@ -208,19 +182,13 @@ def bundle_of(value: ModuleType | Bundle) -> Bundle:
         bundle = getattr(value, "__kitup_bundle__", None)
         if bundle is None:
             raise BundleError(
-                f"module {value.__name__!r} does not define a bundle; "
-                "construct Bundle(...) in its __init__.py"
+                f"module {value.__name__!r} does not define a bundle; construct Bundle(...) in its __init__.py"
             )
         if not isinstance(bundle, Bundle):
-            raise BundleError(
-                f"module {value.__name__!r} has a non-Bundle __kitup_bundle__"
-            )
+            raise BundleError(f"module {value.__name__!r} has a non-Bundle __kitup_bundle__")
         bundle.bind(value)
         return bundle
-    raise BundleError(
-        "expected a bundle module or Bundle object, "
-        f"not {type(value).__name__}"
-    )
+    raise BundleError(f"expected a bundle module or Bundle object, not {type(value).__name__}")
 
 
 def task(

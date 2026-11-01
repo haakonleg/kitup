@@ -1,14 +1,12 @@
 """Per-run task context exposed to bundle task code."""
 
-from __future__ import annotations
-
 import builtins
 import subprocess
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, NoReturn, TypeVar, overload
+from typing import Any, Final, Never, cast, overload
 
 from ._privileged.client import PrivilegedWorker
 from .commands import CommandRunner
@@ -19,9 +17,7 @@ from .registry import Bundle, Task
 from .results import Change
 from .validation import normalize_strings, require_text
 
-T = TypeVar("T")
-
-_MISSING = object()
+_MISSING: Final = object()
 
 
 class TaskContext:
@@ -66,10 +62,12 @@ class TaskContext:
 
     @property
     def changes(self) -> list[Change]:
+        """Return the changes recorded for the current task."""
         return list(self._changes)
 
     @property
     def notes(self) -> list[str]:
+        """Return the notes recorded for the current task."""
         return list(self._notes)
 
     @property
@@ -167,9 +165,7 @@ class TaskContext:
         }
 
         if unless is not None:
-            probe = self.command.run(
-                normalize_strings(unless), check=False, **run_options
-            )
+            probe = self.command.run(normalize_strings(unless), check=False, **run_options)
             if probe.returncode == 0:
                 return _skipped(command)
 
@@ -193,18 +189,16 @@ class TaskContext:
         # task failure.
         return self.command.run(command, check=False, **run_options)
 
-    def probe(
-        self, argv: str | Sequence[str], **kwargs: Any
-    ) -> subprocess.CompletedProcess[str]:
+    def probe(self, argv: str | Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         """Run a query command without recording a change."""
         kwargs.pop("mutates", None)
         return self.run(argv, mutates=False, **kwargs)
 
-    def skip(self, reason: str = "") -> NoReturn:
+    def skip(self, reason: str = "") -> Never:
         """Skip the current task before making any changes."""
         raise SkipTask(reason)
 
-    def fail(self, reason: str) -> NoReturn:
+    def fail(self, reason: str) -> Never:
         """Fail the current task with the given reason."""
         raise TaskFailed(reason)
 
@@ -216,11 +210,11 @@ class TaskContext:
         """Attach an informational note to the current task line."""
         self._notes.append(detail)
 
-    def memo(self, key: str, loader: Callable[[], T]) -> T:
+    def memo[T](self, key: str, loader: Callable[[], T]) -> T:
         """Compute a value once per run and return the cached result."""
         if key not in self._memo:
             self._memo[key] = loader()
-        return self._memo[key]
+        return cast(T, self._memo[key])
 
     def close(self) -> None:
         """Close the privileged worker, if it was started."""
@@ -261,7 +255,7 @@ class TaskContext:
     def get(self, key: str) -> Any: ...
 
     @overload
-    def get(self, key: str, default: T) -> T: ...
+    def get[T](self, key: str, default: T) -> T: ...
 
     def get(self, key: str, default: Any = _MISSING) -> Any:
         """Return a value stored by :meth:`set`, :meth:`input`, or :meth:`memo`.

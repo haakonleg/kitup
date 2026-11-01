@@ -49,9 +49,7 @@ if ctx.facts.get("distro_id") == "fedora":
 
 for mount in ctx.facts.get("mounts", ()):
     if mount["mount"] == "/":
-        ctx.note(
-            f"root is {mount['bytes_used']} of {mount['bytes_total']} bytes used"
-        )
+        ctx.note(f"root is {mount['bytes_used']} of {mount['bytes_total']} bytes used")
 ```
 
 Bytes are raw values suitable for calculations; format them for display as needed.

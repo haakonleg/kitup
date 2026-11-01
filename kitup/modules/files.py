@@ -1,7 +1,5 @@
 """Idempotent file, directory, and symlink management."""
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 
@@ -15,6 +13,7 @@ from .._utils.file_helper import (
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..validation import (
+    State,
     require_metadata,
     require_mode,
     require_path,
@@ -28,7 +27,7 @@ def file(
     ctx: TaskContext,
     path: str | Path,
     *,
-    state: str = "present",
+    state: State = "present",
     content: str | None = None,
     mode: int | None = None,
     owner: str | int | None = None,
@@ -219,7 +218,7 @@ def line(
     line: str,
     *,
     match: str | None = None,
-    state: str = "present",
+    state: State = "present",
     sudo: bool = False,
 ) -> None:
     """Add, replace, or remove a line selected by an exact value or regex."""
@@ -247,11 +246,7 @@ def line(
             new_lines[index] = rendered
         summary = f"{'replace' if index is not None else 'append'} line in {target}"
     else:
-        new_lines = [
-            existing
-            for existing in lines
-            if not _line_matches(existing, desired, match)
-        ]
+        new_lines = [existing for existing in lines if not _line_matches(existing, desired, match)]
         summary = f"remove line from {target}"
 
     new_text = "".join(new_lines)
@@ -265,7 +260,7 @@ def block(
     marker: str,
     content: str,
     *,
-    state: str = "present",
+    state: State = "present",
     sudo: bool = False,
 ) -> None:
     """Create, update, or remove a marked block in a file."""
@@ -308,7 +303,7 @@ def directory(
     ctx: TaskContext,
     path: str | Path,
     *,
-    state: str = "present",
+    state: State = "present",
     force: bool = False,
     mode: int | None = None,
     owner: str | int | None = None,
@@ -387,7 +382,7 @@ def symlink(
     )
     if ctx.dry_run:
         return
-    if file_ops.privileged(ctx, sudo):
+    if file_ops.privileged(ctx, sudo=sudo):
         file_ops.worker_request(ctx, "symlink", path=str(link), target=desired)
         return
     try:
@@ -436,7 +431,7 @@ def _read_text(ctx: TaskContext, path: Path, *, sudo: bool) -> str:
 
 
 def _move(ctx: TaskContext, source: Path, target: Path, *, sudo: bool) -> None:
-    if file_ops.privileged(ctx, sudo):
+    if file_ops.privileged(ctx, sudo=sudo):
         file_ops.worker_request(ctx, "move", source=str(source), path=str(target))
         return
     try:
@@ -482,7 +477,7 @@ def _mkdir(
     *,
     sudo: bool,
 ) -> None:
-    if file_ops.privileged(ctx, sudo):
+    if file_ops.privileged(ctx, sudo=sudo):
         file_ops.worker_request(
             ctx,
             "mkdir",
@@ -504,14 +499,11 @@ def _remove_path(ctx: TaskContext, path: Path, *, force: bool, sudo: bool) -> No
     info = file_ops.stat(ctx, path, sudo=sudo)
     if info is None:
         return
-    if info.is_dir and not info.is_symlink and not force:
-        action = "rmdir"
-    else:
-        action = "remove"
+    action = "rmdir" if info.is_dir and not info.is_symlink and not force else "remove"
     ctx.changed({"path": str(path), "action": action}, f"{action} {path}")
     if ctx.dry_run:
         return
-    if file_ops.privileged(ctx, sudo):
+    if file_ops.privileged(ctx, sudo=sudo):
         file_ops.worker_request(ctx, "remove", path=str(path), force=force)
         return
     try:

@@ -1,11 +1,13 @@
 """Systemd unit management."""
 
-from __future__ import annotations
+from typing import Final, Literal
 
 from ..context import TaskContext
 from ..validation import require_scope, require_state, require_text
 
-_ENABLED_STATES = {
+type SystemdState = Literal["started", "stopped"]
+
+_ENABLED_STATES: Final = {
     "enabled",
     "enabled-runtime",
     "static",
@@ -14,7 +16,7 @@ _ENABLED_STATES = {
     "generated",
 }
 
-_PAST_TENSE = {
+_PAST_TENSE: Final = {
     "enable": "enabled",
     "disable": "disabled",
     "start": "started",
@@ -27,7 +29,7 @@ def unit(
     unit: str,
     *,
     enabled: bool | None = None,
-    state: str | None = None,
+    state: SystemdState | None = None,
     scope: str = "system",
 ) -> None:
     """Ensure a unit's enabled and active state."""
@@ -85,6 +87,6 @@ def _is_active(ctx: TaskContext, base: list[str], unit: str) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "active"
 
 
-def _desired_active(state: str) -> bool:
+def _desired_active(state: SystemdState) -> bool:
     require_state(state, "systemd", ("started", "stopped"))
     return state == "started"

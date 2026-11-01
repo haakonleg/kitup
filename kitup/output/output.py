@@ -1,13 +1,11 @@
 """Line-oriented terminal output with optional ANSI colors."""
 
-from __future__ import annotations
-
 import os
 import sys
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
-from typing import Any, TextIO
+from typing import Any, Final, TextIO
 
 from .. import PACKAGE_NAME, __version__
 from ..results import Status, TaskResult
@@ -16,20 +14,20 @@ from .live_line import LiveLine
 from .terminal import clear_input as clear_terminal_input
 from .timer import Stopwatch
 
-NAME_WIDTH = 44
-STATUS_WIDTH = 9
-SPINNER_FRAMES = ("|", "/", "-", "\\")
-SPINNER_DELAY = 0.1
-SPINNER_INTERVAL = 0.1
+NAME_WIDTH: Final = 44
+STATUS_WIDTH: Final = 9
+SPINNER_FRAMES: Final = ("|", "/", "-", "\\")
+SPINNER_DELAY: Final = 0.1
+SPINNER_INTERVAL: Final = 0.1
 
-_COLORS = {
+_COLORS: Final = {
     Status.OK: "\033[32m",
     Status.CHANGED: "\033[33m",
     Status.SKIPPED: "\033[36m",
     Status.FAILED: "\033[31m",
 }
-_RESET = "\033[0m"
-_DIM = "\033[2m"
+_RESET: Final = "\033[0m"
+_DIM: Final = "\033[2m"
 
 
 class Output:
@@ -63,23 +61,24 @@ class Output:
         return f"{code}{text}{_RESET}"
 
     def write(self, text: str = "") -> None:
+        """Write one line of output."""
         self._live.write(text)
 
     def banner(self, facts: Mapping[str, Any]) -> None:
+        """Print the version and platform banner."""
         parts = [f"{PACKAGE_NAME} {__version__}", _platform_label(facts)]
         if desktop := _desktop_label():
             parts.append(desktop)
         self.write("  ·  ".join(part for part in parts if part))
 
     def bundle_header(self, name: str) -> None:
+        """Print a bundle header."""
         self.write()
         self.write(f"bundle: {name}")
 
     def fit_task_names(self, names: Iterable[str]) -> None:
         """Widen the task name column so statuses stay aligned."""
-        self.name_width = max(
-            NAME_WIDTH, max((len(name) for name in names), default=0) + 2
-        )
+        self.name_width = max(NAME_WIDTH, max((len(name) for name in names), default=0) + 2)
 
     def task_start(self, name: str) -> None:
         """Start timing a task and show its animated running line."""
@@ -130,6 +129,7 @@ class Output:
         return Animation(render, SPINNER_DELAY, SPINNER_INTERVAL)
 
     def task(self, result: TaskResult) -> None:
+        """Print the final status line for a task."""
         detail = self._task_detail(result)
         status_text = result.status.value
         if detail:
@@ -159,6 +159,7 @@ class Output:
         return detail
 
     def failure(self, result: TaskResult) -> None:
+        """Print failure details for a task."""
         error = result.error
         if error is None:
             return
@@ -178,6 +179,7 @@ class Output:
                 self.write(f"  {line}")
 
     def summary(self, counts: Mapping[Status, int], duration: float) -> None:
+        """Print the run summary."""
         parts = [
             f"{counts.get(Status.CHANGED, 0)} changed",
             f"{counts.get(Status.OK, 0)} ok",
@@ -194,10 +196,12 @@ class Output:
         self.write(f"Summary: {', '.join(parts)} — {duration:.1f} s")
 
     def aborted(self, task_name: str, not_run: int) -> None:
+        """Print the abort message after a failed task."""
         suffix = f" {not_run} task(s) not run." if not_run else ""
         self.write(f'Aborted after failure in "{task_name}".{suffix}')
 
     def interrupted(self, not_run: int) -> None:
+        """Print the interrupted-run message."""
         suffix = f" {not_run} task(s) not run." if not_run else ""
         self.write(f"Interrupted.{suffix}")
 
@@ -209,6 +213,7 @@ class Output:
         stdout: str = "",
         stderr: str = "",
     ) -> None:
+        """Print a command and its captured output when verbose."""
         self.write(self._paint(f"  $ {' '.join(argv)}", _DIM))
         self.write(self._paint(f"    -> exit {returncode} in {duration:.2f} s", _DIM))
         self._output_block("stdout", stdout)

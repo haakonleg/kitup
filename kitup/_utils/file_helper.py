@@ -4,6 +4,7 @@ The privileged worker embeds this module's source, so keep the imports
 standard-library-only and avoid package imports.
 """
 
+import contextlib
 import grp
 import hashlib
 import os
@@ -137,10 +138,8 @@ def atomic_write_path(
         _apply_replacement_metadata(path, temp, info, resolved_mode, owner, group)
         os.replace(temp, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(temp)
-        except OSError:
-            pass
         raise
 
 
@@ -215,10 +214,8 @@ def _apply_replacement_metadata(
     group: str | int | None,
 ) -> None:
     if info is not None and not info["is_symlink"]:
-        try:
+        with contextlib.suppress(OSError):
             shutil.copystat(path, temp, follow_symlinks=False)
-        except OSError:
-            pass
         apply_metadata(temp, mode, owner, group, info, preserve=True)
         return
     apply_metadata(temp, mode, owner, group)
@@ -268,10 +265,8 @@ def symlink_path(target: str, path: str | os.PathLike[str]) -> None:
         os.symlink(target, temp)
         os.replace(temp, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(temp)
-        except OSError:
-            pass
         raise
 
 

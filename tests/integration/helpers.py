@@ -1,7 +1,5 @@
 """Helpers shared by the container integration tests."""
 
-from __future__ import annotations
-
 import subprocess
 import sys
 import textwrap
@@ -44,7 +42,6 @@ def write_bundle(root: Path, name: str, source: str) -> Path:
     folder.mkdir(parents=True)
     (bundles / "__init__.py").write_text("", encoding="utf-8")
     (folder / "__init__.py").write_text(
-        "from __future__ import annotations\n\n"
         "from kitup.registry import Bundle\n\n"
         "from . import tasks\n\n"
         f"Bundle({name!r}, 'integration test bundle', modules=[tasks])\n",
@@ -53,16 +50,12 @@ def write_bundle(root: Path, name: str, source: str) -> Path:
 
     body = textwrap.dedent(source).strip()
     (folder / "tasks.py").write_text(
-        "from __future__ import annotations\n\n"
-        "from kitup.registry import task\n\n"
-        f"{body}\n",
+        f"from kitup.registry import task\n\n{body}\n",
         encoding="utf-8",
     )
 
     (root / "kitup.py").write_text(
-        "from bundles import " + name + "\n\n"
-        "from kitup import profile\n\n"
-        f"profile(bundles=[{name}])\n",
+        "from bundles import " + name + f"\n\nfrom kitup import profile\n\nprofile(bundles=[{name}])\n",
         encoding="utf-8",
     )
     return root
@@ -72,9 +65,7 @@ def run_kitup(command: str, root: Path, *args: str) -> int:
     """Run the CLI in-process against a temporary configuration root."""
     _purge_profile_modules()
     try:
-        return main(
-            [command, str(root / "kitup.py"), "--no-color", *args]
-        )
+        return main([command, str(root / "kitup.py"), "--no-color", *args])
     finally:
         _purge_profile_modules()
 

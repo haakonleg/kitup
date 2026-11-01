@@ -10,7 +10,7 @@ package imports, and without a ``__main__`` guard.
 import base64
 import os
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from .._utils.file_helper import (
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     )
     from .protocol import MAX_MESSAGE_BYTES, READY, Request, Response
 
-MAX_READ_BYTES = 32 * 1024 * 1024
+MAX_READ_BYTES: Final = 32 * 1024 * 1024
 
 
 def _path(params: dict[str, Any], key: str = "path") -> str:
@@ -75,7 +75,7 @@ def _identity(params: dict[str, Any], key: str) -> str | int | None:
     raise ValueError(f"{key} must be a user/group name or numeric ID")
 
 
-def _boolean(params: dict[str, Any], key: str, default: bool = False) -> bool:
+def _boolean(params: dict[str, Any], key: str, *, default: bool = False) -> bool:
     value = params.get(key, default)
     if not isinstance(value, bool):
         raise ValueError(f"{key} must be a boolean")  # noqa: TRY004
@@ -93,9 +93,7 @@ def read_action(params: dict[str, Any]) -> dict[str, Any]:
     if result is None:
         return {"exists": False}
     if result["is_file"]:
-        result["content"] = base64.b64encode(_read_limited(path, MAX_READ_BYTES)).decode(
-            "ascii"
-        )
+        result["content"] = base64.b64encode(_read_limited(path, MAX_READ_BYTES)).decode("ascii")
     return result
 
 
@@ -103,9 +101,7 @@ def _read_limited(path: str, limit: int) -> bytes:
     with open(path, "rb") as stream:
         data = stream.read(limit + 1)
     if len(data) > limit:
-        raise ValueError(
-            f"file is too large to read through privileged worker (limit {limit} bytes)"
-        )
+        raise ValueError(f"file is too large to read through privileged worker (limit {limit} bytes)")
     return data
 
 
@@ -158,7 +154,7 @@ def remove_action(params: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-ACTIONS = {
+ACTIONS: Final = {
     "stat": stat_action,
     "read": read_action,
     "write": write_action,

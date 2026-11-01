@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from kitup.errors import TaskFailed
@@ -19,9 +17,7 @@ def test_matching_value_is_a_noop(tmp_path):
 
     gsettings.key(ctx, "org.example", "theme", "dark")
 
-    assert [call[0] for call in command.calls] == [
-        ["gsettings", "get", "org.example", "theme"]
-    ]
+    assert [call[0] for call in command.calls] == [["gsettings", "get", "org.example", "theme"]]
     assert ctx.changes == []
 
 
@@ -55,7 +51,7 @@ def test_bool_int_and_list_values_are_formatted(tmp_path):
     ]
     ctx = make_context(tmp_path, command=command)
 
-    gsettings.key(ctx, "org.example", "enabled", True)
+    gsettings.key(ctx, "org.example", "enabled", value=True)
     gsettings.key(ctx, "org.example", "count", 3)
     gsettings.key(ctx, "org.example", "items", ["a", 2])
 

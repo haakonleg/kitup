@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 import os
 import stat
@@ -178,5 +176,3 @@ def test_digest_path_streams_file_content(tmp_path):
     assert digest_path(path, "sha256") == hashlib.sha256(b"data\n").hexdigest()
     with pytest.raises(ValueError, match="unsupported checksum algorithm"):
         digest_path(path, "not-a-real-algorithm")
-
-

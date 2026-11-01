@@ -1,7 +1,5 @@
 """RPM package, package-group, and repository management."""
 
-from __future__ import annotations
-
 import re
 import shutil
 from collections.abc import Iterable
@@ -12,6 +10,7 @@ from urllib.parse import urlparse
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..validation import (
+    State,
     normalize_strings,
     require_collection,
     require_path,
@@ -27,7 +26,7 @@ def packages(
     ctx: TaskContext,
     names: Iterable[str] | str,
     *,
-    state: str = "present",
+    state: State = "present",
     group: bool = False,
     weak_deps: bool = False,
     exclude: Iterable[str] | str | None = None,
@@ -160,7 +159,7 @@ def autoremove(ctx: TaskContext) -> None:
     ctx.run([_dnf_command(ctx), "autoremove", "-y"], sudo=True, record=False)
 
 
-def copr(ctx: TaskContext, project: str, *, state: str = "present") -> None:
+def copr(ctx: TaskContext, project: str, *, state: State = "present") -> None:
     """Ensure a COPR project is enabled or removed."""
     require_state(state, "COPR")
     require_text(project, "COPR project")
@@ -205,7 +204,7 @@ def repository(
     ctx: TaskContext,
     source: str | Path | None = None,
     *,
-    state: str = "present",
+    state: State = "present",
     name: str | None = None,
 ) -> None:
     """Ensure a repository from a .repo file is present or absent."""

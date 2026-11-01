@@ -1,7 +1,5 @@
 """Shared helper for importing profile and configuration files."""
 
-from __future__ import annotations
-
 import importlib.util
 import itertools
 import sys

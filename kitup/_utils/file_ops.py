@@ -1,13 +1,11 @@
 """Context-aware filesystem helpers shared by built-in modules."""
 
-from __future__ import annotations
-
 import base64
 import difflib
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .._privileged.protocol import Request
 from ..context import TaskContext
@@ -22,7 +20,7 @@ from .file_helper import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FileInfo:
     """Filesystem metadata returned by :func:`stat`."""
 
@@ -47,7 +45,7 @@ class FileInfo:
         }
 
 
-def privileged(ctx: TaskContext, sudo: bool) -> bool:
+def privileged(ctx: TaskContext, *, sudo: bool) -> bool:
     """Return whether an operation should use the privileged worker."""
     return sudo and not ctx.sudo.is_root
 
@@ -61,12 +59,12 @@ def worker_request(ctx: TaskContext, action: str, **params: Any) -> dict[str, An
         if not os.path.isabs(value):
             value = os.path.join(os.getcwd(), value)
         params[key] = value
-    return ctx.privileged_worker.request(Request(action, params))
+    return cast(dict[str, Any], ctx.privileged_worker.request(Request(action, params)))
 
 
 def stat(ctx: TaskContext, path: Path, *, sudo: bool) -> FileInfo | None:
     """Return path metadata, using the privileged worker when needed."""
-    if not privileged(ctx, sudo):
+    if not privileged(ctx, sudo=sudo):
         return stat_local(path)
     result = worker_request(ctx, "stat", path=str(path))
     if not result or not result.get("exists"):
@@ -99,7 +97,7 @@ def _file_info(result: dict[str, Any]) -> FileInfo:
 
 def require_parent(ctx: TaskContext, path: Path, *, sudo: bool) -> None:
     """Raise when the parent directory of ``path`` does not exist."""
-    if not privileged(ctx, sudo):
+    if not privileged(ctx, sudo=sudo):
         require_parent_local(path)
         return
     result = worker_request(ctx, "stat", path=str(path.parent), follow=True)
@@ -151,7 +149,7 @@ def read_bytes(
     """Read a path as bytes, using the privileged worker when needed."""
     if info is None:
         return b""
-    if privileged(ctx, sudo):
+    if privileged(ctx, sudo=sudo):
         result = worker_request(ctx, "read", path=str(path))
         if not result.get("exists"):
             return b""
@@ -229,7 +227,7 @@ def apply_metadata_ctx(
     sudo: bool,
 ) -> None:
     """Apply file metadata, using the privileged worker when needed."""
-    if privileged(ctx, sudo):
+    if privileged(ctx, sudo=sudo):
         worker_request(
             ctx,
             "metadata",
@@ -257,7 +255,7 @@ def _write_bytes(
     *,
     sudo: bool,
 ) -> None:
-    if privileged(ctx, sudo):
+    if privileged(ctx, sudo=sudo):
         worker_request(
             ctx,
             "write",

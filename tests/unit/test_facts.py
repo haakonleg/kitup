@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from types import SimpleNamespace
 
 from kitup.facts import collect_facts, collect_mounts, parse_mountinfo, parse_os_release
@@ -54,8 +52,7 @@ def test_parse_mountinfo_extracts_unescaped_mount_attributes():
 def test_collect_mounts_adds_capacity_and_skips_unreadable_mounts(tmp_path):
     path = tmp_path / "mountinfo"
     path.write_text(
-        "36 35 98:0 / / rw,relatime - ext4 /dev/nvme0n1p1 rw\n"
-        "37 35 0:32 / /run rw,nosuid - tmpfs tmpfs rw\n",
+        "36 35 98:0 / / rw,relatime - ext4 /dev/nvme0n1p1 rw\n37 35 0:32 / /run rw,nosuid - tmpfs tmpfs rw\n",
         encoding="utf-8",
     )
     sizes = {
@@ -94,8 +91,7 @@ def test_collect_mounts_adds_capacity_and_skips_unreadable_mounts(tmp_path):
 def test_collect_facts_from_os_release(tmp_path):
     path = tmp_path / "os-release"
     path.write_text(
-        'NAME="Test Linux"\nID=testos\nVERSION_ID=1\n'
-        'PRETTY_NAME="Test Linux 1 (Workstation Edition)"\n',
+        'NAME="Test Linux"\nID=testos\nVERSION_ID=1\nPRETTY_NAME="Test Linux 1 (Workstation Edition)"\n',
         encoding="utf-8",
     )
 

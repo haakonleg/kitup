@@ -1,7 +1,5 @@
 """Architecture rules for built-in modules and embedded worker sources."""
 
-from __future__ import annotations
-
 import ast
 import sys
 from pathlib import Path
@@ -10,6 +8,7 @@ from kitup import PACKAGE_NAME
 
 PACKAGE_DIR = Path(__file__).parents[2] / PACKAGE_NAME
 MODULES_DIR = PACKAGE_DIR / "modules"
+DOCS_DIR = Path(__file__).parents[2] / "docs" / "modules"
 FILE_HELPER = PACKAGE_DIR / "_utils" / "file_helper.py"
 PROTOCOL = PACKAGE_DIR / "_privileged" / "protocol.py"
 WORKER = PACKAGE_DIR / "_privileged" / "worker.py"
@@ -39,11 +38,7 @@ def _sibling_imports(path: Path) -> set[str]:
                 imported.add(node.module.removeprefix("modules."))
             elif node.level == 0 and node.module == f"{PACKAGE_NAME}.modules":
                 imported.update(alias.name for alias in node.names)
-            elif (
-                node.level == 0
-                and node.module
-                and node.module.startswith(f"{PACKAGE_NAME}.modules.")
-            ):
+            elif node.level == 0 and node.module and node.module.startswith(f"{PACKAGE_NAME}.modules."):
                 imported.add(node.module.removeprefix(f"{PACKAGE_NAME}.modules."))
 
     return imported
@@ -52,13 +47,26 @@ def _sibling_imports(path: Path) -> set[str]:
 def test_modules_do_not_import_each_other():
     module_names = {path.stem for path in MODULES_DIR.glob("*.py") if path.stem != "__init__"}
 
-    violations = []
-    for path in sorted(MODULES_DIR.glob("*.py")):
-        for imported in _sibling_imports(path):
-            if imported in module_names - {path.stem}:
-                violations.append(f"{path.name} imports {imported}")
+    violations = [
+        f"{path.name} imports {imported}"
+        for path in sorted(MODULES_DIR.glob("*.py"))
+        for imported in _sibling_imports(path)
+        if imported in module_names - {path.stem}
+    ]
 
     assert not violations, "modules must remain standalone: " + ", ".join(violations)
+
+
+def test_modules_have_documentation():
+    """Every built-in module has a matching page in ``docs/modules``."""
+    module_names = {path.stem for path in MODULES_DIR.glob("*.py") if path.stem != "__init__"}
+    documented = {path.stem for path in DOCS_DIR.glob("*.md") if path.stem != "index"}
+
+    missing = sorted(module_names - documented)
+    orphaned = sorted(documented - module_names)
+
+    assert not missing, "modules missing documentation: " + ", ".join(missing)
+    assert not orphaned, "documentation without a module: " + ", ".join(orphaned)
 
 
 class _EmbeddedVisitor(ast.NodeVisitor):
@@ -79,9 +87,7 @@ class _EmbeddedVisitor(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.level != 0:
-            self.violations.append(
-                f"{self.path.name}: relative import: {node.module or '<unknown>'}"
-            )
+            self.violations.append(f"{self.path.name}: relative import: {node.module or '<unknown>'}")
             return
         if node.module:
             self._check(node.module)
@@ -102,9 +108,7 @@ def test_embedded_sources_are_standalone():
         visitor.visit(ast.parse(path.read_text(encoding="utf-8")))
         violations.extend(visitor.violations)
 
-    assert not violations, "embedded sources must use only the standard library: " + ", ".join(
-        violations
-    )
+    assert not violations, "embedded sources must use only the standard library: " + ", ".join(violations)
 
 
 def _has_main_guard(path: Path) -> bool:
@@ -132,9 +136,7 @@ def _has_main_guard(path: Path) -> bool:
 def test_embedded_sources_have_no_main_guard():
     """``client.py`` calls ``main()`` explicitly after concatenating sources."""
     offenders = [path.name for path in EMBEDDED_SOURCES if _has_main_guard(path)]
-    assert not offenders, "embedded sources must not run on import: " + ", ".join(
-        offenders
-    )
+    assert not offenders, "embedded sources must not run on import: " + ", ".join(offenders)
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -143,11 +145,7 @@ def _imported_modules(path: Path) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imported.update(alias.name.split(".")[0] for alias in node.names)
-        elif (
-            isinstance(node, ast.ImportFrom)
-            and node.level == 0
-            and node.module
-        ):
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             imported.add(node.module.split(".")[0])
     return imported
 

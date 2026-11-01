@@ -1,7 +1,5 @@
 """Low-level command execution."""
 
-from __future__ import annotations
-
 import os
 import signal
 import subprocess
@@ -37,6 +35,7 @@ class CommandRunner:
         check: bool = True,
         refresh_sudo: bool = True,
     ) -> subprocess.CompletedProcess[str]:
+        """Run an argv-style command and return its completed process."""
         command = [str(part) for part in normalize_strings(argv)]
         if not command:
             raise TaskFailed("empty command")
@@ -60,6 +59,8 @@ class CommandRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 # A new process group lets timeouts kill the whole command tree,
                 # while staying in the parent session so sudo can use its
                 # controlling-terminal credential cache.
@@ -127,7 +128,7 @@ def _drain(process: subprocess.Popen[str]) -> tuple[str, str]:
     """Collect remaining output after a timeout, without hanging forever."""
     try:
         stdout, stderr = process.communicate()
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return "", ""
     return stdout or "", stderr or ""
 

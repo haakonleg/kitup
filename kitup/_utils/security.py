@@ -2,8 +2,9 @@
 
 import ctypes
 import sys
+from typing import Final
 
-_PR_SET_DUMPABLE = 4
+_PR_SET_DUMPABLE: Final = 4
 
 
 def disable_same_uid_ptrace() -> None:
@@ -19,5 +20,5 @@ def disable_same_uid_ptrace() -> None:
     try:
         libc = ctypes.CDLL(None, use_errno=True)
         libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0)
-    except (AttributeError, OSError):
+    except AttributeError, OSError:
         pass

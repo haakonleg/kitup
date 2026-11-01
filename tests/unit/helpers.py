@@ -1,7 +1,5 @@
 """Shared test doubles and builders."""
 
-from __future__ import annotations
-
 import subprocess
 from collections.abc import Callable, Sequence
 from types import SimpleNamespace
@@ -19,9 +17,7 @@ class FakeCommandRunner:
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
-        self.responses: list[
-            Callable[[list[str]], int | subprocess.CompletedProcess[str]]
-        ] = []
+        self.responses: list[Callable[[list[str]], int | subprocess.CompletedProcess[str]]] = []
 
     def run(self, argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         command = list(argv)

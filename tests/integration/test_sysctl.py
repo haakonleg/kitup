@@ -6,8 +6,6 @@ while host sysctls stay untouched. Global sysctls such as vm.* remain
 unwritable from the container's user namespace.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from pathlib import Path
 

@@ -1,13 +1,12 @@
 """Flatpak remote repository and package management."""
 
-from __future__ import annotations
-
 import shutil
 from collections.abc import Iterable
 
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..validation import (
+    State,
     normalize_strings,
     require_collection,
     require_scope,
@@ -24,7 +23,7 @@ def remote(
     name: str,
     url: str | None = None,
     *,
-    state: str = "present",
+    state: State = "present",
     scope: str = "system",
     gpg_verify: bool = True,
 ) -> None:
@@ -74,7 +73,7 @@ def packages(
     ctx: TaskContext,
     names: Iterable[str] | str,
     *,
-    state: str = "present",
+    state: State = "present",
     scope: str = "system",
     remote: str | None = None,
 ) -> None:
@@ -114,21 +113,15 @@ def packages(
         if ctx.dry_run:
             return
         remaining_installed = _installed_refs(ctx, flag)
-        remaining = [
-            name for name in missing if not _matching_refs(name, remaining_installed)
-        ]
+        remaining = [name for name in missing if not _matching_refs(name, remaining_installed)]
         if remaining:
-            raise TaskFailed(
-                f"flatpak refs still missing after install: {', '.join(remaining)}"
-            )
+            raise TaskFailed(f"flatpak refs still missing after install: {', '.join(remaining)}")
         return
 
     present = [name for name in wanted if _matching_refs(name, installed)]
     if not present:
         return
-    targets = unique_strings(
-        ref for name in present for ref in _matching_refs(name, installed)
-    )
+    targets = unique_strings(ref for name in present for ref in _matching_refs(name, installed))
     ctx.changed(
         {"removed": targets, "scope": scope},
         " ".join(f"-{name}" for name in targets),
@@ -141,13 +134,9 @@ def packages(
     if ctx.dry_run:
         return
     remaining_installed = _installed_refs(ctx, flag)
-    remaining = [
-        name for name in present if _matching_refs(name, remaining_installed)
-    ]
+    remaining = [name for name in present if _matching_refs(name, remaining_installed)]
     if remaining:
-        raise TaskFailed(
-            f"flatpak refs still installed after removal: {', '.join(remaining)}"
-        )
+        raise TaskFailed(f"flatpak refs still installed after removal: {', '.join(remaining)}")
 
 
 def _scope_flag(ctx: TaskContext, scope: str) -> str:

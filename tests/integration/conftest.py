@@ -1,7 +1,5 @@
 """Gate the container integration suite behind an explicit opt-in."""
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 

@@ -1,19 +1,17 @@
 """Shared HTTP response reading helpers."""
 
-from __future__ import annotations
-
 import http.client
 import io
 import math
 import ssl
 from collections.abc import Callable, Mapping
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Final
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPSHandler, Request, build_opener
 
 from ..errors import TaskFailed
 
-_CHUNK_SIZE = 1024 * 1024
+_CHUNK_SIZE: Final = 1024 * 1024
 
 
 def open_url(
@@ -31,7 +29,7 @@ def open_url(
     responses such as GitHub rate limits.
     """
     # Keep the opener's default User-Agent header (Python-urllib/<version>).
-    opener = build_opener(HTTPSHandler(context=_ssl_context(validate_certs)))
+    opener = build_opener(HTTPSHandler(context=_ssl_context(validate_certs=validate_certs)))
     request = Request(url, headers=dict(headers), method="GET")
     try:
         return opener.open(request, timeout=timeout)
@@ -94,9 +92,7 @@ def read_response(
             on_chunk(chunk)
 
     if content_length is not None and total != content_length:
-        raise TaskFailed(
-            f"incomplete {label} for {context}: expected {content_length} bytes, got {total}"
-        )
+        raise TaskFailed(f"incomplete {label} for {context}: expected {content_length} bytes, got {total}")
 
 
 def read_bytes(
@@ -118,7 +114,7 @@ def read_bytes(
     return buffer.getvalue()
 
 
-def _ssl_context(validate_certs: bool) -> ssl.SSLContext:
+def _ssl_context(*, validate_certs: bool) -> ssl.SSLContext:
     if validate_certs:
         return ssl.create_default_context()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

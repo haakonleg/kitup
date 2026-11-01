@@ -1,13 +1,11 @@
 """Import-based run profiles and their composition helpers."""
 
-from __future__ import annotations
-
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, Final
 
 from ._utils.importer import load_module
 from .config import ConfigSource, mapping_key_error
@@ -16,7 +14,7 @@ from .registry import Bundle, bundle_of
 from .validation import split_tags
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RunDefinition:
     """An immutable description of the bundles and config for one run."""
 
@@ -61,17 +59,11 @@ class RunDefinition:
         caller = sys._getframe(1).f_globals
         source = _caller_file(caller)
 
-        if bundles is None:
-            bundle_values = self.bundles
-        else:
-            bundle_values = _normalize_bundles(bundles)
+        bundle_values = self.bundles if bundles is None else _normalize_bundles(bundles)
         if not bundle_values:
             raise ProfileError("profile option 'bundles' must not be empty")
 
-        if config is None:
-            config_values = self.config
-        else:
-            config_values = _normalize_config(config, source.parent)
+        config_values = self.config if config is None else _normalize_config(config, source.parent)
 
         return _build_definition(
             caller=caller,
@@ -80,11 +72,7 @@ class RunDefinition:
             config=config_values,
             description=self.description if description is None else _text(description),
             tags=self.tags if tags is None else _normalize_tags(tags, "tags"),
-            skip_tags=(
-                self.skip_tags
-                if skip_tags is None
-                else _normalize_tags(skip_tags, "skip_tags")
-            ),
+            skip_tags=(self.skip_tags if skip_tags is None else _normalize_tags(skip_tags, "skip_tags")),
         )
 
 
@@ -100,6 +88,7 @@ class ProfileAPI:
         tags: Iterable[str] = (),
         skip_tags: Iterable[str] = (),
     ) -> RunDefinition:
+        """Create and register a run definition."""
         caller = sys._getframe(1).f_globals
         source = _caller_file(caller)
 
@@ -144,10 +133,7 @@ class ProfileAPI:
     def of(self, module: ModuleType) -> RunDefinition:
         """Return a module's run definition without registering anything."""
         if not isinstance(module, ModuleType):
-            raise ProfileError(
-                "profile.of() expects a module, "
-                f"not {type(module).__name__}"
-            )
+            raise ProfileError(f"profile.of() expects a module, not {type(module).__name__}")
         return _as_definition(module)
 
     def use(self, source: ModuleType | RunDefinition) -> RunDefinition:
@@ -169,10 +155,7 @@ def load_profile(path: Path) -> RunDefinition:
     """
     profile_path = Path(path).expanduser().resolve()
     if not profile_path.is_file():
-        raise ProfileError(
-            f"profile not found: {profile_path} "
-            "(create it or pass its path to the command)"
-        )
+        raise ProfileError(f"profile not found: {profile_path} (create it or pass its path to the command)")
 
     try:
         module = load_module(profile_path, prefix="profile")
@@ -181,9 +164,7 @@ def load_profile(path: Path) -> RunDefinition:
 
     definition = getattr(module, "__kitup_run__", None)
     if not isinstance(definition, RunDefinition):
-        raise ProfileError(
-            f"no run definition found in '{profile_path}'; call profile(...)"
-        )
+        raise ProfileError(f"no run definition found in '{profile_path}'; call profile(...)")
     return definition
 
 
@@ -231,10 +212,7 @@ def _as_definition(source: ModuleType | RunDefinition) -> RunDefinition:
         if not isinstance(definition, RunDefinition):
             raise ProfileError(f"module {source.__name__!r} has no run definition")
         return definition
-    raise ProfileError(
-        "expected a profile module or RunDefinition, "
-        f"not {type(source).__name__}"
-    )
+    raise ProfileError(f"expected a profile module or RunDefinition, not {type(source).__name__}")
 
 
 def _normalize_bundles(
@@ -242,50 +220,37 @@ def _normalize_bundles(
 ) -> tuple[Bundle, ...]:
     if isinstance(values, str):
         raise ProfileError(
-            "profile option 'bundles' must be a sequence of bundle modules or "
-            "Bundle objects, not a single string"
+            "profile option 'bundles' must be a sequence of bundle modules or Bundle objects, not a single string"
         )
     try:
         entries = tuple(values)
     except TypeError as exc:
-        raise ProfileError(
-            "profile option 'bundles' must be a sequence of bundle modules or "
-            "Bundle objects"
-        ) from exc
+        raise ProfileError("profile option 'bundles' must be a sequence of bundle modules or Bundle objects") from exc
 
     bundles: list[Bundle] = []
     by_name: dict[str, Bundle] = {}
     for entry in entries:
         if not isinstance(entry, (ModuleType, Bundle)):
             raise ProfileError(
-                "profile option 'bundles' must contain bundle modules or "
-                f"Bundle objects, not {type(entry).__name__}"
+                f"profile option 'bundles' must contain bundle modules or Bundle objects, not {type(entry).__name__}"
             )
         bundle = bundle_of(entry)
         existing = by_name.get(bundle.name)
         if existing is not None:
             if existing is not bundle:
-                raise ProfileError(
-                    f"duplicate bundle name in profile: {bundle.name}"
-                )
+                raise ProfileError(f"duplicate bundle name in profile: {bundle.name}")
             continue
         by_name[bundle.name] = bundle
         bundles.append(bundle)
     return tuple(bundles)
 
 
-def _normalize_config(
-    values: Sequence[ConfigSource], caller_dir: Path
-) -> tuple[ConfigSource, ...]:
+def _normalize_config(values: Sequence[ConfigSource], caller_dir: Path) -> tuple[ConfigSource, ...]:
     if isinstance(values, Mapping):
-        raise ProfileError(
-            "profile option 'config' must be a sequence of config sources, "
-            "not a single mapping"
-        )
+        raise ProfileError("profile option 'config' must be a sequence of config sources, not a single mapping")
     if isinstance(values, (str, bytes)):
         raise ProfileError(
-            "profile option 'config' must be a sequence of Path objects, "
-            "modules, or mappings, not a single string"
+            "profile option 'config' must be a sequence of Path objects, modules, or mappings, not a single string"
         )
     try:
         entries = tuple(values)
@@ -302,19 +267,14 @@ def _normalize_config(
             seen_paths.add(path)
             sources.append(path)
         elif isinstance(entry, str):
-            raise ProfileError(
-                "config file sources must use pathlib.Path, not str"
-            )
+            raise ProfileError("config file sources must use pathlib.Path, not str")
         elif isinstance(entry, Mapping):
             _validate_mapping(entry)
             sources.append(entry)
         elif isinstance(entry, ModuleType):
             sources.append(entry)
         else:
-            raise ProfileError(
-                "config sources must be Path objects, modules, or mappings, "
-                f"not {type(entry).__name__}"
-            )
+            raise ProfileError(f"config sources must be Path objects, modules, or mappings, not {type(entry).__name__}")
     return tuple(sources)
 
 
@@ -333,16 +293,11 @@ def _validate_mapping(source: Mapping[Any, Any]) -> None:
 
 def _normalize_tags(values: Iterable[str], label: str) -> frozenset[str]:
     if isinstance(values, str):
-        raise ProfileError(
-            f"profile option {label!r} must be a sequence of strings, "
-            "not a single string"
-        )
+        raise ProfileError(f"profile option {label!r} must be a sequence of strings, not a single string")
     try:
         entries = tuple(values)
     except TypeError as exc:
-        raise ProfileError(
-            f"profile option {label!r} must be a sequence of strings"
-        ) from exc
+        raise ProfileError(f"profile option {label!r} must be a sequence of strings") from exc
 
     for value in entries:
         if not isinstance(value, str):
@@ -350,9 +305,7 @@ def _normalize_tags(values: Iterable[str], label: str) -> frozenset[str]:
     try:
         return frozenset(split_tags(entries, allow_empty=False))
     except ValueError as exc:
-        raise ProfileError(
-            f"profile option {label!r} contains an invalid tag"
-        ) from exc
+        raise ProfileError(f"profile option {label!r} contains an invalid tag") from exc
 
 
 def _text(value: str) -> str:
@@ -394,4 +347,4 @@ def _attach(caller: dict[str, Any], definition: RunDefinition) -> None:
     caller["__kitup_run__"] = definition
 
 
-__all__ = ["ConfigSource", "ProfileAPI", "RunDefinition", "load_profile", "profile"]
+__all__: Final = ["ConfigSource", "ProfileAPI", "RunDefinition", "load_profile", "profile"]

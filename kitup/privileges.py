@@ -1,18 +1,17 @@
 """Lazy sudo handling."""
 
-from __future__ import annotations
-
 import getpass
 import os
 import shutil
 import subprocess
 import sys
+from typing import Final
 
 from . import PACKAGE_NAME
 from .errors import PrivilegeError
 from .output.terminal import clear_lines, terminal_columns
 
-_SUDO_PROMPT = "sudo password: "
+_SUDO_PROMPT: Final = "sudo password: "
 
 
 class PrivilegeManager:
@@ -20,6 +19,7 @@ class PrivilegeManager:
 
     @property
     def is_root(self) -> bool:
+        """Return whether the current process is running as root."""
         return os.geteuid() == 0
 
     def validate(self) -> None:
@@ -46,8 +46,7 @@ class PrivilegeManager:
 
         if not sys.stdin.isatty():
             raise PrivilegeError(
-                "sudo credentials are required but stdin is not a TTY; "
-                f"run {PACKAGE_NAME} from a terminal"
+                f"sudo credentials are required but stdin is not a TTY; run {PACKAGE_NAME} from a terminal"
             )
 
         password = self._prompt_password(reason)
@@ -57,6 +56,8 @@ class PrivilegeManager:
                 ["sudo", "-S", "-p", "", "-v"],
                 input=f"{password}\n",
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 check=False,

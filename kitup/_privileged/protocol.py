@@ -6,13 +6,13 @@ standard-library-only and avoid package imports or a ``__main__`` guard.
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final, Self
 
-READY = "ready"
-MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+READY: Final = "ready"
+MAX_MESSAGE_BYTES: Final = 64 * 1024 * 1024
 
 
-@dataclass
+@dataclass(slots=True)
 class Request:
     """One action request sent to the privileged worker."""
 
@@ -26,7 +26,7 @@ class Request:
             raise ValueError("request params must be a mapping")  # noqa: TRY004
 
     @classmethod
-    def decode(cls, line: str | bytes) -> Request:
+    def decode(cls, line: str | bytes) -> Self:
         """Parse one NDJSON request line."""
         try:
             data = json.loads(line)
@@ -47,7 +47,7 @@ class Request:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class Response:
     """One result or error response from the privileged worker."""
 
@@ -56,7 +56,7 @@ class Response:
     fatal: bool = False
 
     @classmethod
-    def decode(cls, line: str | bytes) -> Response:
+    def decode(cls, line: str | bytes) -> Self:
         """Parse one NDJSON response line."""
         try:
             data = json.loads(line)

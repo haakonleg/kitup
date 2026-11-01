@@ -1,7 +1,5 @@
 """Build a standalone zipapp with bundled runtime dependencies."""
 
-from __future__ import annotations
-
 import compileall
 import json
 import shutil
@@ -12,25 +10,28 @@ import tomllib
 import venv
 import zipapp
 from pathlib import Path
+from typing import Final
 
-ROOT = Path(__file__).resolve().parents[2]
-PROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-COMMAND, ENTRY_POINT = next(iter(PROJECT["scripts"].items()))
-MODULE, FUNCTION = ENTRY_POINT.split(":", 1)
-PACKAGE = MODULE.split(".", 1)[0]
-TARGET = ROOT / "dist" / COMMAND
+ROOT: Final = Path(__file__).resolve().parents[2]
+PROJECT: Final = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+COMMAND: Final[str] = next(iter(PROJECT["scripts"]))
+ENTRY_POINT: Final[str] = PROJECT["scripts"][COMMAND]
+MODULE: Final[str] = ENTRY_POINT.split(":", 1)[0]
+FUNCTION: Final[str] = ENTRY_POINT.split(":", 1)[1]
+PACKAGE: Final = MODULE.split(".", 1)[0]
+TARGET: Final = ROOT / "dist" / COMMAND
 
-BUNDLED_PACKAGES = ("jinja2", "markupsafe")
-NOTICES = Path(__file__).with_name("THIRD_PARTY_NOTICES.txt")
-IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.so")
+BUNDLED_PACKAGES: Final = ("jinja2", "markupsafe")
+NOTICES: Final = Path(__file__).with_name("THIRD_PARTY_NOTICES.txt")
+IGNORE: Final = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.so")
 
-LAUNCHER = f"""\
+LAUNCHER: Final = f"""\
 from {MODULE} import {FUNCTION}
 
 raise SystemExit({FUNCTION}())
 """
 
-LOCATE_PACKAGES = textwrap.dedent(
+LOCATE_PACKAGES: Final = textwrap.dedent(
     """\
     import importlib.util
     import json
@@ -56,11 +57,7 @@ def build(target: Path = TARGET, *, interpreter: str | Path | None = None) -> Pa
     """
     with tempfile.TemporaryDirectory() as temporary:
         stage = Path(temporary) / "app"
-        python = (
-            Path(interpreter)
-            if interpreter is not None
-            else _create_build_venv(Path(temporary) / "venv")
-        )
+        python = Path(interpreter) if interpreter is not None else _create_build_venv(Path(temporary) / "venv")
 
         _stage_package(stage)
         _stage_dependencies(stage, python)
@@ -153,6 +150,8 @@ def _find_packages(python: Path, names: tuple[str, ...]) -> dict[str, Path]:
         [str(python), "-c", LOCATE_PACKAGES, *names],
         check=False,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
     )
     if result.returncode != 0:
@@ -165,7 +164,14 @@ def _find_packages(python: Path, names: tuple[str, ...]) -> dict[str, Path]:
 
 def _run(command: list[str], description: str) -> None:
     """Run a command and turn failures into a user-facing build error."""
-    result = subprocess.run(command, check=False, text=True, capture_output=True)
+    result = subprocess.run(
+        command,
+        check=False,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
         raise SystemExit(f"could not {description}: {detail}")

@@ -167,6 +167,7 @@ from kitup.registry import Bundle
 
 local = Bundle("Local overrides")
 
+
 @local.task("Write marker")
 def write_marker(ctx):
     content = ctx.bundle.read_resource("local-bundle/marker.txt")
@@ -184,8 +185,7 @@ from kitup.registry import task
 
 
 @task("Install packages", tags={"packages"}, description="Optional detail")
-def install_packages(ctx):
-    ...
+def install_packages(ctx): ...
 ```
 
 The task name is required and must be a non-empty string. The decorator records

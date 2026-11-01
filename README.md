@@ -340,20 +340,20 @@ distribution, architecture, kernel, and mounted filesystems. See
 Tasks receive `ctx`, which provides:
 
 ```python
-ctx.config                          # merged configuration values
-ctx.facts                           # system information
-ctx.bundle                          # current bundle and its resources
+ctx.config  # merged configuration values
+ctx.facts  # system information
+ctx.bundle  # current bundle and its resources
 
 ctx.run(["systemctl", "reload", "sshd"], sudo=True)  # run with sudo
-ctx.probe(["systemctl", "is-active", "firewalld"])    # read-only query
+ctx.probe(["systemctl", "is-active", "firewalld"])  # read-only query
 ctx.changed({"detail": "x"}, "+x")  # report a change
-ctx.note("extra context")           # add a note
-ctx.memo("key", compute_once)       # cache a value for this run
-ctx.input("key", "Prompt: ")        # prompt for input
-ctx.set("key", value)               # store a value for later tasks
-ctx.get("key")                      # read a stored value
-ctx.skip("reason")                  # skip the task
-ctx.fail("reason")                  # fail the task
+ctx.note("extra context")  # add a note
+ctx.memo("key", compute_once)  # cache a value for this run
+ctx.input("key", "Prompt: ")  # prompt for input
+ctx.set("key", value)  # store a value for later tasks
+ctx.get("key")  # read a stored value
+ctx.skip("reason")  # skip the task
+ctx.fail("reason")  # fail the task
 ```
 
 ## Built-in modules

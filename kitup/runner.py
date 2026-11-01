@@ -1,7 +1,5 @@
 """Sequential, fail-fast task execution."""
 
-from __future__ import annotations
-
 import time
 import traceback
 
@@ -33,13 +31,10 @@ class Runner:
         self._summary = RunSummary()
 
     def run(self) -> int:
+        """Execute the plan and return the process exit code."""
         start = time.monotonic()
-        selected = [
-            (bundle, self._select(bundle.tasks)) for bundle in self.plan.bundles
-        ]
-        self.output.fit_task_names(
-            task.name for _, tasks in selected for task in tasks
-        )
+        selected = [(bundle, self._select(bundle.tasks)) for bundle in self.plan.bundles]
+        self.output.fit_task_names(task.name for _, tasks in selected for task in tasks)
         total = sum(len(tasks) for _, tasks in selected)
         completed = 0
 

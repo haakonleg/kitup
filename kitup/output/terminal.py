@@ -1,12 +1,10 @@
 """Terminal width and line-clearing helpers."""
 
-from __future__ import annotations
-
 import os
-from typing import TextIO
+from typing import Final, TextIO
 
-DEFAULT_COLUMNS = 80
-MIN_COLUMNS = 20
+DEFAULT_COLUMNS: Final = 80
+MIN_COLUMNS: Final = 20
 
 
 def terminal_columns(stream: TextIO) -> int:

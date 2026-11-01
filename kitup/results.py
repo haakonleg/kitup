@@ -1,7 +1,5 @@
 """Result and change-tracking data structures used by the runner."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -9,7 +7,7 @@ from typing import Any
 from .registry import Task
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Change:
     """One module-reported change: structured data plus a short summary."""
 
@@ -18,6 +16,8 @@ class Change:
 
 
 class Status(StrEnum):
+    """Final status of a task."""
+
     OK = "ok"
     CHANGED = "changed"
     SKIPPED = "skipped"
@@ -25,8 +25,10 @@ class Status(StrEnum):
     NOT_RUN = "not run"
 
 
-@dataclass
+@dataclass(slots=True)
 class TaskResult:
+    """Outcome and timing for one executed task."""
+
     task: Task
     status: Status
     changes: list[Change] = field(default_factory=list)
@@ -36,11 +38,12 @@ class TaskResult:
     error: BaseException | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class RunSummary:
     """Aggregate counts for one run."""
 
     counts: dict[Status, int] = field(default_factory=dict)
 
     def add(self, status: Status, count: int = 1) -> None:
+        """Add a count for the given status."""
         self.counts[status] = self.counts.get(status, 0) + count

@@ -1,18 +1,16 @@
 """Idempotent Jinja2 template rendering to managed files."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from .._utils import file_ops
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..validation import require_metadata, require_mode, require_path
 
-_RESERVED_VARIABLES = frozenset({"config", "facts"})
+_RESERVED_VARIABLES: Final = frozenset({"config", "facts"})
 
 
 def file(
@@ -109,7 +107,7 @@ def _render(
     }
     try:
         template = environment.from_string(text)
-        return template.render(context)
+        return str(template.render(context))
     except jinja2.TemplateSyntaxError as exc:
         location = f"{source}:{exc.lineno}" if exc.lineno else str(source)
         raise TaskFailed(f"template syntax error in {location}: {exc.message}") from exc
@@ -122,9 +120,7 @@ def _render(
 @cache
 def _load_jinja2() -> Any:
     try:
-        import jinja2
+        import jinja2  # noqa: PLC0415 - lazy import reports a task-level error
     except ImportError as exc:  # pragma: no cover - packaging guarantees the dependency
-        raise TaskFailed(
-            "the template module requires Jinja2; install it or use the standalone kitup build"
-        ) from exc
+        raise TaskFailed("the template module requires Jinja2; install it or use the standalone kitup build") from exc
     return jinja2

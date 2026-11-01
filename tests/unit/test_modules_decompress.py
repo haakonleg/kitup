@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import bz2
 import gzip
 import io
@@ -436,7 +434,7 @@ def test_file_dry_run_reports_without_writing(tmp_path):
 def test_file_rejects_archives(tmp_path):
     archive = _write_tar(tmp_path / "app.tar.gz", "gz")
 
-    with pytest.raises(TaskFailed, match="use decompress.archive"):
+    with pytest.raises(TaskFailed, match=r"use decompress\.archive"):
         decompress.file(make_context(tmp_path), archive, tmp_path / "out")
 
 

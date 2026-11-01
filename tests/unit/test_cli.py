@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import sys
 import textwrap
 from pathlib import Path
@@ -13,6 +11,7 @@ from kitup.errors import PrivilegeError, TaskFailed
 def write(path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(text), encoding="utf-8")
+
 
 def make_bundle(
     root,
@@ -44,6 +43,7 @@ def make_bundle(
         "from kitup.registry import task\n\n" + textwrap.dedent(tasks),
     )
 
+
 def make_profile(root, names, *, filename="kitup.py", **options):
     imports = ", ".join(names)
     values = [f"bundles=[{imports}]"]
@@ -62,12 +62,14 @@ def make_profile(root, names, *, filename="kitup.py", **options):
         """,
     )
 
+
 def _format_option(value):
     if isinstance(value, Path):
         return f"Path({str(value)!r})"
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(_format_option(item) for item in value) + "]"
     return repr(value)
+
 
 def purge_project_modules() -> None:
     for name in tuple(sys.modules):
@@ -78,11 +80,13 @@ def purge_project_modules() -> None:
         if name.startswith(("_kitup_profile_", "_kitup_config_")):
             sys.modules.pop(name, None)
 
+
 @pytest.fixture(autouse=True)
 def clean_imports():
     purge_project_modules()
     yield
     purge_project_modules()
+
 
 @pytest.fixture(autouse=True)
 def fake_facts(monkeypatch):
@@ -101,6 +105,7 @@ def fake_facts(monkeypatch):
             },
         },
     )
+
 
 def test_apply_uses_profile_config_sources(tmp_path, capsys):
     (tmp_path / "config.py").write_text("VALUE = 'base'\n")
@@ -125,6 +130,7 @@ def test_apply_uses_profile_config_sources(tmp_path, capsys):
     assert code == 0
     assert "value=work" in capsys.readouterr().out
 
+
 def test_default_profile_is_kitup_py_in_cwd(tmp_path, monkeypatch, capsys):
     make_bundle(tmp_path, "base")
     make_profile(tmp_path, ["base"])
@@ -134,6 +140,7 @@ def test_default_profile_is_kitup_py_in_cwd(tmp_path, monkeypatch, capsys):
 
     assert code == 0
     assert "bundle: base" in capsys.readouterr().out
+
 
 def test_list_shows_file_names_unless_verbose(tmp_path, capsys):
     make_bundle(tmp_path, "base")
@@ -166,6 +173,7 @@ def test_list_shows_file_names_unless_verbose(tmp_path, capsys):
     assert f"profile: {tmp_path / 'kitup.py'}" in out
     assert f"config: {tmp_path / 'settings.py'}" in out
 
+
 def test_list_shows_imported_config_module_files(tmp_path, capsys):
     make_bundle(tmp_path, "base")
     write(tmp_path / "config.py", "VALUE = 1\n")
@@ -195,6 +203,7 @@ def test_list_shows_imported_config_module_files(tmp_path, capsys):
     out = capsys.readouterr().out
     assert f"config: {tmp_path / 'config.py'}" in out
 
+
 def test_apply_closes_context_on_success(tmp_path, monkeypatch):
     contexts = []
 
@@ -222,6 +231,7 @@ def test_apply_closes_context_on_success(tmp_path, monkeypatch):
 
     assert code == 0
     assert contexts and contexts[0].closed
+
 
 def test_apply_closes_context_on_failure(tmp_path, capsys, monkeypatch):
     contexts = []
@@ -252,6 +262,7 @@ def test_apply_closes_context_on_failure(tmp_path, capsys, monkeypatch):
     assert contexts and contexts[0].closed
     assert "error: boom" in capsys.readouterr().err
 
+
 def test_sudo_validation_failure_is_exit_2(tmp_path, capsys, monkeypatch):
     make_bundle(tmp_path, "base")
     make_profile(tmp_path, ["base"])
@@ -265,6 +276,7 @@ def test_sudo_validation_failure_is_exit_2(tmp_path, capsys, monkeypatch):
 
     assert code == 2
     assert "error: no credentials" in capsys.readouterr().err
+
 
 def test_bundle_errors_are_exit_2(tmp_path, capsys):
     write(tmp_path / "bundles" / "__init__.py", "")
@@ -285,6 +297,7 @@ def test_bundle_errors_are_exit_2(tmp_path, capsys):
     assert code == 2
     assert "does not define a bundle" in capsys.readouterr().err
 
+
 def test_profile_named_kitup_can_import_the_package(tmp_path, capsys):
     make_bundle(tmp_path, "base")
     make_profile(tmp_path, ["base"])
@@ -293,6 +306,7 @@ def test_profile_named_kitup_can_import_the_package(tmp_path, capsys):
 
     assert code == 0
     assert "bundle: base" in capsys.readouterr().out
+
 
 def make_shared_profile(tmp_path):
     shared = tmp_path / "shared"
@@ -324,6 +338,7 @@ def make_shared_profile(tmp_path):
     )
     return shared
 
+
 def test_profile_use_keeps_the_invoked_profile_as_config_root(tmp_path, monkeypatch):
     make_shared_profile(tmp_path)
     seen = {}
@@ -349,6 +364,7 @@ def test_profile_use_keeps_the_invoked_profile_as_config_root(tmp_path, monkeypa
 
     assert code == 0
     assert seen["config_dir"] == tmp_path.resolve()
+
 
 def test_profile_tags_are_split_and_stripped(tmp_path, capsys):
     make_bundle(
@@ -378,6 +394,7 @@ def test_profile_tags_are_split_and_stripped(tmp_path, capsys):
     assert "Config" in out
     assert "Docs" not in out
 
+
 def test_missing_profile_or_config_is_exit_2(tmp_path, capsys):
     code = cli.main(["list", str(tmp_path / "missing.py")])
     assert code == 2
@@ -388,6 +405,7 @@ def test_missing_profile_or_config_is_exit_2(tmp_path, capsys):
     code = cli.main(["list", str(tmp_path / "kitup.py")])
     assert code == 2
     assert "error: config not found" in capsys.readouterr().err
+
 
 def test_cli_tag_filters_merge_with_profile_defaults(tmp_path, capsys):
     make_bundle(

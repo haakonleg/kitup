@@ -1,7 +1,5 @@
 """Command-line interface."""
 
-from __future__ import annotations
-
 import argparse
 import sys
 from collections.abc import Mapping, Sequence
@@ -25,6 +23,7 @@ from .validation import split_tags
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser."""
     parser = argparse.ArgumentParser(
         prog=PACKAGE_NAME,
         description="The simple python-driven system configuration tool.",
@@ -40,16 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="profile file (default: ./kitup.py)",
     )
     _add_common_options(apply_parser)
-    apply_parser.add_argument(
-        "-n", "--dry-run", action="store_true", help="report without mutating"
-    )
+    apply_parser.add_argument("-n", "--dry-run", action="store_true", help="report without mutating")
     apply_parser.add_argument("-d", "--diff", action="store_true", help="show unified diffs")
-    apply_parser.add_argument(
-        "-s", "--sudo", action="store_true", help="validate sudo credentials up front"
-    )
-    apply_parser.add_argument(
-        "-t", "--tags", action="append", default=[], metavar="TAGS", help="only matching tags"
-    )
+    apply_parser.add_argument("-s", "--sudo", action="store_true", help="validate sudo credentials up front")
+    apply_parser.add_argument("-t", "--tags", action="append", default=[], metavar="TAGS", help="only matching tags")
     apply_parser.add_argument(
         "-x", "--skip-tags", action="append", default=[], metavar="TAGS", help="skip matching tags"
     )
@@ -77,6 +70,7 @@ def _version() -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the command-line interface and return an exit code."""
     disable_same_uid_ptrace()
     args = build_parser().parse_args(argv)
     output = Output(no_color=args.no_color, verbose=args.verbose)
@@ -93,15 +87,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             facts = collect_facts()
             output.banner(facts)
             if args.command == "list":
-                _print_environment(
-                    profile_path, definition, output, verbose=args.verbose
-                )
+                _print_environment(profile_path, definition, output, verbose=args.verbose)
                 _print_plan(plan, output, verbose=args.verbose)
                 return 0
             if args.verbose:
-                _print_environment(
-                    profile_path, definition, output, verbose=args.verbose
-                )
+                _print_environment(profile_path, definition, output, verbose=args.verbose)
             return _apply(args, profile_path, definition, plan, config, facts, output)
         finally:
             sys.path[:] = old_path
@@ -166,9 +156,7 @@ def _print_environment(
     if definition.description:
         output.write(f"description: {definition.description}")
     if definition.config:
-        sources = ", ".join(
-            _config_label(source, verbose=verbose) for source in definition.config
-        )
+        sources = ", ".join(_config_label(source, verbose=verbose) for source in definition.config)
         output.write(f"config: {sources}")
 
 
@@ -194,9 +182,7 @@ def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
         if bundle.description:
             output.write(f"  {bundle.description}")
         if verbose:
-            dependencies = ", ".join(
-                dependency.name for dependency in bundle.depends_on
-            )
+            dependencies = ", ".join(dependency.name for dependency in bundle.depends_on)
             output.write(f"  depends:{f' {dependencies}' if dependencies else ''}")
             output.write("  tasks:")
         for task in bundle.tasks:
@@ -222,9 +208,7 @@ def _tag_filter(values: Sequence[str]) -> frozenset[str] | None:
     return frozenset(split_tags(values))
 
 
-def _merge_include_tags(
-    profile_tags: frozenset[str], cli_tags: frozenset[str] | None
-) -> frozenset[str] | None:
+def _merge_include_tags(profile_tags: frozenset[str], cli_tags: frozenset[str] | None) -> frozenset[str] | None:
     if cli_tags is None:
         return profile_tags or None
     if profile_tags:
@@ -232,9 +216,7 @@ def _merge_include_tags(
     return cli_tags
 
 
-def _merge_skip_tags(
-    profile_tags: frozenset[str], cli_tags: frozenset[str] | None
-) -> frozenset[str] | None:
+def _merge_skip_tags(profile_tags: frozenset[str], cli_tags: frozenset[str] | None) -> frozenset[str] | None:
     combined = profile_tags | (cli_tags or frozenset())
     return combined or None
 

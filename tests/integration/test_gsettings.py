@@ -1,7 +1,5 @@
 """Integration tests for real gsettings behavior under a D-Bus session."""
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from pathlib import Path
 

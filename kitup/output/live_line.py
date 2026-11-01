@@ -1,7 +1,5 @@
 """Reusable worker for rendering transient terminal animation lines."""
 
-from __future__ import annotations
-
 import threading
 import time
 from collections.abc import Callable
@@ -37,6 +35,7 @@ class LiveLine:
             return self._timer.elapsed()
 
     def start(self, animation: Animation) -> None:
+        """Start rendering the given animation."""
         with self._condition:
             self._animation = animation
             self._timer.reset()
@@ -46,6 +45,7 @@ class LiveLine:
             self._condition.notify()
 
     def stop(self) -> None:
+        """Stop rendering and clear the animation line."""
         with self._condition:
             if self._animation is None:
                 return
@@ -57,6 +57,7 @@ class LiveLine:
             self._condition.notify()
 
     def suspend(self) -> None:
+        """Suspend animation rendering, nesting with other suspensions."""
         with self._condition:
             self._suspended += 1
             if self._suspended > 1:
@@ -69,6 +70,7 @@ class LiveLine:
             self._condition.notify()
 
     def resume(self) -> None:
+        """Resume animation rendering after a matching suspension."""
         with self._condition:
             if self._suspended == 0:
                 return
@@ -78,6 +80,7 @@ class LiveLine:
                 self._condition.notify()
 
     def write(self, text: str = "") -> None:
+        """Write a line without corrupting the animation."""
         # Only the runner toggles the animation state, so checking without the
         # lock is safe and keeps ordinary output uncontended.
         if self._animation is None or self._suspended or not self._drawn:
@@ -94,9 +97,7 @@ class LiveLine:
     def _ensure_thread(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
-        self._thread = threading.Thread(
-            target=self._run, daemon=True, name=f"{PACKAGE_NAME}-animation"
-        )
+        self._thread = threading.Thread(target=self._run, daemon=True, name=f"{PACKAGE_NAME}-animation")
         self._thread.start()
 
     def _run(self) -> None:

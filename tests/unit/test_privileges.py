@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import subprocess
 
 import pytest
@@ -93,12 +91,10 @@ def test_failed_prompt_is_an_error(monkeypatch):
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv, 1, "", "Sorry, try again.\n"
-        ),
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1, "", "Sorry, try again.\n"),
     )
 
-    with pytest.raises(PrivilegeError, match="authentication failed: Sorry, try again."):
+    with pytest.raises(PrivilegeError, match=r"authentication failed: Sorry, try again\."):
         PrivilegeManager().refresh()
 
 

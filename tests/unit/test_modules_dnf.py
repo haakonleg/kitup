@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from kitup.errors import TaskFailed
@@ -226,9 +224,7 @@ def test_hidden_group_is_detected_as_installed(tmp_path):
 
     dnf.packages(ctx, ["@multimedia"])
 
-    assert [call[0] for call in command.calls] == [
-        ["dnf5", "group", "list", "--installed", "--hidden"]
-    ]
+    assert [call[0] for call in command.calls] == [["dnf5", "group", "list", "--installed", "--hidden"]]
     assert ctx.changes == []
 
 
@@ -438,9 +434,7 @@ def test_rpm_release_accepts_multiple_sources(tmp_path):
 
     assert command.calls[0][0] == ["dnf5", "install", "-y", url, str(local)]
     assert ctx.changes[0].data == {"sources": [url, str(local)]}
-    assert ctx.changes[0].summary == (
-        "install tool-release-2-1.noarch.rpm, extra-release-1-1.noarch.rpm"
-    )
+    assert ctx.changes[0].summary == ("install tool-release-2-1.noarch.rpm, extra-release-1-1.noarch.rpm")
 
 
 def test_repository_requires_arguments(tmp_path):

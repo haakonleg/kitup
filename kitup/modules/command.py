@@ -1,7 +1,5 @@
 """Guarded one-off command module."""
 
-from __future__ import annotations
-
 import os
 import pwd
 import subprocess

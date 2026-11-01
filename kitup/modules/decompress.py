@@ -1,7 +1,5 @@
 """Idempotent archive extraction and single-file decompression."""
 
-from __future__ import annotations
-
 import bz2
 import fnmatch
 import gzip
@@ -17,7 +15,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Final
 
 from .._utils import file_ops
 from .._utils.file_helper import (
@@ -35,19 +33,18 @@ try:
 except ImportError:  # pragma: no cover - Python builds without zstd support
     zstd = None  # type: ignore[assignment]
 
-_CHUNK_SIZE = 1024 * 1024
-_COMPRESSION_SUFFIXES = (".zst", ".zstd", ".gz", ".bz2", ".xz")
+_CHUNK_SIZE: Final = 1024 * 1024
+_COMPRESSION_SUFFIXES: Final = (".zst", ".zstd", ".gz", ".bz2", ".xz")
 
-_DECOMPRESSION_ERRORS: tuple[type[BaseException], ...] = (
+_DECOMPRESSION_ERRORS: Final[tuple[type[BaseException], ...]] = (
     OSError,
     EOFError,
     lzma.LZMAError,
     zlib.error,
+    *((zstd.ZstdError,) if zstd is not None else ()),
 )
-if zstd is not None:
-    _DECOMPRESSION_ERRORS += (zstd.ZstdError,)
 
-_ARCHIVE_ERRORS: tuple[type[BaseException], ...] = (
+_ARCHIVE_ERRORS: Final[tuple[type[BaseException], ...]] = (
     tarfile.TarError,
     zipfile.BadZipFile,
     OSError,
@@ -58,7 +55,7 @@ _ARCHIVE_ERRORS: tuple[type[BaseException], ...] = (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Member:
     """One selected archive member."""
 
@@ -103,9 +100,7 @@ def archive(
     _require_source(source, "archive source")
     target = Path(dest)
     target_info = _lstat(target)
-    if target_info is not None and not (
-        stat.S_ISDIR(target_info.st_mode) and not stat.S_ISLNK(target_info.st_mode)
-    ):
+    if target_info is not None and not (stat.S_ISDIR(target_info.st_mode) and not stat.S_ISLNK(target_info.st_mode)):
         raise TaskFailed(f"archive destination is not a directory: {target}")
     if target_info is None:
         file_ops.require_parent_local(target)
@@ -254,7 +249,6 @@ def _reconcile(
             _ensure_symlink(path, member, changed, dry_run=dry_run)
         else:
             _ensure_file(
-                ctx,
                 archive,
                 member,
                 path,
@@ -303,7 +297,6 @@ def _ensure_directory(
 
 
 def _ensure_file(
-    ctx: TaskContext,
     archive: tarfile.TarFile | zipfile.ZipFile,
     member: _Member,
     path: Path,
@@ -630,8 +623,7 @@ def _require_no_conflicts(entries: dict[str, _Member]) -> None:
             ancestor = entries.get(parent)
             if ancestor is not None and ancestor.kind != "dir":
                 raise TaskFailed(
-                    f"conflicting archive entries: {parent!r} is not a directory "
-                    f"but {name!r} is nested inside it"
+                    f"conflicting archive entries: {parent!r} is not a directory but {name!r} is nested inside it"
                 )
 
 
@@ -710,9 +702,7 @@ def _decompressed_name(source: Path) -> str:
     for suffix in _COMPRESSION_SUFFIXES:
         if name.endswith(suffix) and len(name) > len(suffix):
             return name[: -len(suffix)]
-    raise TaskFailed(
-        f"cannot derive a decompressed filename from {name!r}; pass a destination file path"
-    )
+    raise TaskFailed(f"cannot derive a decompressed filename from {name!r}; pass a destination file path")
 
 
 def _reject_archive(path: Path) -> None:
@@ -721,9 +711,7 @@ def _reject_archive(path: Path) -> None:
     except OSError as exc:
         raise TaskFailed(f"could not read {path}: {exc}") from exc
     if is_archive:
-        raise TaskFailed(
-            f"source is an archive, not a single compressed file: {path}; use decompress.archive()"
-        )
+        raise TaskFailed(f"source is an archive, not a single compressed file: {path}; use decompress.archive()")
 
 
 @contextmanager

@@ -1,12 +1,10 @@
 """GNOME gsettings management."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_state, require_text
+from ..validation import State, require_state, require_text
 
 
 def key(
@@ -15,7 +13,7 @@ def key(
     key: str,
     value: Any = None,
     *,
-    state: str = "present",
+    state: State = "present",
 ) -> None:
     """Manage a gsettings key, or reset it to its schema default."""
     require_state(state, "gsettings")

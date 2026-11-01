@@ -1,7 +1,5 @@
 """Integration tests for real Flatpak remote and package management."""
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from pathlib import Path
 

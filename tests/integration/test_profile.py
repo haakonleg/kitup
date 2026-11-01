@@ -1,7 +1,5 @@
 """Integration test for composed profiles and imported dependencies."""
 
-from __future__ import annotations
-
 import textwrap
 from pathlib import Path
 
@@ -17,9 +15,7 @@ def write(path: Path, text: str) -> None:
     path.write_text(textwrap.dedent(text), encoding="utf-8")
 
 
-def test_composed_profiles_merge_config_and_dependencies(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_composed_profiles_merge_config_and_dependencies(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write(tmp_path / "bundles" / "__init__.py", "")
     write(
         tmp_path / "bundles" / "base" / "__init__.py",

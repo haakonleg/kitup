@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import importlib
 import sys
 import textwrap
@@ -14,6 +12,7 @@ from kitup.profiles import RunDefinition, load_profile, profile
 def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(text), encoding="utf-8")
+
 
 def write_bundle(
     root: Path,
@@ -35,6 +34,7 @@ def write_bundle(
         """,
     )
 
+
 def load(root: Path, text: str, *, filename: str = "kitup.py") -> RunDefinition:
     write(root / filename, "from pathlib import Path\n\n" + textwrap.dedent(text))
     sys.path.insert(0, str(root))
@@ -43,6 +43,7 @@ def load(root: Path, text: str, *, filename: str = "kitup.py") -> RunDefinition:
         return load_profile(root / filename)
     finally:
         sys.path.remove(str(root))
+
 
 def purge_project_modules() -> None:
     for name in tuple(sys.modules):
@@ -61,11 +62,13 @@ def purge_project_modules() -> None:
         if name.startswith(("_kitup_profile_", "_kitup_config_")):
             sys.modules.pop(name, None)
 
+
 @pytest.fixture(autouse=True)
 def clean_imports():
     purge_project_modules()
     yield
     purge_project_modules()
+
 
 def test_basic_profile_registers_without_a_variable(tmp_path):
     write_bundle(tmp_path, "base")
@@ -84,6 +87,7 @@ def test_basic_profile_registers_without_a_variable(tmp_path):
     assert definition.description == "Base"
     assert definition.tags == frozenset({"one"})
     assert definition.skip_tags == frozenset({"two"})
+
 
 def test_bundle_option_validation(tmp_path):
     with pytest.raises(ProfileError, match="must not be empty"):
@@ -104,6 +108,7 @@ def test_bundle_option_validation(tmp_path):
             "from kitup import profile\nprofile(bundles=[object()])\n",
         )
 
+
 def test_duplicate_bundle_names_are_rejected(tmp_path):
     write_bundle(tmp_path, "one", name="same")
     write_bundle(tmp_path, "two", name="same")
@@ -119,6 +124,7 @@ def test_duplicate_bundle_names_are_rejected(tmp_path):
             profile(bundles=[one, two])
             """,
         )
+
 
 def test_config_paths_resolve_against_the_declaring_file(tmp_path):
     write_bundle(tmp_path, "base")
@@ -137,6 +143,7 @@ def test_config_paths_resolve_against_the_declaring_file(tmp_path):
 
     assert definition.config == ((tmp_path / "profiles" / "config.py").resolve(),)
 
+
 def test_config_validation(tmp_path):
     write_bundle(tmp_path, "base")
 
@@ -152,7 +159,7 @@ def test_config_validation(tmp_path):
             """,
         )
 
-    with pytest.raises(ProfileError, match="must use pathlib.Path"):
+    with pytest.raises(ProfileError, match=r"must use pathlib\.Path"):
         load(
             tmp_path,
             """
@@ -213,6 +220,7 @@ def test_config_validation(tmp_path):
             """,
         )
 
+
 def test_duplicate_config_paths_are_rejected(tmp_path):
     write_bundle(tmp_path, "base")
     write(tmp_path / "config.py", "VALUE = 1\n")
@@ -228,6 +236,7 @@ def test_duplicate_config_paths_are_rejected(tmp_path):
             profile(bundles=[base], config=[Path("config.py"), Path("config.py")])
             """,
         )
+
 
 def test_profile_extend_module_appends_and_inherits(tmp_path):
     write_bundle(tmp_path, "base")
@@ -275,6 +284,7 @@ def test_profile_extend_module_appends_and_inherits(tmp_path):
     assert definition.skip_tags == frozenset({"optional"})
     assert definition.source == (tmp_path / "kitup.py").resolve()
 
+
 def test_profile_extend_requires_a_definition(tmp_path):
     write(tmp_path / "empty_profile.py", "VALUE = 1\n")
 
@@ -289,6 +299,7 @@ def test_profile_extend_requires_a_definition(tmp_path):
             profile.extend(empty_profile)
             """,
         )
+
 
 def test_parent_definition_is_not_modified(tmp_path):
     write_bundle(tmp_path, "base")
@@ -325,6 +336,7 @@ def test_parent_definition_is_not_modified(tmp_path):
     assert [bundle.name for bundle in parent.bundles] == ["base"]
     assert [bundle.name for bundle in module.__kitup_run__.bundles] == ["base"]
 
+
 def test_profile_use_registers_unchanged(tmp_path):
     write_bundle(tmp_path, "base")
     write(
@@ -350,6 +362,7 @@ def test_profile_use_registers_unchanged(tmp_path):
 
     assert definition.description == "Base"
     assert [bundle.name for bundle in definition.bundles] == ["base"]
+
 
 def test_three_level_extension(tmp_path):
     write_bundle(tmp_path, "base")
@@ -396,6 +409,7 @@ def test_three_level_extension(tmp_path):
         "child",
     ]
 
+
 def test_run_definition_extend_and_replace(tmp_path):
     write_bundle(tmp_path, "base")
     write_bundle(tmp_path, "other")
@@ -419,6 +433,7 @@ def test_run_definition_extend_and_replace(tmp_path):
     assert definition.tags == frozenset({"extra"})
     assert definition.skip_tags == frozenset({"skip"})
     assert [path.name for path in definition.config] == ["base.py", "other.py"]
+
 
 def test_importing_a_profile_does_not_select_it(tmp_path):
     write_bundle(tmp_path, "base")
@@ -447,6 +462,7 @@ def test_importing_a_profile_does_not_select_it(tmp_path):
     )
 
     assert [bundle.name for bundle in definition.bundles] == ["other"]
+
 
 def test_extended_config_paths_resolve_against_the_child_file(tmp_path):
     write_bundle(tmp_path, "base")
@@ -480,6 +496,7 @@ def test_extended_config_paths_resolve_against_the_child_file(tmp_path):
         (tmp_path / "child.py").resolve(),
     )
 
+
 def test_profile_loading_errors(tmp_path):
     write(tmp_path / "run.py", "VALUE = 1\n")
 
@@ -487,6 +504,7 @@ def test_profile_loading_errors(tmp_path):
         load_profile(tmp_path / "missing.py")
     with pytest.raises(ProfileError, match="no run definition found"):
         load_profile(tmp_path / "run.py")
+
 
 def test_profile_of(tmp_path):
     write_bundle(tmp_path, "base")

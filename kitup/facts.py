@@ -1,7 +1,6 @@
 """System fact collection, performed once per run."""
 
-from __future__ import annotations
-
+import contextlib
 import os
 import platform
 import re
@@ -10,10 +9,10 @@ import socket
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Final
 
-OS_RELEASE_PATH = Path("/etc/os-release")
-MOUNTINFO_PATH = Path("/proc/self/mountinfo")
+OS_RELEASE_PATH: Final = Path("/etc/os-release")
+MOUNTINFO_PATH: Final = Path("/proc/self/mountinfo")
 
 
 def parse_os_release(text: str) -> dict[str, str]:
@@ -103,17 +102,12 @@ def collect_mounts(
 
 
 def _parse_options(*values: str) -> tuple[str, ...]:
-    options = [
-        _unescape_mount_field(option)
-        for value in values
-        for option in value.split(",")
-        if option
-    ]
+    options = [_unescape_mount_field(option) for value in values for option in value.split(",") if option]
     # The two option sets overlap (e.g. ``rw``), so keep the first occurrence.
     return tuple(dict.fromkeys(options))
 
 
-_MOUNT_ESCAPE = re.compile(r"\\([0-7]{3})")
+_MOUNT_ESCAPE: Final = re.compile(r"\\([0-7]{3})")
 
 
 def _unescape_mount_field(value: str) -> str:
@@ -128,10 +122,8 @@ def collect_facts(os_release_path: Path = OS_RELEASE_PATH) -> Mapping[str, Any]:
     """
     facts: dict[str, Any] = {}
 
-    try:
+    with contextlib.suppress(OSError):
         facts["hostname"] = socket.gethostname()
-    except OSError:
-        pass
 
     os_release = read_os_release(os_release_path)
     if os_release:

@@ -1,7 +1,5 @@
 """Integration tests for privileged file operations through the worker."""
 
-from __future__ import annotations
-
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -194,16 +192,11 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
     assert run(["sudo", "-n", "cat", str(WORKER_FILE)]).stdout == (
         "alpha\nbeta\n# BEGIN managed\ninside\n# END managed\n"
     )
-    assert (
-        run(["sudo", "-n", "stat", "-c", "%a %u %g", str(WORKER_FILE)]).stdout.strip()
-        == "640 0 0"
-    )
+    assert run(["sudo", "-n", "stat", "-c", "%a %u %g", str(WORKER_FILE)]).stdout.strip() == "640 0 0"
     assert run(["sudo", "-n", "stat", "-c", "%a", str(WORKER_ROOT)]).stdout.strip() == "750"
     assert run(["sudo", "-n", "cat", str(WORKER_COPY)]).stdout == "copied\n"
     assert run(["sudo", "-n", "stat", "-c", "%a", str(WORKER_COPY)]).stdout.strip() == "600"
-    assert run(["sudo", "-n", "readlink", str(WORKER_LINK)]).stdout.strip() == str(
-        WORKER_FILE
-    )
+    assert run(["sudo", "-n", "readlink", str(WORKER_LINK)]).stdout.strip() == str(WORKER_FILE)
     assert run(["sudo", "-n", "stat", "-c", "%a", str(WORKER_DIR)]).stdout.strip() == "700"
     assert run(["sudo", "-n", "cat", str(WORKER_NESTED)]).stdout == "nested\n"
 

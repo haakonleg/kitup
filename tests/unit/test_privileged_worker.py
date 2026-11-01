@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import os
 import stat
@@ -55,12 +53,14 @@ def test_worker_closes_on_fatal_error(ctx, tmp_path, monkeypatch):
     monkeypatch.setattr(
         client_module,
         "_embedded_script",
-        lambda: """\
+        lambda: (
+            """\
 import sys
 print('ready', flush=True)
 sys.stdin.readline()
 print('{"error":"fatal boom","fatal":true}', flush=True)
-""",
+"""
+        ),
     )
     worker = PrivilegedWorker(ctx)
 
@@ -118,12 +118,7 @@ def test_worker_move_action(ctx, tmp_path):
     worker = PrivilegedWorker(ctx)
 
     try:
-        assert (
-            worker.request(
-                Request("move", {"source": str(source), "path": str(destination)})
-            )
-            == {}
-        )
+        assert worker.request(Request("move", {"source": str(source), "path": str(destination)})) == {}
         assert not source.exists()
         assert destination.read_text() == "data\n"
     finally:
@@ -136,22 +131,13 @@ def test_worker_directory_metadata_and_symlink(ctx, tmp_path):
     worker = PrivilegedWorker(ctx)
 
     try:
-        assert (
-            worker.request(Request("mkdir", {"path": str(directory), "mode": 0o700}))
-            == {}
-        )
+        assert worker.request(Request("mkdir", {"path": str(directory), "mode": 0o700})) == {}
         assert stat.S_IMODE(directory.stat().st_mode) == 0o700
 
-        assert (
-            worker.request(Request("metadata", {"path": str(directory), "mode": 0o750}))
-            == {}
-        )
+        assert worker.request(Request("metadata", {"path": str(directory), "mode": 0o750})) == {}
         assert stat.S_IMODE(directory.stat().st_mode) == 0o750
 
-        assert (
-            worker.request(Request("symlink", {"path": str(link), "target": "target"}))
-            == {}
-        )
+        assert worker.request(Request("symlink", {"path": str(link), "target": "target"})) == {}
         assert link.is_symlink()
     finally:
         worker.close()
@@ -165,9 +151,7 @@ def test_worker_rejects_unknown_action_and_stays_alive(ctx, tmp_path):
         with pytest.raises(TaskFailed, match="unknown privileged action"):
             worker.request(Request("nope", {}))
 
-        worker.request(
-            Request("write", {"path": str(path), "content": "", "mode": 0o600})
-        )
+        worker.request(Request("write", {"path": str(path), "content": "", "mode": 0o600}))
         assert path.exists()
     finally:
         worker.close()
@@ -199,11 +183,7 @@ def test_worker_start_failure_includes_stderr_and_exit_code(ctx, monkeypatch):
     monkeypatch.setattr(
         client_module,
         "_embedded_script",
-        lambda: (
-            "import sys\n"
-            "print('startup boom', file=sys.stderr, flush=True)\n"
-            "sys.exit(7)\n"
-        ),
+        lambda: "import sys\nprint('startup boom', file=sys.stderr, flush=True)\nsys.exit(7)\n",
     )
     worker = PrivilegedWorker(ctx)
 
@@ -269,12 +249,7 @@ def test_worker_invalid_response_closes(ctx, tmp_path, monkeypatch):
     monkeypatch.setattr(
         client_module,
         "_embedded_script",
-        lambda: (
-            "import sys\n"
-            "print('ready', flush=True)\n"
-            "sys.stdin.readline()\n"
-            "print('not json', flush=True)\n"
-        ),
+        lambda: "import sys\nprint('ready', flush=True)\nsys.stdin.readline()\nprint('not json', flush=True)\n",
     )
     worker = PrivilegedWorker(ctx)
 
@@ -298,7 +273,7 @@ def test_worker_rejects_invalid_mode_and_ids(ctx, tmp_path):
             {"path": str(path), "content": "", "owner": -1},
             {"path": str(path), "content": "", "owner": True},
         ):
-            with pytest.raises(TaskFailed, match="mode|owner"):
+            with pytest.raises(TaskFailed, match=r"mode|owner"):
                 worker.request(Request("write", params))
         assert not path.exists()
     finally:
@@ -337,9 +312,7 @@ def test_worker_serializes_concurrent_requests(ctx, tmp_path):
         except Exception as exc:  # noqa: BLE001 - surface thread failures
             errors.append(exc)
 
-    threads = [
-        threading.Thread(target=check, args=(existing, True)) for _ in range(4)
-    ] + [
+    threads = [threading.Thread(target=check, args=(existing, True)) for _ in range(4)] + [
         threading.Thread(target=check, args=(missing, False)) for _ in range(4)
     ]
 
@@ -391,12 +364,7 @@ def test_worker_timeout_closes_process(ctx, tmp_path, monkeypatch):
     monkeypatch.setattr(
         client_module,
         "_embedded_script",
-        lambda: (
-            "import sys\n"
-            "print('ready', flush=True)\n"
-            "for _ in sys.stdin:\n"
-            "    pass\n"
-        ),
+        lambda: "import sys\nprint('ready', flush=True)\nfor _ in sys.stdin:\n    pass\n",
     )
     worker = PrivilegedWorker(ctx, timeout=0.2, startup_timeout=5)
 
@@ -415,6 +383,3 @@ def test_unprivileged_operations_do_not_start_worker(tmp_path):
 
     assert context.privileged_worker._process is None
     context.close()
-
-
-

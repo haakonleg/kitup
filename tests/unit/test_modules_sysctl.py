@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import stat
 
 import pytest
@@ -160,7 +158,7 @@ def test_bool_and_int_values_are_formatted(tmp_path):
     command.responses = [response(0, "0\n"), response(0), response(0, "0\n"), response(0)]
     ctx = make_sysctl_context(tmp_path, command=command)
 
-    sysctl.key(ctx, "net.ipv4.ip_forward", True)
+    sysctl.key(ctx, "net.ipv4.ip_forward", value=True)
     sysctl.key(ctx, "kernel.panic", 3)
 
     assert command.calls[1][0] == ["sysctl", "-w", "net.ipv4.ip_forward=1"]
@@ -173,7 +171,7 @@ def test_file_line_uses_the_formatted_value(tmp_path):
     command.responses = [response(0, "0\n"), response(0)]
     ctx = make_sysctl_context(tmp_path, command=command)
 
-    sysctl.key(ctx, "net.ipv4.ip_forward", True, file=conf)
+    sysctl.key(ctx, "net.ipv4.ip_forward", value=True, file=conf)
 
     assert conf.read_text() == "net.ipv4.ip_forward = 1\n"
 

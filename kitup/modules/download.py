@@ -1,7 +1,6 @@
 """Remote file download over HTTP(S)."""
 
-from __future__ import annotations
-
+import contextlib
 import hashlib
 import io
 import os
@@ -11,7 +10,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Final
 from urllib.error import HTTPError
 from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
@@ -22,12 +21,12 @@ from ..context import TaskContext
 from ..errors import TaskFailed
 from ..validation import require_mode, require_path
 
-_DEFAULT_MAX_BYTES = 10 * 1024 * 1024
-_HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
-_HEX_DIGEST = re.compile(r"^[0-9a-f]+$")
+_DEFAULT_MAX_BYTES: Final = 10 * 1024 * 1024
+_HEADER_NAME: Final = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_HEX_DIGEST: Final = re.compile(r"^[0-9a-f]+$")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Checksum:
     algorithm: str
     digest: str
@@ -80,9 +79,9 @@ def to_file(
         display,
         request_headers,
         timeout,
-        validate_certs,
         expected,
         target.parent,
+        validate_certs=validate_certs,
     )
     try:
         if info is not None and _content_matches(target, temporary):
@@ -100,7 +99,7 @@ def to_file(
 
 
 def to_bytes(
-    ctx: TaskContext,
+    ctx: TaskContext,  # noqa: ARG001 - part of the module API convention
     url: str,
     *,
     checksum: str | None = None,
@@ -123,7 +122,7 @@ def to_bytes(
     display = _display_url(parts)
 
     buffer = io.BytesIO()
-    with _open_url(url, display, request_headers, timeout, validate_certs) as response:
+    with _open_url(url, display, request_headers, timeout, validate_certs=validate_certs) as response:
         _read_response(response, buffer, expected=expected, max_bytes=limit, display=display)
     return buffer.getvalue()
 
@@ -133,9 +132,10 @@ def _download_to_temp(
     display: str,
     headers: Mapping[str, str],
     timeout: float,
-    validate_certs: bool,
     expected: _Checksum | None,
     directory: Path,
+    *,
+    validate_certs: bool,
 ) -> Path:
     try:
         handle, name = tempfile.mkstemp(
@@ -148,7 +148,7 @@ def _download_to_temp(
     temporary = Path(name)
     try:
         with os.fdopen(handle, "wb") as stream:
-            with _open_url(url, display, headers, timeout, validate_certs) as response:
+            with _open_url(url, display, headers, timeout, validate_certs=validate_certs) as response:
                 _read_response(
                     response,
                     stream,
@@ -160,10 +160,8 @@ def _download_to_temp(
             os.fsync(stream.fileno())
         return temporary
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(name)
-        except OSError:
-            pass
         raise
 
 
@@ -172,6 +170,7 @@ def _open_url(
     display: str,
     headers: Mapping[str, str],
     timeout: float,
+    *,
     validate_certs: bool,
 ) -> Any:
     try:
@@ -255,10 +254,7 @@ def _validate_url(url: str) -> tuple[str, SplitResult]:
         raise TaskFailed("URL must not contain whitespace")
     parts = urlsplit(url)
     if parts.scheme.lower() not in {"http", "https"}:
-        raise TaskFailed(
-            f"unsupported URL scheme: {parts.scheme or '<missing>'}; "
-            "only http and https are supported"
-        )
+        raise TaskFailed(f"unsupported URL scheme: {parts.scheme or '<missing>'}; only http and https are supported")
     if not parts.netloc:
         raise TaskFailed(f"URL has no host: {_display_url(parts)}")
     try:
@@ -313,9 +309,7 @@ def _build_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
                 raise TaskFailed(f"invalid header name: {name!r}")
             if not isinstance(value, str):
                 raise TaskFailed(f"header {name!r} value must be a string")
-            if any(
-                ord(character) < 32 and character != "\t" for character in value
-            ) or "\x7f" in value:
+            if any(ord(character) < 32 and character != "\t" for character in value) or "\x7f" in value:
                 raise TaskFailed(f"header {name!r} value must not contain control characters")
             values[name] = value
     return values
@@ -331,7 +325,7 @@ def _validate_max_bytes(max_bytes: int | None) -> int | None:
     return max_bytes
 
 
-def _validate_boolean(value: bool, label: str) -> None:
+def _validate_boolean(value: object, label: str) -> None:
     if not isinstance(value, bool):
         raise TaskFailed(f"{label} must be a boolean")
 

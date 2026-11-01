@@ -12,7 +12,7 @@ license = "MIT"
 dependencies = ["Jinja2>=3.1,<4"]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "pytest-randomly", "ruff", "mypy"]
 
 [project.scripts]
 kitup = "kitup.cli:main"
@@ -25,13 +25,63 @@ kitup = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
+addopts = ["--strict-markers", "--strict-config", "-ra", "--durations=10"]
+filterwarnings = ["error"]
 markers = [
     "integration: requires a disposable Fedora container",
 ]
 
 [tool.ruff]
 target-version = "py314"
-line-length = 100
+line-length = 120
 
 [tool.ruff.lint]
-extend-select = ["E402", "E501"]
+extend-select = [
+    "E402",
+    "E501",
+    "D",
+    "I",
+    "UP",
+    "B",
+    "C4",
+    "PIE",
+    "RET",
+    "PERF",
+    "ERA",
+    "Q",
+    "BLE",
+    "TRY004",
+    "SIM",
+    "TC004",
+    "S102",
+    "ARG",
+    "PLC0415",
+    "RUF",
+    "FURB",
+    "DTZ",
+    "T20",
+    "E711",
+    "E712",
+    "E721",
+    "E731",
+    "E741",
+    "W291",
+    "W293",
+    "FBT",
+]
+ignore = ["D105", "D107"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "ARG", "T20"]
+"examples/**" = ["D", "ARG", "T20"]
+"kitup/cli.py" = ["T20"]
+"kitup/privileges.py" = ["T20"]
+"kitup/output/**" = ["T20"]
+"tools/zipapp/build.py" = ["T20"]
+
+[tool.mypy]
+strict = true
+enable_error_code = ["explicit-override"]

@@ -1,7 +1,5 @@
 """Merge ordered configuration sources into a namespace."""
 
-from __future__ import annotations
-
 import types
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -37,10 +35,7 @@ def load_config(sources: Sequence[ConfigSource]) -> SimpleNamespace:
                 raise ConfigError(f"config not found: {path}")
             values.update(_import_public_fields(path))
         else:
-            raise ConfigError(
-                "config sources must be Path objects, modules, or mappings, "
-                f"not {type(source).__name__}"
-            )
+            raise ConfigError(f"config sources must be Path objects, modules, or mappings, not {type(source).__name__}")
 
     return SimpleNamespace(**values)
 
@@ -55,11 +50,7 @@ def _import_public_fields(path: Path) -> dict[str, Any]:
 
 
 def _public_fields(module: types.ModuleType) -> dict[str, Any]:
-    return {
-        name: value
-        for name, value in vars(module).items()
-        if _public(name, value)
-    }
+    return {name: value for name, value in vars(module).items() if _public(name, value)}
 
 
 def _mapping_fields(source: Mapping[Any, Any]) -> dict[str, Any]:

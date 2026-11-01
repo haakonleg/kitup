@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import textwrap
 from pathlib import Path
 from types import ModuleType
@@ -24,16 +22,22 @@ def module(**values) -> ModuleType:
 def test_path_sources_merge_in_order(tmp_path):
     first = tmp_path / "first.py"
     second = tmp_path / "second.py"
-    write(first, """
+    write(
+        first,
+        """
         KEEP = "first"
         REPLACE = "first"
         COLLECTION = [1, 2]
-    """)
-    write(second, """
+    """,
+    )
+    write(
+        second,
+        """
         REPLACE = "second"
         COLLECTION = [3]
         ADDED = True
-    """)
+    """,
+    )
 
     config = load_config([first, second])
 
@@ -44,9 +48,7 @@ def test_path_sources_merge_in_order(tmp_path):
 
 
 def test_module_and_mapping_sources_contribute_public_fields():
-    module_config = load_config(
-        [module(VALUE="module", _PRIVATE="hidden", helper=lambda: None)]
-    )
+    module_config = load_config([module(VALUE="module", _PRIVATE="hidden", helper=lambda: None)])
     mapping_config = load_config([{"VALUE": 1, "helper": lambda: None}])
 
     assert vars(module_config) == {"VALUE": "module"}
@@ -95,12 +97,15 @@ def test_import_exception_is_reported(tmp_path):
 
 
 def test_bundle_instances_are_not_config_values(tmp_path):
-    write(tmp_path / "config.py", """
+    write(
+        tmp_path / "config.py",
+        """
         from kitup.registry import Bundle
 
         VALUE = 1
         BUNDLE = Bundle("nested")
-    """)
+    """,
+    )
 
     config = load_config([tmp_path / "config.py"])
 

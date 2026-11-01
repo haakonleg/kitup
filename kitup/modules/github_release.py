@@ -1,13 +1,11 @@
 """Read public GitHub release metadata."""
 
-from __future__ import annotations
-
 import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 from urllib.error import HTTPError
 from urllib.parse import quote
 
@@ -16,13 +14,13 @@ from ..context import TaskContext
 from ..errors import TaskFailed
 from ..validation import require_text
 
-_API_URL = "https://api.github.com"
-_DEFAULT_TIMEOUT = 30
-_MAX_BYTES = 10 * 1024 * 1024
-_ACCEPT = "application/vnd.github+json"
-_API_VERSION = "2022-11-28"
+_API_URL: Final = "https://api.github.com"
+_DEFAULT_TIMEOUT: Final = 30
+_MAX_BYTES: Final = 10 * 1024 * 1024
+_ACCEPT: Final = "application/vnd.github+json"
+_API_VERSION: Final = "2022-11-28"
 
-__all__ = ["Asset", "Release", "by_asset", "by_tag", "latest"]
+__all__: Final = ["Asset", "Release", "by_asset", "by_tag", "latest"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,10 +132,7 @@ def by_asset(
     to select a specific release instead.
     """
     regex = _compile_asset_pattern(pattern)
-    if tag is None:
-        release = latest(ctx, project, timeout=timeout)
-    else:
-        release = by_tag(ctx, project, tag, timeout=timeout)
+    release = latest(ctx, project, timeout=timeout) if tag is None else by_tag(ctx, project, tag, timeout=timeout)
     return _single_asset(release, regex)
 
 
@@ -160,14 +155,11 @@ def _single_asset(release: Release, regex: re.Pattern[str]) -> Asset:
     if not matches:
         available = ", ".join(asset.name for asset in release.assets) or "none"
         raise TaskFailed(
-            f"no asset matching regex {regex.pattern!r} in release {release.tag!r}; "
-            f"available: {available}"
+            f"no asset matching regex {regex.pattern!r} in release {release.tag!r}; available: {available}"
         )
     if len(matches) > 1:
         names = ", ".join(asset.name for asset in matches)
-        raise TaskFailed(
-            f"multiple assets match regex {regex.pattern!r} in release {release.tag!r}: {names}"
-        )
+        raise TaskFailed(f"multiple assets match regex {regex.pattern!r} in release {release.tag!r}: {names}")
     return matches[0]
 
 
@@ -349,9 +341,7 @@ def _memo_key(
 
 
 def _has_whitespace_or_control(value: str) -> bool:
-    return any(
-        character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value
-    )
+    return any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
 
 
 def _http_error_message(exc: HTTPError, label: str) -> str:

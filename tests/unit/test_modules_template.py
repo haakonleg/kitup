@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import stat
 from io import StringIO
@@ -56,10 +54,7 @@ def test_file_renders_config_facts_and_variables(tmp_path):
     source = tmp_path / "template.j2"
     write_source(
         source,
-        "port={{ config.SSH_PORT }}\n"
-        'host={{ config["HOSTNAME"] }}\n'
-        "fact={{ facts.hostname }}\n"
-        "user={{ user }}\n",
+        'port={{ config.SSH_PORT }}\nhost={{ config["HOSTNAME"] }}\nfact={{ facts.hostname }}\nuser={{ user }}\n',
     )
     dest = tmp_path / "rendered.conf"
     ctx = context(

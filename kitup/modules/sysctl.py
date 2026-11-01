@@ -1,31 +1,31 @@
 """Linux sysctl parameter management."""
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
+from typing import Final
 
 from .._utils import file_ops
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_state, require_text
+from ..validation import State, require_state, require_text
 
-_KEY_PATTERN = r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*"
+_KEY_PATTERN: Final = r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*"
 
 
 def key(
     ctx: TaskContext,
     name: str,
-    value: str | float | bool | None = None,
+    value: str | float | None = None,
     *,
-    state: str = "present",
+    state: State = "present",
     file: str | Path | None = None,
 ) -> None:
     """Set a sysctl key at runtime and optionally persist it in a file.
 
     ``file=None`` changes only the runtime value. When ``file`` is an absolute
     path, a ``name = value`` entry is also managed in that file.
-    ``state="absent"`` requires ``file`` and only edits the file.
+    ``state="absent"`` requires ``file`` and only edits the file. Boolean
+    values are written as ``1`` or ``0``.
     """
     require_state(state, "sysctl")
     key_name = _normalize_name(name)
@@ -66,7 +66,7 @@ def _resolve_file(file: str | Path | None) -> Path | None:
     return target
 
 
-def _format_value(value: str | float | bool) -> str:
+def _format_value(value: str | float) -> str:
     if isinstance(value, bool):
         return "1" if value else "0"
     if isinstance(value, (int, float)):

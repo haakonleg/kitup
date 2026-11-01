@@ -1,7 +1,5 @@
 """Exception types shared by the CLI, loader, runner, and modules."""
 
-from __future__ import annotations
-
 
 class KitupError(Exception):
     """Base class for expected, user-facing application errors."""

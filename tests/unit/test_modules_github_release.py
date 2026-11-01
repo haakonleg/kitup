@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import http.server
 import json
 import threading
+from contextlib import closing
 from urllib.error import HTTPError
 from urllib.parse import unquote
 
@@ -247,18 +246,18 @@ def test_rate_limit_failure_includes_reset_time(tmp_path, api_server):
 
 
 def test_rate_limit_helpers_accept_missing_response_headers():
-    forbidden = HTTPError("https://api.github.com", 403, "Forbidden", None, None)
-    too_many = HTTPError("https://api.github.com", 429, "Too Many Requests", None, None)
-
-    assert github_release._is_rate_limited(forbidden) is False
-    assert github_release._http_error_message(
-        forbidden,
-        "latest release for owner/repo",
-    ) == ("GitHub API request failed for latest release for owner/repo: HTTP 403 Forbidden")
-    assert github_release._http_error_message(too_many, "latest release for owner/repo") == (
-        "GitHub API rate limit exceeded for latest release for owner/repo "
-        "(unauthenticated requests are limited)"
-    )
+    with (
+        closing(HTTPError("https://api.github.com", 403, "Forbidden", None, None)) as forbidden,
+        closing(HTTPError("https://api.github.com", 429, "Too Many Requests", None, None)) as too_many,
+    ):
+        assert github_release._is_rate_limited(forbidden) is False
+        assert github_release._http_error_message(
+            forbidden,
+            "latest release for owner/repo",
+        ) == ("GitHub API request failed for latest release for owner/repo: HTTP 403 Forbidden")
+        assert github_release._http_error_message(too_many, "latest release for owner/repo") == (
+            "GitHub API rate limit exceeded for latest release for owner/repo (unauthenticated requests are limited)"
+        )
 
 
 def test_invalid_json_is_a_task_failure(tmp_path, api_server):
