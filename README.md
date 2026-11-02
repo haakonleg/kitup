@@ -354,6 +354,7 @@ ctx.set("key", value)  # store a value for later tasks
 ctx.get("key")  # read a stored value
 ctx.result(task_func)  # read an earlier task's result
 ctx.results  # all task results for this run
+ctx.register_side_effect(side_effect)  # run work only if this task changed
 ctx.skip("reason")  # skip the task
 ctx.fail("reason")  # fail the task
 ```
@@ -385,6 +386,30 @@ def apply_updates(ctx):
 
 `TaskResult` exposes `status`, `changed`, `ok`, `skipped`, `failed`, `changes`,
 `notes`, and `value`. `ctx.results` returns all results for the run.
+
+### Side effects
+
+A task can register work that should only run when the task changes something:
+
+```python
+from kitup.registry import side_effect, task
+
+
+@side_effect("Reload nginx", one_shot=False)
+def reload_nginx(ctx):
+    ctx.run(["systemctl", "reload", "nginx"], sudo=True)
+
+
+@task("Configure nginx", tags={"web"})
+def configure_nginx(ctx):
+    files.file(ctx, "/etc/nginx/nginx.conf", content="...")
+    ctx.register_side_effect(reload_nginx)
+```
+
+`one_shot=True` (the default) defers the side effect to the end of the bundle and
+runs it at most once per apply run; `one_shot=False` runs it immediately after
+the registering task. Side effects only run when the registering task changes
+something.
 
 ## Built-in modules
 

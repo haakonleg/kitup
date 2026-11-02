@@ -13,7 +13,7 @@ from .commands import CommandRunner
 from .errors import SkipTask, TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
-from .registry import Bundle, Task
+from .registry import Bundle, SideEffect, Task
 from .results import Change, TaskResult
 from .validation import normalize_strings, require_text
 
@@ -59,6 +59,9 @@ class TaskContext:
         self._task_name = ""
         self._bundle: Bundle | None = None
         self._bundle_path: Path | None = None
+        self._pending_side_effects: list[SideEffect] = []
+        self._task: Task | None = None
+        self._running_side_effect = False
         self._sudo_ready = False
         self.privileged_worker: PrivilegedWorker = PrivilegedWorker(self)
 
@@ -113,13 +116,32 @@ class TaskContext:
             return self._bundle_path / "files" / source
         return self._bundle_path / source
 
-    def begin_task(self, task: Task) -> None:
+    def begin_task(self, task: Task, *, is_side_effect: bool = False) -> None:
         """Reset task-scoped state while retaining per-run state."""
         self._changes.clear()
         self._notes.clear()
         self._task_name = task.name
         self._bundle = task.bundle
         self._bundle_path = task.bundle_path
+        self._task = task
+        self._pending_side_effects.clear()
+        self._running_side_effect = is_side_effect
+
+    def register_side_effect(self, side_effect: SideEffect) -> None:
+        """Queue a side effect to run if this task changed."""
+        if not isinstance(side_effect, SideEffect):
+            raise TaskFailed("register_side_effect expects a SideEffect")
+        if self._task is None:
+            raise TaskFailed("side effects can only be registered from a task")
+        if self._running_side_effect:
+            raise TaskFailed("side effects cannot register other side effects")
+        self._pending_side_effects.append(side_effect)
+
+    def _take_side_effects(self) -> list[SideEffect]:
+        """Return and clear the side effects registered by the current task."""
+        effects = self._pending_side_effects
+        self._pending_side_effects = []
+        return effects
 
     def _store_result(self, task: Task, result: TaskResult) -> None:
         """Store a task result for later tasks."""

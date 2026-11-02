@@ -407,6 +407,67 @@ def test_missing_profile_or_config_is_exit_2(tmp_path, capsys):
     assert "error: config not found" in capsys.readouterr().err
 
 
+def test_list_does_not_show_side_effect_names(tmp_path, capsys):
+    make_bundle(
+        tmp_path,
+        "base",
+        tasks="""
+        from kitup.registry import side_effect
+
+        @side_effect("Refresh package metadata")
+        def refresh(ctx):
+            pass
+
+        @task("Install packages")
+        def install(ctx):
+            ctx.register_side_effect(refresh)
+        """,
+    )
+    make_profile(tmp_path, ["base"])
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "--no-color"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Install packages" in out
+    assert "Refresh package metadata" not in out
+
+
+def test_apply_shows_and_prefixes_side_effect_lines(tmp_path, capsys):
+    make_bundle(
+        tmp_path,
+        "base",
+        tasks="""
+        from kitup.registry import side_effect
+
+        @side_effect("Reload nginx", one_shot=False)
+        def reload(ctx):
+            ctx.changed({}, "+reloaded")
+
+        @side_effect("Refresh package metadata")
+        def refresh(ctx):
+            ctx.changed({}, "+refreshed")
+
+        @task("Configure nginx")
+        def configure(ctx):
+            ctx.changed({}, "+conf")
+            ctx.register_side_effect(reload)
+            ctx.register_side_effect(refresh)
+        """,
+    )
+    make_profile(tmp_path, ["base"])
+
+    code = cli.main(["apply", str(tmp_path / "kitup.py"), "-n", "--no-color"])
+
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert code == 0
+    assert any(line.startswith("    Configure nginx") for line in lines)
+    assert any(line.startswith("  ↳ Reload nginx") for line in lines)
+    assert any(line.startswith("  ↳ Refresh package metadata") for line in lines)
+    assert not any(line.startswith("  ↳ Configure nginx") for line in lines)
+
+
 def test_cli_tag_filters_merge_with_profile_defaults(tmp_path, capsys):
     make_bundle(
         tmp_path,

@@ -233,6 +233,61 @@ their normal dry-run outcome. Reading a task that did not run raises
 declared once, and imports between task modules should be one-directional to
 avoid circular dependencies.
 
+### Side effects
+
+Side effects are work that a task registers to run only when the task changes
+something. Declare them with `@side_effect` and register them from a task with
+`ctx.register_side_effect()`:
+
+```python
+from kitup.registry import side_effect, task
+
+
+@side_effect("Refresh package metadata", one_shot=True)
+def refresh_metadata(ctx):
+    ctx.run(["dnf5", "makecache"], sudo=True)
+
+
+@side_effect("Reload nginx", one_shot=False)
+def reload_nginx(ctx):
+    ctx.run(["systemctl", "reload", "nginx"], sudo=True)
+
+
+@task("Install packages", tags={"packages"})
+def install_packages(ctx):
+    dnf.packages(ctx, ctx.config.PACKAGES)
+    ctx.register_side_effect(refresh_metadata)
+
+
+@task("Configure nginx", tags={"web"})
+def configure_nginx(ctx):
+    files.file(ctx, "/etc/nginx/nginx.conf", content="...")
+    ctx.register_side_effect(reload_nginx)
+```
+
+`@side_effect(name, *, one_shot=True, description="")` returns a `SideEffect`.
+It is not registered with a bundle and does not appear in `Bundle.tasks`.
+Side-effect results are stored like task results and can be read with
+`ctx.result()`.
+
+A side effect runs only when the registering task reports a change; tasks that
+are `ok`, `skipped`, or `failed` do not trigger theirs. Side effects inherit tag
+selection from the registering task, use the registering bundle's context, and
+can inspect earlier task results. They take only `ctx`; use closures for
+parameters.
+
+- `one_shot=True` (the default) defers the side effect to the end of the bundle
+  and runs it at most once per apply run. It is marked as executed only after an
+  `ok` or `changed` result, so a skipped side effect can run again when a later
+  task registers it. If the bundle fails before the end, queued one-shot side
+  effects do not run.
+- `one_shot=False` runs the side effect immediately after the registering task,
+  before the next task starts. Every registration is honored, including
+  duplicates, and a failure aborts the run immediately.
+
+A side effect cannot register another side effect. Side-effect-only modules
+should not be listed in `bundle.modules`; import them from task modules instead.
+
 ## Config sources
 
 Config sources merge left-to-right. Later sources replace same-named fields;

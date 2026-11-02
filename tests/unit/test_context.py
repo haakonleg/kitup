@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from kitup.errors import TaskFailed
-from kitup.registry import Bundle
+from kitup.registry import Bundle, side_effect
 from kitup.results import Status, TaskResult
 
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
@@ -287,3 +287,60 @@ def test_bundle_is_the_owning_bundle_for_the_current_task(tmp_path):
 
     assert context.bundle is bundle
     assert context.bundle_path == tmp_path
+
+
+def test_register_side_effect_queues_for_the_current_task(tmp_path):
+    context = make_context(tmp_path)
+    context.begin_task(task_for())
+    effect = side_effect("Refresh")(lambda ctx: None)
+
+    context.register_side_effect(effect)
+
+    assert context._take_side_effects() == [effect]
+
+
+def test_register_side_effect_outside_a_task_fails(tmp_path):
+    context = make_context(tmp_path)
+    effect = side_effect("Refresh")(lambda ctx: None)
+
+    with pytest.raises(TaskFailed, match="side effects can only be registered from a task"):
+        context.register_side_effect(effect)
+
+
+def test_register_side_effect_from_a_side_effect_fails(tmp_path):
+    context = make_context(tmp_path)
+    context.begin_task(task_for(), is_side_effect=True)
+    effect = side_effect("Refresh")(lambda ctx: None)
+
+    with pytest.raises(TaskFailed, match="side effects cannot register other side effects"):
+        context.register_side_effect(effect)
+
+
+def test_register_side_effect_requires_a_side_effect(tmp_path):
+    context = make_context(tmp_path)
+    context.begin_task(task_for())
+
+    with pytest.raises(TaskFailed, match="register_side_effect expects a SideEffect"):
+        context.register_side_effect(lambda ctx: None)  # type: ignore[arg-type]
+
+
+def test_begin_task_clears_pending_side_effects(tmp_path):
+    context = make_context(tmp_path)
+    context.begin_task(task_for())
+    context.register_side_effect(side_effect("Refresh")(lambda ctx: None))
+
+    context.begin_task(task_for("Other"))
+
+    assert context._take_side_effects() == []
+
+
+def test_take_side_effects_returns_and_clears_pending(tmp_path):
+    context = make_context(tmp_path)
+    context.begin_task(task_for())
+    first = side_effect("First")(lambda ctx: None)
+    second = side_effect("Second", one_shot=False)(lambda ctx: None)
+    context.register_side_effect(first)
+    context.register_side_effect(second)
+
+    assert context._take_side_effects() == [first, second]
+    assert context._take_side_effects() == []

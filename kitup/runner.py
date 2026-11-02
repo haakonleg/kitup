@@ -7,7 +7,7 @@ from typing import Any
 from .context import TaskContext
 from .errors import PrivilegeError, SkipTask, TaskFailed
 from .output import Output
-from .registry import Task
+from .registry import Bundle, SideEffect, Task
 from .resolver import BundlePlan
 from .results import RunSummary, Status, TaskResult
 
@@ -30,6 +30,7 @@ class Runner:
         self.tags = tags
         self.skip_tags = skip_tags
         self._summary = RunSummary()
+        self._executed_side_effects: set[SideEffect] = set()
 
     def run(self) -> int:
         """Execute the plan and return the process exit code."""
@@ -44,6 +45,8 @@ class Runner:
                 if not tasks:
                     continue
                 self.output.bundle_header(bundle.name)
+                deferred: list[SideEffect] = []
+
                 for task in tasks:
                     self.output.task_start(task.name)
                     try:
@@ -54,12 +57,35 @@ class Runner:
                     self._summary.add(result.status)
                     self.output.task(result)
 
+                    pending = self.context._take_side_effects()
+                    if result.status is Status.CHANGED:
+                        immediate = [effect for effect in pending if not effect.one_shot]
+                        if immediate:
+                            code = self._run_side_effects(
+                                bundle,
+                                immediate,
+                                start=start,
+                                total=total,
+                                completed=completed,
+                            )
+                            if code:
+                                return code
+                        deferred.extend(effect for effect in pending if effect.one_shot)
+
                     if result.status is Status.FAILED:
                         self.output.failure(result)
-                        not_run = total - completed
-                        self._finish(start, not_run)
-                        self.output.aborted(task.name, not_run)
-                        return 1
+                        return self._abort(task.name, start, total, completed)
+
+                if deferred:
+                    code = self._run_side_effects(
+                        bundle,
+                        deferred,
+                        start=start,
+                        total=total,
+                        completed=completed,
+                    )
+                    if code:
+                        return code
         except KeyboardInterrupt:
             not_run = total - completed
             self._finish(start, not_run)
@@ -74,6 +100,12 @@ class Runner:
             self._summary.add(Status.NOT_RUN, not_run)
         self.output.summary(self._summary.counts, time.monotonic() - start)
 
+    def _abort(self, name: str, start: float, total: int, completed: int) -> int:
+        not_run = total - completed
+        self._finish(start, not_run)
+        self.output.aborted(name, not_run)
+        return 1
+
     def _select(self, tasks: list[Task]) -> list[Task]:
         selected: list[Task] = []
         for task in tasks:
@@ -84,8 +116,49 @@ class Runner:
             selected.append(task)
         return selected
 
-    def _run_task(self, task: Task) -> TaskResult:
-        self.context.begin_task(task)
+    def _run_side_effects(
+        self,
+        bundle: Bundle,
+        side_effects: list[SideEffect],
+        *,
+        start: float,
+        total: int,
+        completed: int,
+    ) -> int:
+        self.output.fit_task_names(side_effect.name for side_effect in side_effects)
+
+        for side_effect in side_effects:
+            if side_effect.one_shot and side_effect in self._executed_side_effects:
+                continue
+
+            task = Task(
+                bundle=bundle,
+                name=side_effect.name,
+                func=side_effect.func,
+                description=side_effect.description,
+                bundle_path=bundle.path,
+            )
+
+            self.output.task_start(side_effect.name, side_effect=True)
+            try:
+                result = self._run_task(task, is_side_effect=True)
+            finally:
+                self.output.task_stop()
+
+            self._summary.add(result.status)
+            self.output.task(result, side_effect=True)
+
+            if result.status is Status.FAILED:
+                self.output.failure(result)
+                return self._abort(side_effect.name, start, total, completed)
+
+            if side_effect.one_shot and result.status in (Status.OK, Status.CHANGED):
+                self._executed_side_effects.add(side_effect)
+
+        return 0
+
+    def _run_task(self, task: Task, *, is_side_effect: bool = False) -> TaskResult:
+        self.context.begin_task(task, is_side_effect=is_side_effect)
         status = Status.OK
         detail = ""
         error: BaseException | None = None

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from kitup.errors import BundleError
-from kitup.registry import Bundle, bundle_of, task
+from kitup.registry import Bundle, SideEffect, bundle_of, side_effect, task
 
 
 def write(path: Path, text: str) -> None:
@@ -267,3 +267,37 @@ def test_task_names_must_be_strings():
         @task
         def decorated(ctx):
             pass
+
+
+def test_side_effect_stores_its_declaration():
+    def reload(ctx):
+        pass
+
+    effect = side_effect("Reload nginx", one_shot=False, description="details")(reload)
+
+    assert isinstance(effect, SideEffect)
+    assert effect.name == "Reload nginx"
+    assert effect.func is reload
+    assert effect.one_shot is False
+    assert effect.description == "details"
+
+
+def test_side_effect_defaults_to_one_shot():
+    effect = side_effect("Refresh")(lambda ctx: None)
+
+    assert effect.one_shot is True
+    assert effect.description == ""
+
+
+def test_side_effect_names_must_be_strings():
+    with pytest.raises(BundleError, match="side effect name must be a string"):
+        side_effect(None)  # type: ignore[arg-type]
+    with pytest.raises(BundleError, match="side effect name must be a string"):
+        side_effect(123)  # type: ignore[arg-type]
+    with pytest.raises(BundleError, match="side effect name must not be empty"):
+        side_effect("")
+
+
+def test_side_effect_one_shot_must_be_a_boolean():
+    with pytest.raises(BundleError, match="side effect one_shot must be a boolean"):
+        side_effect("Refresh", one_shot="yes")  # type: ignore[arg-type]

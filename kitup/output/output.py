@@ -80,14 +80,14 @@ class Output:
         """Widen the task name column so statuses stay aligned."""
         self.name_width = max(NAME_WIDTH, max((len(name) for name in names), default=0) + 2)
 
-    def task_start(self, name: str) -> None:
+    def task_start(self, name: str, *, side_effect: bool = False) -> None:
         """Start timing a task and show its animated running line."""
         self._task_timer.reset()
         if self._interactive_depth:
             self._task_timer.pause()
         if not self.is_interactive:
             return
-        self._live.start(self._task_spinner(name))
+        self._live.start(self._task_spinner(name, side_effect=side_effect))
 
     def task_stop(self) -> None:
         """Stop the running indicator and clear its line."""
@@ -117,18 +117,19 @@ class Output:
         """Erase an input prompt and its echoed value from the terminal."""
         clear_terminal_input(self.stream, prompt, value)
 
-    def _task_spinner(self, name: str) -> Animation:
+    def _task_spinner(self, name: str, *, side_effect: bool = False) -> Animation:
         width = max(self.name_width, len(name) + 2)
+        prefix = "↳ " if side_effect else "  "
 
         def render(elapsed: float, tick: int) -> str:
             frame = SPINNER_FRAMES[tick % len(SPINNER_FRAMES)]
             status = self._paint(frame.ljust(2), _DIM)
             duration = self._paint(f"  ({elapsed:.2f} s)", _DIM)
-            return f"  {name:<{width}}{status}{duration}"
+            return f"  {prefix}{name:<{width}}{status}{duration}"
 
         return Animation(render, SPINNER_DELAY, SPINNER_INTERVAL)
 
-    def task(self, result: TaskResult) -> None:
+    def task(self, result: TaskResult, *, side_effect: bool = False) -> None:
         """Print the final status line for a task."""
         detail = self._task_detail(result)
         status_text = result.status.value
@@ -136,7 +137,8 @@ class Output:
             status_text = status_text.ljust(STATUS_WIDTH)
         status = self._paint(status_text, _COLORS.get(result.status, ""))
         width = max(self.name_width, len(result.task.name) + 2)
-        line = f"  {result.task.name:<{width}}{status}{detail}"
+        prefix = "↳ " if side_effect else "  "
+        line = f"  {prefix}{result.task.name:<{width}}{status}{detail}"
         duration = self._paint(f"  ({result.duration:.2f} s)", _DIM)
         self.write(f"{line}{duration}")
         if self.verbose and result.task.description:

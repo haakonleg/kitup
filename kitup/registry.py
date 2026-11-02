@@ -32,6 +32,16 @@ class Task:
         return f"{owner}.{self.func.__name__}"
 
 
+@dataclass(frozen=True, slots=True)
+class SideEffect:
+    """A side effect that a task can register."""
+
+    name: str
+    func: Callable[[Any], Any]
+    one_shot: bool = True
+    description: str = ""
+
+
 class Bundle:
     """A bundle and the tasks it owns.
 
@@ -222,18 +232,44 @@ def task(
     return register
 
 
+def side_effect(
+    name: str,
+    *,
+    one_shot: bool = True,
+    description: str = "",
+) -> Callable[[Callable[[Any], Any]], SideEffect]:
+    """Declare a side effect that tasks can register."""
+    validated_name = _validate_name(name, "side effect name")
+    if not isinstance(one_shot, bool):
+        raise BundleError("side effect one_shot must be a boolean")
+
+    def decorate(func: Callable[[Any], Any]) -> SideEffect:
+        return SideEffect(
+            name=validated_name,
+            func=func,
+            one_shot=one_shot,
+            description=description,
+        )
+
+    return decorate
+
+
 def _caller_dir(caller_file: str | None) -> Path | None:
     if not caller_file:
         return None
     return Path(caller_file).expanduser().resolve().parent
 
 
+def _validate_name(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise BundleError(f"{label} must be a string")
+    if not value.strip():
+        raise BundleError(f"{label} must not be empty")
+    return value
+
+
 def _validate_task_name(name: object) -> str:
-    if not isinstance(name, str):
-        raise BundleError("task name must be a string")
-    if not name.strip():
-        raise BundleError("task name must not be empty")
-    return name
+    return _validate_name(name, "task name")
 
 
 def _resolve_path(path: Path) -> Path:
