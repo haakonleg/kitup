@@ -2,6 +2,7 @@
 
 import time
 import traceback
+from typing import Any
 
 from .context import TaskContext
 from .errors import PrivilegeError, SkipTask, TaskFailed
@@ -88,9 +89,10 @@ class Runner:
         status = Status.OK
         detail = ""
         error: BaseException | None = None
+        value: Any = None
 
         try:
-            task.func(self.context)
+            value = task.func(self.context)
         except SkipTask as exc:
             status = Status.SKIPPED
             detail = exc.reason
@@ -115,7 +117,7 @@ class Runner:
             if status is Status.OK and changes:
                 status = Status.CHANGED
 
-        return TaskResult(
+        result = TaskResult(
             task=task,
             status=status,
             changes=changes,
@@ -123,4 +125,7 @@ class Runner:
             detail=detail,
             duration=self.output.task_elapsed,
             error=error,
+            value=value,
         )
+        self.context._store_result(task, result)
+        return result

@@ -97,9 +97,9 @@ def make_context(
 
 def add_task(
     bundle: Bundle,
-    func: Callable[[TaskContext], None],
+    func: Callable[[TaskContext], Any],
     *,
     name: str | None = None,
     tags: Sequence[str] = (),
-) -> Callable[[TaskContext], None]:
+) -> Callable[[TaskContext], Any]:
     return bundle.task(name or func.__name__, tags=tags)(func)

@@ -5,6 +5,7 @@ import pytest
 
 from kitup.errors import TaskFailed
 from kitup.registry import Bundle
+from kitup.results import Status, TaskResult
 
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
 
@@ -96,6 +97,47 @@ def test_get_returns_default_and_raises_for_missing_key(tmp_path):
 
     with pytest.raises(TaskFailed, match="no stored value for key: missing"):
         context.get("missing")
+
+
+def test_result_returns_stored_result_for_function(tmp_path):
+    context = make_context(tmp_path)
+    task = task_for("Check")
+    result = TaskResult(task=task, status=Status.CHANGED, value="done")
+    context._store_result(task, result)
+
+    assert context.result(task.func) is result
+
+
+def test_result_raises_for_task_that_has_not_run(tmp_path):
+    context = make_context(tmp_path)
+    task = task_for("Check")
+
+    with pytest.raises(TaskFailed, match="no result for task:"):
+        context.result(task.func)
+
+
+def test_results_returns_a_snapshot(tmp_path):
+    context = make_context(tmp_path)
+    task = task_for("Check")
+    result = TaskResult(task=task, status=Status.OK)
+    context._store_result(task, result)
+
+    snapshot = context.results
+    assert snapshot == {task.func: result}
+
+    snapshot.clear()
+    assert context.result(task.func) is result
+
+
+def test_results_survive_begin_task(tmp_path):
+    context = make_context(tmp_path)
+    task = task_for("Check")
+    result = TaskResult(task=task, status=Status.OK)
+    context._store_result(task, result)
+
+    context.begin_task(task_for("Other"))
+
+    assert context.result(task.func) is result
 
 
 def test_creates_guard_skips_command_and_resolves_cwd(tmp_path):

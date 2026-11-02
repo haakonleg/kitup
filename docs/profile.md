@@ -199,6 +199,40 @@ content = ctx.bundle.read_resource("files/example.conf")
 source = ctx.bundle.resource_path("files/dotfiles")
 ```
 
+### Task results
+
+Every task result is stored automatically and keyed by the task function. A
+later task can read the result by referencing the earlier task function:
+
+```python
+# bundles/base/packages.py
+@task("Install packages")
+def install_packages(ctx):
+    dnf.packages(ctx, ctx.config.PACKAGES)
+
+
+# bundles/base/services.py
+from .packages import install_packages
+
+
+@task("Enable services")
+def enable_services(ctx):
+    if not ctx.result(install_packages).changed:
+        ctx.skip("packages unchanged")
+```
+
+`ctx.result()` accepts the task function. `TaskResult` exposes `status`,
+`changed`, `ok`, `skipped`, `failed`, `changes`, `notes`, `detail`, `duration`,
+`error`, and `value`. `ctx.results` returns a snapshot of all results keyed by
+task function.
+
+Task functions may return a value; it is stored in `TaskResult.value`. Results
+are stored for tasks that ran, including skipped tasks. Dry-run tasks store
+their normal dry-run outcome. Reading a task that did not run raises
+`TaskFailed`. Tag-filtered tasks do not store results. Task functions should be
+declared once, and imports between task modules should be one-directional to
+avoid circular dependencies.
+
 ## Config sources
 
 Config sources merge left-to-right. Later sources replace same-named fields;

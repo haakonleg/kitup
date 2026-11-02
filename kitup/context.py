@@ -14,7 +14,7 @@ from .errors import SkipTask, TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
 from .registry import Bundle, Task
-from .results import Change
+from .results import Change, TaskResult
 from .validation import normalize_strings, require_text
 
 _MISSING: Final = object()
@@ -23,9 +23,10 @@ _MISSING: Final = object()
 class TaskContext:
     """State and services available to every task.
 
-    One context is reused for the whole run so ``memo`` is a per-run cache.
-    ``begin_task`` resets the task-specific parts before each task executes.
-    ``config_dir`` is the directory of the top-level profile.
+    One context is reused for the whole run so ``memo`` is a per-run cache and
+    ``results`` retains task outcomes. ``begin_task`` resets the task-specific
+    parts before each task executes. ``config_dir`` is the directory of the
+    top-level profile.
     """
 
     def __init__(
@@ -54,6 +55,7 @@ class TaskContext:
         self._changes: list[Change] = []
         self._notes: list[str] = []
         self._memo: dict[str, Any] = {}
+        self._results: dict[Callable[..., Any], TaskResult] = {}
         self._task_name = ""
         self._bundle: Bundle | None = None
         self._bundle_path: Path | None = None
@@ -69,6 +71,19 @@ class TaskContext:
     def notes(self) -> list[str]:
         """Return the notes recorded for the current task."""
         return list(self._notes)
+
+    @property
+    def results(self) -> dict[Callable[..., Any], TaskResult]:
+        """Return a snapshot of results keyed by task function."""
+        return dict(self._results)
+
+    def result(self, task: Callable[..., Any]) -> TaskResult:
+        """Return the result of a task that already ran."""
+        result = self._results.get(task)
+        if result is None:
+            name = getattr(task, "__name__", repr(task))
+            raise TaskFailed(f"no result for task: {name}")
+        return result
 
     @property
     def bundle(self) -> Bundle:
@@ -105,6 +120,10 @@ class TaskContext:
         self._task_name = task.name
         self._bundle = task.bundle
         self._bundle_path = task.bundle_path
+
+    def _store_result(self, task: Task, result: TaskResult) -> None:
+        """Store a task result for later tasks."""
+        self._results[task.func] = result
 
     def ensure_sudo(self, reason: str | None = None) -> None:
         """Revalidate sudo, prompting only when cached credentials expired."""

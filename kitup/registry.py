@@ -20,7 +20,7 @@ class Task:
 
     bundle: Bundle | None
     name: str
-    func: Callable[[Any], None]
+    func: Callable[[Any], Any]
     tags: frozenset[str] = frozenset()
     description: str = ""
     bundle_path: Path | None = None
@@ -140,7 +140,7 @@ class Bundle:
         *,
         tags: Iterable[str] = (),
         description: str = "",
-    ) -> Callable[[Callable[[Any], None]], Callable[[Any], None]]:
+    ) -> Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
         """Register a task and return the original function.
 
         ``name`` is the required display name.
@@ -148,7 +148,7 @@ class Bundle:
         name = _validate_task_name(name)
         tag_values = normalize_string_sequence(tags, "task tags")
 
-        def register(func: Callable[[Any], None]) -> Callable[[Any], None]:
+        def register(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
             self.tasks.append(
                 Task(
                     bundle=self,
@@ -196,7 +196,7 @@ def task(
     *,
     tags: Iterable[str] = (),
     description: str = "",
-) -> Callable[[Callable[[Any], None]], Callable[[Any], None]]:
+) -> Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
     """Declare a task for the module's bundle.
 
     The task is recorded on the calling module and registered when the module
@@ -206,7 +206,7 @@ def task(
     tag_values = normalize_string_sequence(tags, "task tags")
     caller = sys._getframe(1).f_globals
 
-    def register(func: Callable[[Any], None]) -> Callable[[Any], None]:
+    def register(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
         specs = caller.setdefault(_TASKS_ATTR, [])
         specs.append(
             Task(

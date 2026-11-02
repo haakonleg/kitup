@@ -215,6 +215,17 @@ def test_inline_bundle_tasks_need_no_modules(tmp_path):
     assert [registered.name for registered in bundle.tasks] == ["Write marker"]
 
 
+def test_task_functions_may_return_values(tmp_path):
+    bundle = Bundle("Local", path=tmp_path)
+
+    @bundle.task("Return value")
+    def return_value(ctx):
+        return "value"
+
+    assert return_value(None) == "value"
+    assert bundle.tasks[0].func is return_value
+
+
 def test_bundle_of_requires_a_bundle(tmp_path):
     _, module = import_package(
         tmp_path,

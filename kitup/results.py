@@ -36,6 +36,27 @@ class TaskResult:
     detail: str = ""
     duration: float = 0.0
     error: BaseException | None = None
+    value: Any = None
+
+    @property
+    def changed(self) -> bool:
+        """Whether the task reported at least one change."""
+        return self.status is Status.CHANGED
+
+    @property
+    def ok(self) -> bool:
+        """Whether the task completed successfully."""
+        return self.status in (Status.OK, Status.CHANGED)
+
+    @property
+    def skipped(self) -> bool:
+        """Whether the task was skipped."""
+        return self.status is Status.SKIPPED
+
+    @property
+    def failed(self) -> bool:
+        """Whether the task failed."""
+        return self.status is Status.FAILED
 
 
 @dataclass(slots=True)

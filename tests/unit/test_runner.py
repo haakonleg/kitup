@@ -4,7 +4,7 @@ from kitup.errors import PrivilegeError, TaskFailed
 from kitup.output import Output
 from kitup.registry import Bundle
 from kitup.resolver import resolve
-from kitup.results import Status
+from kitup.results import Status, TaskResult
 from kitup.runner import Runner
 
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
@@ -14,9 +14,10 @@ def make_output() -> Output:
     return Output(StringIO(), no_color=True)
 
 
-def run_plan(tmp_path, bundles, *, tags=(), skip_tags=()):
+def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False):
     context = make_context(
         tmp_path,
+        dry_run=dry_run,
         command=FakeCommandRunner(),
         sudo=FakeSudo(),
     )
@@ -66,6 +67,135 @@ def test_status_inference_and_summary(tmp_path):
     assert "changed  +x" in text
     assert "skipped  not needed" in text
     assert "Summary: 1 changed, 1 ok, 1 skipped, 0 failed, 0 not run" in text
+
+
+def test_later_task_reads_previous_result(tmp_path):
+    seen = []
+    bundle = Bundle("base")
+
+    def check(ctx):
+        ctx.changed({"available": True}, "+updates")
+        return "release-1"
+
+    def apply(ctx):
+        result = ctx.result(check)
+        seen.append((result.changed, result.value, result.status))
+        if not result.changed:
+            ctx.skip("no updates")
+
+    add_task(bundle, check, name="Check")
+    add_task(bundle, apply, name="Apply")
+
+    code, _, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 0
+    assert seen == [(True, "release-1", Status.CHANGED)]
+
+
+def test_skipped_task_result_is_available(tmp_path):
+    seen = []
+    bundle = Bundle("base")
+
+    def check(ctx):
+        ctx.skip("nothing to do")
+
+    def apply(ctx):
+        result = ctx.result(check)
+        seen.append((result.skipped, result.value))
+
+    add_task(bundle, check, name="Check")
+    add_task(bundle, apply, name="Apply")
+
+    code, _, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 0
+    assert seen == [(True, None)]
+
+
+def test_dry_run_result_is_available(tmp_path):
+    seen = []
+    bundle = Bundle("base")
+
+    def check(ctx):
+        ctx.changed({"would": "change"}, "would change")
+
+    def apply(ctx):
+        result = ctx.result(check)
+        seen.append((result.changed, result.status))
+
+    add_task(bundle, check, name="Check")
+    add_task(bundle, apply, name="Apply")
+
+    code, _, _ = run_plan(tmp_path, [bundle], dry_run=True)
+
+    assert code == 0
+    assert seen == [(True, Status.CHANGED)]
+
+
+def test_failed_task_result_is_available(tmp_path):
+    bundle = Bundle("base")
+
+    def fail(ctx):
+        raise TaskFailed("boom")
+
+    add_task(bundle, fail, name="Fail")
+
+    code, _, context = run_plan(tmp_path, [bundle])
+
+    assert code == 1
+    result = context.result(fail)
+    assert result.failed
+    assert result.value is None
+
+
+def test_result_for_task_that_did_not_run_raises(tmp_path):
+    bundle = Bundle("base")
+
+    def check(ctx):
+        pass
+
+    def apply(ctx):
+        ctx.result(check)
+
+    add_task(bundle, check, name="Check", tags={"skip"})
+    add_task(bundle, apply, name="Apply")
+
+    code, text, _ = run_plan(tmp_path, [bundle], skip_tags={"skip"})
+
+    assert code == 1
+    assert "no result for task: check" in text
+
+
+def test_result_is_available_across_bundles(tmp_path):
+    seen = []
+    base = Bundle("base")
+    desktop = Bundle("desktop", depends_on=[base])
+
+    def check(ctx):
+        return "ready"
+
+    def apply(ctx):
+        seen.append(ctx.result(check).value)
+
+    add_task(base, check, name="Check")
+    add_task(desktop, apply, name="Apply")
+
+    code, _, _ = run_plan(tmp_path, [desktop])
+
+    assert code == 0
+    assert seen == ["ready"]
+
+
+def test_task_result_status_helpers():
+    bundle = Bundle("base")
+    add_task(bundle, lambda ctx: None)
+    task = bundle.tasks[0]
+
+    assert TaskResult(task, Status.OK).ok
+    assert TaskResult(task, Status.CHANGED).changed
+    assert TaskResult(task, Status.CHANGED).ok
+    assert TaskResult(task, Status.SKIPPED).skipped
+    assert TaskResult(task, Status.FAILED).failed
 
 
 def test_fail_fast_and_remaining_count(tmp_path):

@@ -352,9 +352,39 @@ ctx.memo("key", compute_once)  # cache a value for this run
 ctx.input("key", "Prompt: ")  # prompt for input
 ctx.set("key", value)  # store a value for later tasks
 ctx.get("key")  # read a stored value
+ctx.result(task_func)  # read an earlier task's result
+ctx.results  # all task results for this run
 ctx.skip("reason")  # skip the task
 ctx.fail("reason")  # fail the task
 ```
+
+### Task results
+
+Every task result is stored automatically and keyed by the task function. A
+later task can read it by referencing the earlier function. Task functions may
+also return a value, which is stored in `TaskResult.value`:
+
+```python
+# bundles/base/updates.py
+@task("Check for updates")
+def check_updates(ctx):
+    return ctx.probe(["dnf5", "check-update"])
+
+
+# bundles/base/packages.py
+from .updates import check_updates
+
+
+@task("Apply updates")
+def apply_updates(ctx):
+    result = ctx.result(check_updates)
+    if result.value.returncode != 100:
+        ctx.skip("no updates available")
+    ctx.run(["dnf5", "upgrade", "-y"], sudo=True)
+```
+
+`TaskResult` exposes `status`, `changed`, `ok`, `skipped`, `failed`, `changes`,
+`notes`, and `value`. `ctx.results` returns all results for the run.
 
 ## Built-in modules
 
