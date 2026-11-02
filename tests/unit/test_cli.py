@@ -44,6 +44,18 @@ def make_bundle(
     )
 
 
+def make_task_bundle(root, folder, task_name):
+    make_bundle(
+        root,
+        folder,
+        tasks=f"""
+        @task("{task_name}")
+        def {folder}_task(ctx):
+            ctx.changed({{}}, "{folder}")
+        """,
+    )
+
+
 def make_profile(root, names, *, filename="kitup.py", **options):
     imports = ", ".join(names)
     values = [f"bundles=[{imports}]"]
@@ -520,3 +532,86 @@ def test_cli_tag_filters_merge_with_profile_defaults(tmp_path, capsys):
     assert "Packages" not in out
     assert "Config" not in out
     assert "Docs" in out
+
+
+def test_apply_only_bundles_filters_plan(tmp_path, capsys):
+    make_task_bundle(tmp_path, "base", "Base task")
+    make_task_bundle(tmp_path, "desktop", "Desktop task")
+    make_profile(tmp_path, ["base", "desktop"])
+
+    code = cli.main(["apply", str(tmp_path / "kitup.py"), "-n", "--no-color", "-b", "desktop"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Desktop task" in out
+    assert "Base task" not in out
+
+
+def test_apply_skip_bundles_filters_plan(tmp_path, capsys):
+    make_task_bundle(tmp_path, "base", "Base task")
+    make_task_bundle(tmp_path, "desktop", "Desktop task")
+    make_profile(tmp_path, ["base", "desktop"])
+
+    code = cli.main(["apply", str(tmp_path / "kitup.py"), "-n", "--no-color", "-B", "desktop"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Base task" in out
+    assert "Desktop task" not in out
+
+
+def test_list_bundle_filters(tmp_path, capsys):
+    make_bundle(tmp_path, "base")
+    make_bundle(tmp_path, "desktop")
+    make_profile(tmp_path, ["base", "desktop"])
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "--no-color", "-b", "desktop"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "bundle: desktop" in out
+    assert "bundle: base" not in out
+
+
+def test_bundle_filter_unknown_name_is_exit_2(tmp_path, capsys):
+    make_bundle(tmp_path, "base")
+    make_profile(tmp_path, ["base"])
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "-b", "missing"])
+
+    assert code == 2
+    assert "error: unknown bundle: missing" in capsys.readouterr().err
+
+
+def test_bundle_filters_accept_comma_separated_and_repeated_values(tmp_path, capsys):
+    make_bundle(tmp_path, "base")
+    make_bundle(tmp_path, "desktop")
+    make_bundle(tmp_path, "gaming")
+    make_profile(tmp_path, ["base", "desktop", "gaming"])
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "--no-color", "-b", "base,gaming"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "bundle: base" in out
+    assert "bundle: gaming" in out
+    assert "bundle: desktop" not in out
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "--no-color", "-B", "base", "-B", "gaming"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "bundle: desktop" in out
+    assert "bundle: base" not in out
+    assert "bundle: gaming" not in out
+
+
+def test_skip_bundles_rejects_required_dependency(tmp_path, capsys):
+    make_bundle(tmp_path, "base")
+    make_bundle(tmp_path, "desktop", setup="from bundles import base", depends="(base,)")
+    make_profile(tmp_path, ["desktop"])
+
+    code = cli.main(["list", str(tmp_path / "kitup.py"), "-B", "base"])
+
+    assert code == 2
+    assert "error: cannot exclude bundle 'base': required by 'desktop'" in capsys.readouterr().err

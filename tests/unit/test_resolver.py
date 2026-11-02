@@ -2,7 +2,7 @@ import pytest
 
 from kitup.errors import BundleError, ResolutionError
 from kitup.registry import Bundle
-from kitup.resolver import resolve
+from kitup.resolver import filter_plan, resolve
 
 
 def names(plan) -> list[str]:
@@ -52,3 +52,92 @@ def test_cycle_reports_the_path():
 
     with pytest.raises(ResolutionError, match="dependency cycle: base -> repos -> base"):
         resolve([base])
+
+
+def test_filter_plan_include_keeps_dependencies():
+    base = Bundle("base")
+    repos = Bundle("repos", depends_on=[base])
+    desktop = Bundle("desktop", depends_on=[base, repos])
+
+    filtered = filter_plan(resolve([desktop]), include={"desktop"})
+
+    assert names(filtered) == ["base", "repos", "desktop"]
+
+
+def test_filter_plan_include_can_select_a_dependency():
+    base = Bundle("base")
+    desktop = Bundle("desktop", depends_on=[base])
+
+    filtered = filter_plan(resolve([desktop]), include={"base"})
+
+    assert names(filtered) == ["base"]
+
+
+def test_filter_plan_exclude_removes_bundle():
+    base = Bundle("base")
+    desktop = Bundle("desktop")
+
+    filtered = filter_plan(resolve([base, desktop]), exclude={"desktop"})
+
+    assert names(filtered) == ["base"]
+
+
+def test_filter_plan_exclude_required_dependency_is_rejected():
+    base = Bundle("base")
+    desktop = Bundle("desktop", depends_on=[base])
+
+    with pytest.raises(ResolutionError, match="cannot exclude bundle 'base': required by 'desktop'"):
+        filter_plan(resolve([desktop]), exclude={"base"})
+
+
+def test_filter_plan_exclude_dependency_when_dependent_is_also_excluded():
+    base = Bundle("base")
+    desktop = Bundle("desktop", depends_on=[base])
+
+    filtered = filter_plan(resolve([desktop]), exclude={"base", "desktop"})
+
+    assert names(filtered) == []
+
+
+def test_filter_plan_unknown_include_is_rejected():
+    base = Bundle("base")
+
+    with pytest.raises(ResolutionError, match="unknown bundle: missing"):
+        filter_plan(resolve([base]), include={"missing"})
+
+
+def test_filter_plan_unknown_exclude_is_rejected():
+    base = Bundle("base")
+
+    with pytest.raises(ResolutionError, match="unknown bundle: missing"):
+        filter_plan(resolve([base]), exclude={"missing"})
+
+
+def test_filter_plan_combines_include_and_exclude():
+    base = Bundle("base")
+    desktop = Bundle("desktop")
+    gaming = Bundle("gaming")
+
+    filtered = filter_plan(resolve([base, desktop, gaming]), include={"base", "desktop"}, exclude={"gaming"})
+
+    assert names(filtered) == ["base", "desktop"]
+
+
+def test_filter_plan_overlapping_filters_are_rejected():
+    base = Bundle("base")
+
+    with pytest.raises(ResolutionError, match="bundle selected and excluded: base"):
+        filter_plan(resolve([base]), include={"base"}, exclude={"base"})
+
+
+def test_filter_plan_empty_include_selects_nothing():
+    base = Bundle("base")
+
+    assert names(filter_plan(resolve([base]), include=frozenset())) == []
+
+
+def test_filter_plan_without_filters_returns_the_same_plan():
+    base = Bundle("base")
+    plan = resolve([base])
+
+    assert filter_plan(plan) is plan

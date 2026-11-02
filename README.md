@@ -152,6 +152,8 @@ kitup apply profiles/laptop.py
 kitup apply -n -d
 kitup apply -t packages
 kitup apply -x optional
+kitup apply -b workstation
+kitup apply -B gaming
 ```
 
 `list` and `apply` use `./kitup.py` by default. Pass another profile path to use
@@ -169,6 +171,8 @@ Common options:
 - `-s`, `--sudo` — ask for sudo credentials before starting.
 - `-t TAGS` — only run tasks matching these tags.
 - `-x TAGS` — skip tasks matching these tags.
+- `-b BUNDLES`, `--only-bundles BUNDLES` — only include bundles with these names and their dependencies.
+- `-B BUNDLES`, `--skip-bundles BUNDLES` — exclude bundles with these names.
 - `-c`, `--no-color` — disable colors.
 
 Tags can be comma-separated or repeated:
@@ -177,6 +181,9 @@ Tags can be comma-separated or repeated:
 kitup apply -t packages,config
 kitup apply -t packages -t config
 ```
+
+Bundle filters use the same syntax. Bundle names match the names shown by
+`kitup list`; excluding a bundle that a selected bundle depends on is an error.
 
 ## Profiles
 

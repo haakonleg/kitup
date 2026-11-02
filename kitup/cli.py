@@ -17,7 +17,7 @@ from .facts import collect_facts
 from .output import Output
 from .privileges import PrivilegeManager
 from .profiles import RunDefinition, load_profile
-from .resolver import BundlePlan, resolve
+from .resolver import BundlePlan, filter_plan, resolve
 from .runner import Runner
 from .validation import split_tags
 
@@ -39,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="profile file (default: ./kitup.py)",
     )
     _add_common_options(apply_parser)
+    _add_bundle_filters(apply_parser)
     apply_parser.add_argument("-n", "--dry-run", action="store_true", help="report without mutating")
     apply_parser.add_argument("-d", "--diff", action="store_true", help="show unified diffs")
     apply_parser.add_argument("-s", "--sudo", action="store_true", help="validate sudo credentials up front")
@@ -55,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="profile file (default: ./kitup.py)",
     )
     _add_common_options(list_parser)
+    _add_bundle_filters(list_parser)
 
     return parser
 
@@ -63,6 +65,25 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
     parser.add_argument("-c", "--no-color", action="store_true", help="disable colors")
     parser.add_argument("-V", "--version", action="version", version=_version())
+
+
+def _add_bundle_filters(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-b",
+        "--only-bundles",
+        action="append",
+        default=[],
+        metavar="BUNDLES",
+        help="only include matching bundles and their dependencies",
+    )
+    parser.add_argument(
+        "-B",
+        "--skip-bundles",
+        action="append",
+        default=[],
+        metavar="BUNDLES",
+        help="exclude matching bundles",
+    )
 
 
 def _version() -> str:
@@ -82,7 +103,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             sys.path.insert(0, str(profile_path.parent))
             definition = load_profile(profile_path)
             config = load_config(definition.config)
-            plan = resolve(definition.bundles)
+            plan = filter_plan(
+                resolve(definition.bundles),
+                include=_value_filter(args.only_bundles),
+                exclude=_value_filter(args.skip_bundles),
+            )
 
             facts = collect_facts()
             output.banner(facts)
@@ -112,8 +137,8 @@ def _apply(
     facts: Mapping[str, Any],
     output: Output,
 ) -> int:
-    tags = _merge_include_tags(definition.tags, _tag_filter(args.tags))
-    skip_tags = _merge_skip_tags(definition.skip_tags, _tag_filter(args.skip_tags))
+    tags = _merge_include_tags(definition.tags, _value_filter(args.tags))
+    skip_tags = _merge_skip_tags(definition.skip_tags, _value_filter(args.skip_tags))
 
     sudo = PrivilegeManager()
     if args.sudo:
@@ -197,11 +222,11 @@ def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
                 output.write(f"    - {task.name}{f' [{tags}]' if tags else ''}")
 
 
-def _tag_filter(values: Sequence[str]) -> frozenset[str] | None:
-    """Return an active tag filter, or None when the option was not supplied.
+def _value_filter(values: Sequence[str]) -> frozenset[str] | None:
+    """Return an active filter, or None when the option was not supplied.
 
-    An option supplied with no usable tags is still an active filter and
-    therefore selects no tasks.
+    An option supplied with no usable values is still an active filter and
+    therefore selects nothing.
     """
     if not values:
         return None
