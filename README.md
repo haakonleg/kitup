@@ -434,6 +434,7 @@ All built-in modules are idempotent:
 - `gsettings` — GNOME settings.
 - `git` — repository clones and checkouts.
 - `sysctl` — kernel parameters, set at runtime and optionally persisted in a sysctl file.
+- `users` — local users, groups, and group membership.
 - `podman` — images, containers, registries, and systemd/Quadlet units.
 
 See [docs/modules/index.md](docs/modules/index.md) for the full API.
