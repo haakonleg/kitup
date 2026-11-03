@@ -434,6 +434,7 @@ All built-in modules are idempotent:
 - `gsettings` — GNOME settings.
 - `git` — repository clones and checkouts.
 - `sysctl` — kernel parameters, set at runtime and optionally persisted in a sysctl file.
+- `host` — hostname, time zone, NTP, RTC, and locale.
 - `users` — local users, groups, and group membership.
 - `podman` — images, containers, registries, and systemd/Quadlet units.
 

@@ -20,5 +20,6 @@ from kitup.registry import task
 - [gsettings](gsettings.md) — GNOME settings
 - [git](git.md) — repository clones and checkouts
 - [sysctl](sysctl.md) — kernel parameters at runtime and in sysctl files
+- [host](host.md) — hostname, time zone, NTP, RTC, and locale
 - [users](users.md) — local users, groups, and group membership
 - [podman](podman.md) — images, containers, registries, and systemd/Quadlet units

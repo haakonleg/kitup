@@ -46,6 +46,7 @@ RUN dnf5 install -y \
         flatpak \
         fuse-overlayfs \
         glib2 \
+        glibc-langpack-en \
         passt \
         podman \
         procps-ng \
@@ -54,6 +55,7 @@ RUN dnf5 install -y \
         shadow-utils \
         sudo \
         systemd \
+        tzdata \
         util-linux \
     && dnf5 clean all \
     && rm -rf /usr/share/locale /usr/share/licenses
