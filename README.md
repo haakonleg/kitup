@@ -14,13 +14,14 @@ management is not yet included.
 
 ## Install
 
-Install for the current user with `./install.sh`, or with
-`python3 -m pip install .`.
+Install the CLI with `uv tool install .`, or run `./install.sh` to build a
+standalone zipapp and install it to `~/.local/bin/kitup`.
 
 A standalone zipapp can also be built with `./build.sh`; the result is
-`dist/kitup` and only needs the system Python standard library. The build
-creates a temporary virtualenv, installs kitup's runtime dependencies into it,
-and bundles them into the archive.
+`dist/kitup` and only needs the system Python standard library. Building
+requires [uv](https://docs.astral.sh/uv/): the build creates a temporary uv
+environment from `uv.lock`, installs kitup's runtime dependencies into it, and
+bundles them into the archive.
 
 ## Quick start
 

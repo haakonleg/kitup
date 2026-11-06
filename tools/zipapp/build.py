@@ -2,13 +2,15 @@
 
 import compileall
 import json
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import tomllib
-import venv
 import zipapp
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
@@ -50,10 +52,10 @@ LOCATE_PACKAGES: Final = textwrap.dedent(
 
 
 def build(target: Path = TARGET, *, interpreter: str | Path | None = None) -> Path:
-    """Build the zipapp, installing runtime dependencies into a temporary venv.
+    """Build the zipapp, installing runtime dependencies into a temporary uv environment.
 
     ``interpreter`` overrides the environment used to locate bundled packages;
-    tests use it to avoid creating a virtualenv.
+    tests use it to avoid creating a uv environment.
     """
     with tempfile.TemporaryDirectory() as temporary:
         stage = Path(temporary) / "app"
@@ -70,28 +72,23 @@ def build(target: Path = TARGET, *, interpreter: str | Path | None = None) -> Pa
 
 
 def _create_build_venv(directory: Path) -> Path:
-    """Create a virtualenv, install runtime dependencies, and return its Python."""
-    try:
-        venv.EnvBuilder(with_pip=True, clear=True).create(directory)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SystemExit(f"could not create the build virtualenv: {exc}") from exc
-
-    python = directory / "bin" / "python"
-    dependencies = PROJECT.get("dependencies", [])
-    if dependencies:
-        _run(
-            [
-                str(python),
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                "--no-input",
-                *dependencies,
-            ],
-            "install build dependencies",
-        )
-    return python
+    """Create a uv-managed build environment and return its Python."""
+    environment = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(directory)}
+    _run(
+        [
+            "uv",
+            "sync",
+            "--locked",
+            "--no-default-groups",
+            "--no-install-project",
+            "--python",
+            sys.executable,
+        ],
+        "create the build environment",
+        cwd=ROOT,
+        env=environment,
+    )
+    return directory / "bin" / "python"
 
 
 def _stage_package(stage: Path) -> None:
@@ -162,7 +159,13 @@ def _find_packages(python: Path, names: tuple[str, ...]) -> dict[str, Path]:
     return {name: Path(path) for name, path in paths.items()}
 
 
-def _run(command: list[str], description: str) -> None:
+def _run(
+    command: list[str],
+    description: str,
+    *,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> None:
     """Run a command and turn failures into a user-facing build error."""
     result = subprocess.run(
         command,
@@ -171,6 +174,8 @@ def _run(command: list[str], description: str) -> None:
         encoding="utf-8",
         errors="replace",
         capture_output=True,
+        cwd=cwd,
+        env=env,
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()

@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
 
 [project]
 name = "kitup"
@@ -11,24 +11,18 @@ requires-python = ">=3.14"
 license = "MIT"
 dependencies = ["Jinja2>=3.1,<4"]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["pytest", "pytest-randomly", "ruff", "mypy"]
 
 [project.scripts]
 kitup = "kitup.cli:main"
 
-[tool.setuptools]
-packages = [
-    "kitup",
-    "kitup._privileged",
-    "kitup._utils",
-    "kitup.modules",
-    "kitup.modules.podman",
-    "kitup.output",
-]
+[tool.uv]
+required-version = ">=0.13.5"
 
-[tool.setuptools.package-data]
-kitup = ["py.typed"]
+[tool.uv.build-backend]
+module-name = "kitup"
+module-root = ""
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]

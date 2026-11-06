@@ -33,20 +33,18 @@ Put new built-in task APIs in `kitup/modules/`.
 
 ## Setup
 
-Always work inside a virtual environment for tests and quality checks. Reuse
-`.venv/` when it exists; do not delete or recreate it. Create it only when it
-is missing:
+Use `uv` for dependency management and command execution.
+
+Always work inside the uv-managed `.venv/`. Let `uv sync` manage it; do not
+delete or recreate it manually.
 
 ```bash
-if [ ! -d .venv ]; then
-    python3 -m venv .venv
-    .venv/bin/python -m pip install --upgrade pip
-    .venv/bin/python -m pip install -e '.[dev]'
-fi
+uv sync
 ```
 
-Re-run `.venv/bin/python -m pip install -e '.[dev]'` after changing
-`pyproject.toml` dependencies.
+`uv sync` creates or updates `.venv/` from `uv.lock` and installs the `dev`
+dependency group. Run `uv lock` after changing dependencies in `pyproject.toml`,
+then `uv sync`. Use `uv sync --locked` in automation.
 
 ## Tests
 
@@ -55,8 +53,8 @@ Re-run `.venv/bin/python -m pip install -e '.[dev]'` after changing
 Run the full suite via the quality gates below. Useful focused runs:
 
 ```bash
-.venv/bin/python -m pytest tests/unit/test_modules_files.py
-.venv/bin/python -m pytest tests/unit -k files -x
+uv run pytest tests/unit/test_modules_files.py
+uv run pytest tests/unit -k files -x
 ```
 
 Unit tests MUST NOT require root, sudo, network access, or mutate the host.
@@ -206,8 +204,8 @@ When changing packaging or the zipapp builder:
   lists.
 - DON'T use `print()` in library code. Use the output layer, `ctx.note()`, or the
   CLI's error reporting.
-- DON'T add a runtime dependency without updating `pyproject.toml` and
-  documenting it.
+- DON'T add a runtime dependency without updating `pyproject.toml`, running
+  `uv lock`, and documenting it.
 - DON'T weaken, skip, or delete tests to make a change pass.
 - DON'T use mutable default arguments (`def f(items=[])`).
 - DON'T change public APIs, task names, or CLI flags without discussing the
@@ -218,10 +216,11 @@ When changing packaging or the zipapp builder:
 Run all of these before finishing. All must pass:
 
 ```bash
-.venv/bin/python -m pytest tests/unit
-.venv/bin/python -m ruff check .
-.venv/bin/python -m ruff format --check .
-.venv/bin/python -m mypy kitup tools
+uv lock --check
+uv run --locked pytest tests/unit
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked mypy kitup tools
 ```
 
 `ruff` and `mypy` are configured in `pyproject.toml`. `mypy` runs in strict

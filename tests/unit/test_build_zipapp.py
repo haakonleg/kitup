@@ -16,6 +16,31 @@ def load_build_module() -> ModuleType:
     return module
 
 
+def test_build_environment_uses_uv(monkeypatch, tmp_path):
+    module = load_build_module()
+    calls = []
+
+    def fake_run(command, description, *, cwd=None, env=None):
+        calls.append((command, description, cwd, env))
+
+    monkeypatch.setattr(module, "_run", fake_run)
+
+    environment = tmp_path / "venv"
+    python = module._create_build_venv(environment)
+
+    assert python == environment / "bin" / "python"
+    assert len(calls) == 1
+
+    command, description, cwd, env = calls[0]
+    assert command[:2] == ["uv", "sync"]
+    assert "--locked" in command
+    assert "--no-default-groups" in command
+    assert "--no-install-project" in command
+    assert env["UV_PROJECT_ENVIRONMENT"] == str(environment)
+    assert cwd == module.ROOT
+    assert description == "create the build environment"
+
+
 def test_zipapp_bundles_jinja2_and_licenses(tmp_path):
     module = load_build_module()
     target = tmp_path / "kitup"

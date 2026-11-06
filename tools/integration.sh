@@ -13,7 +13,7 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 
 echo "==> building dist/kitup"
-python3 tools/zipapp/build.py
+./build.sh
 
 echo "==> building $image"
 podman build --squash-all --layers -t "$image" -f tests/integration/Containerfile .
