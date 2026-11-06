@@ -145,13 +145,14 @@ class Output:
             self.write(self._paint(f"    {result.task.description}", _DIM))
 
     def _task_detail(self, result: TaskResult) -> str:
+        calls = result.calls if self.verbose else result.changes
         if result.detail:
             detail = result.detail
-        elif result.changes:
+        elif calls:
             if self.verbose:
-                detail = "; ".join(str(change.data) for change in result.changes)
+                detail = "; ".join(str(call) for call in calls)
             else:
-                detail = "; ".join(change.summary for change in result.changes)
+                detail = "; ".join(call.summary for call in calls)
         else:
             detail = ""
 

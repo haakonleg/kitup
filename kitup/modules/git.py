@@ -7,6 +7,7 @@ from typing import Final
 
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from ..validation import require_path, require_success, require_text
 
 _SHA: Final = re.compile(r"[0-9a-f]{40}")
@@ -23,7 +24,7 @@ def repo(
     depth: int | None = None,
     update: bool = True,
     force: bool = False,
-) -> None:
+) -> CallResult:
     """Ensure a git repository is checked out at ``dest``.
 
     A missing or empty ``dest`` is cloned. An existing repository is
@@ -47,9 +48,8 @@ def repo(
     if not _is_repo(ctx, git, str(path), path):
         if path.is_dir() and any(path.iterdir()):
             raise TaskFailed(f"git destination is not empty and not a git repository: {dest}")
-        _clone(ctx, git, url, path, version=version, single_branch=single_branch, depth=depth)
-        return
-    _reconcile(ctx, git, url, path, version=version, update=update, force=force)
+        return ctx.changed(_clone(ctx, git, url, path, version=version, single_branch=single_branch, depth=depth))
+    return ctx.changed(_reconcile(ctx, git, url, path, version=version, update=update, force=force))
 
 
 def _clone(
@@ -61,7 +61,7 @@ def _clone(
     version: str,
     single_branch: bool,
     depth: int | None,
-) -> None:
+) -> CallResult:
     command = [git, "clone"]
     if depth is not None:
         command.append(f"--depth={depth}")
@@ -71,19 +71,20 @@ def _clone(
     if version != "HEAD" and sha is None:
         command.append(f"--branch={version}")
     command.extend([url, str(path)])
-    ctx.changed(
-        {
-            "repo": url,
-            "dest": str(path),
-            "version": version,
-            "single_branch": single_branch,
-            "depth": depth,
-        },
-        f"clone {url} into {path}",
+    result = CallResult(
+        action="git.repo",
+        changed=True,
+        summary=f"clone {url} into {path}",
+        repo=url,
+        dest=str(path),
+        version=version,
     )
-    ctx.run(command, env=_GIT_ENV, record=False)
-    if sha is not None and not ctx.dry_run:
-        ctx.run([git, "-C", str(path), "checkout", "--force", version], record=False)
+    if ctx.dry_run:
+        return result
+    ctx.run(command, env=_GIT_ENV)
+    if sha is not None:
+        ctx.run([git, "-C", str(path), "checkout", "--force", version])
+    return result
 
 
 def _reconcile(
@@ -95,36 +96,55 @@ def _reconcile(
     version: str,
     update: bool,
     force: bool,
-) -> None:
+) -> CallResult:
     dest = str(path)
     current_url = _remote_url(ctx, git, dest)
     url_changed = current_url != url
+    data: dict[str, object] = {
+        "repo": url,
+        "dest": dest,
+        "version": version,
+    }
+    summaries: list[str] = []
     if url_changed:
-        data: dict[str, str] = {"repo": url, "dest": dest}
-        if current_url is not None:
-            data["previous_url"] = current_url
-        ctx.changed(data, f"set remote URL of {dest} to {url}")
-        verb = "set-url" if current_url is not None else "add"
-        ctx.run([git, "-C", dest, "remote", verb, "origin", url], record=False)
+        data["previous_url"] = current_url
+        summaries.append(f"set remote URL of {dest} to {url}")
+        if not ctx.dry_run:
+            verb = "set-url" if current_url is not None else "add"
+            ctx.run([git, "-C", dest, "remote", verb, "origin", url])
 
     if not update and not url_changed:
-        return
+        return CallResult(
+            action="git.repo",
+            changed=False,
+            summary=f"ensure {dest} at {version}",
+            **data,
+        )
 
     _fetch(ctx, git, dest)
     desired = _resolve_version(ctx, git, dest, version)
     current = _head(ctx, git, dest)
     if current == desired:
-        return
+        data["before"] = current
+        data["after"] = desired
+        return CallResult(
+            action="git.repo",
+            changed=bool(summaries),
+            summary="; ".join(summaries) if summaries else f"ensure {dest} at {version}",
+            **data,
+        )
     if not force and _is_dirty(ctx, git, dest):
         raise TaskFailed(f"local changes in {dest}; use force=True to discard them")
-    ctx.changed(
-        {"before": current, "after": desired, "version": version, "dest": dest},
-        f"update {dest} {current[:12]}..{desired[:12]}",
-    )
-    ctx.run([git, "-C", dest, "checkout", "--force", version], record=False)
-    ctx.run([git, "-C", dest, "reset", "--hard", desired], record=False)
-    if not ctx.dry_run and _head(ctx, git, dest) != desired:
+    summaries.append(f"update {dest} {current[:12]}..{desired[:12]}")
+    data["before"] = current
+    data["after"] = desired
+    if ctx.dry_run:
+        return CallResult(action="git.repo", changed=True, summary="; ".join(summaries), **data)
+    ctx.run([git, "-C", dest, "checkout", "--force", version])
+    ctx.run([git, "-C", dest, "reset", "--hard", desired])
+    if _head(ctx, git, dest) != desired:
         raise TaskFailed(f"could not update {dest} to {desired}")
+    return CallResult(action="git.repo", changed=True, summary="; ".join(summaries), **data)
 
 
 def _git(ctx: TaskContext) -> str:

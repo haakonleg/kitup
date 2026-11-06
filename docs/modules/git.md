@@ -12,6 +12,8 @@ from kitup.registry import task
 
 Ensure the repository `url` is checked out at `dest`.
 
+### Parameters
+
 - `url` — repository address: an HTTPS URL, an SSH address such as
   `git@host:owner/repo.git`, or a local path.
 - `dest` — checkout directory. A missing or empty directory is cloned into.
@@ -32,6 +34,15 @@ Ensure the repository `url` is checked out at `dest`.
 - `force` — discard local modifications to tracked files when updating.
   Without it, a modified worktree fails the task. Untracked files are never
   removed and do not block an update.
+
+### Result fields
+
+- `repo` — repository URL.
+- `dest` — checkout path.
+- `version` — requested version.
+- `previous_url` — previous origin URL, when it changed (update results only).
+- `before` — previous commit ID, when known (update results only).
+- `after` — desired commit ID, when known (update results only).
 
 ```python
 from pathlib import Path

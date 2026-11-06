@@ -5,7 +5,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import host
 
-from .helpers import FakeCommandRunner, completed, make_context
+from .helpers import FakeCommandRunner, call_data, completed, make_context
 
 
 def response(returncode: int = 0, stdout: str = "", stderr: str = ""):
@@ -54,7 +54,7 @@ def test_static_hostname_differs_is_set_and_verified(tmp_path):
     ]
     assert command.calls[1][1]["sudo"] is True
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data == {"hostname": "workstation", "kind": "static"}
+    assert call_data(ctx.changes[0]) == {"hostnames": {"static": "workstation"}}
     assert ctx.changes[0].summary == "set static hostname workstation"
 
 
@@ -87,7 +87,7 @@ def test_pretty_hostname_differs_is_set_and_verified(tmp_path):
     ]
     assert command.calls[1][1]["sudo"] is True
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data == {"hostname": "Workstation", "kind": "pretty"}
+    assert call_data(ctx.changes[0]) == {"hostnames": {"pretty": "Workstation"}}
     assert ctx.changes[0].summary == "set pretty hostname Workstation"
 
 
@@ -118,7 +118,7 @@ def test_empty_pretty_hostname_is_cleared(tmp_path):
         ["hostnamectl", "hostname", "--pretty", ""],
         ["hostnamectl", "hostname", "--pretty"],
     ]
-    assert ctx.changes[0].data == {"hostname": "", "kind": "pretty"}
+    assert call_data(ctx.changes[0]) == {"hostnames": {"pretty": ""}}
     assert ctx.changes[0].summary == "clear pretty hostname"
 
 
@@ -144,7 +144,11 @@ def test_static_and_pretty_hostnames_are_both_managed(tmp_path):
         ["hostnamectl", "hostname", "--pretty", "Workstation"],
         ["hostnamectl", "hostname", "--pretty"],
     ]
-    assert len(ctx.changes) == 2
+    assert len(ctx.changes) == 1
+    assert call_data(ctx.changes[0]) == {
+        "hostnames": {"static": "workstation", "pretty": "Workstation"},
+    }
+    assert ctx.changes[0].summary == "set static hostname workstation; set pretty hostname Workstation"
 
 
 def test_hostname_dry_run_reports_without_mutating(tmp_path):
@@ -233,7 +237,8 @@ def test_timezone_differs_is_set_and_verified(tmp_path):
     ]
     assert command.calls[1][1]["sudo"] is True
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data == {"timezone": "Europe/Oslo"}
+    assert call_data(ctx.changes[0]) == {"timezone": "Europe/Oslo"}
+    assert ctx.changes[0].action == "host.timezone"
     assert ctx.changes[0].summary == "set time zone Europe/Oslo"
 
 
@@ -346,7 +351,7 @@ def test_ntp_enables_synchronization(tmp_path):
     ]
     assert command.calls[1][1]["sudo"] is True
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data == {"ntp": True}
+    assert call_data(ctx.changes[0]) == {"ntp": True}
     assert ctx.changes[0].summary == "enable network time synchronization"
 
 
@@ -358,7 +363,7 @@ def test_ntp_disables_synchronization(tmp_path):
     host.ntp(ctx, enabled=False)
 
     assert command.calls[1][0] == ["timedatectl", "set-ntp", "false"]
-    assert ctx.changes[0].data == {"ntp": False}
+    assert call_data(ctx.changes[0]) == {"ntp": False}
     assert ctx.changes[0].summary == "disable network time synchronization"
 
 
@@ -422,7 +427,7 @@ def test_rtc_local_switches_to_local_time(tmp_path):
     ]
     assert command.calls[1][1]["sudo"] is True
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data == {"rtc_local": True}
+    assert call_data(ctx.changes[0]) == {"rtc_local": True}
     assert ctx.changes[0].summary == "set RTC to local time"
 
 
@@ -443,7 +448,7 @@ def test_rtc_local_switches_to_utc(tmp_path):
         "0",
         "--adjust-system-clock",
     ]
-    assert ctx.changes[0].data == {"rtc_local": False}
+    assert call_data(ctx.changes[0]) == {"rtc_local": False}
     assert ctx.changes[0].summary == "set RTC to UTC"
 
 
@@ -536,7 +541,7 @@ def test_locale_differs_sets_all_requested_values(tmp_path):
     ]
     assert command.calls[1][1]["sudo"] is True
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "locale": {"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"},
     }
     assert ctx.changes[0].summary == "set locale LANG=en_US.UTF-8 LC_TIME=en_GB.UTF-8"

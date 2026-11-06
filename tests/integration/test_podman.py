@@ -399,9 +399,9 @@ def test_container_lifecycle(tmp_path: Path) -> None:
     @task("start container")
     def start_container(ctx):
         podman.container(ctx, {name!r}, image={BASE_IMAGE!r})
-        assert len(ctx.changes) == 2
+        assert len(ctx.changes) == 1
         podman.container(ctx, {name!r}, image={BASE_IMAGE!r})
-        assert len(ctx.changes) == 2
+        assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "container_start", source) == 0
     assert container_status(name) == "running"
@@ -554,7 +554,7 @@ def test_container_recreate_replaces_container(tmp_path: Path) -> None:
     @task("recreate container")
     def recreate_container(ctx):
         podman.container(ctx, {name!r}, image={BASE_IMAGE!r}, recreate=True)
-        assert len(ctx.changes) == 3
+        assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "container_recreate", source) == 0
     assert container_id(name) != first_id
@@ -1061,7 +1061,7 @@ def test_rootful_path(tmp_path: Path, rootful_image: str, clean_rootful: None) -
     def rootful(ctx):
         podman.image(ctx, {rootful_image!r}, sudo=True)
         podman.container(ctx, {name!r}, image={rootful_image!r}, sudo=True)
-        assert len(ctx.changes) == 2
+        assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "rootful", source) == 0
     status = run(

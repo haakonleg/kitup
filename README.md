@@ -14,28 +14,13 @@ management is not yet included.
 
 ## Install
 
-Install for the current user:
+Install for the current user with `./install.sh`, or with
+`python3 -m pip install .`.
 
-```bash
-./install.sh
-```
-
-Or install with pip:
-
-```bash
-python3 -m pip install .
-```
-
-A standalone zipapp can also be built:
-
-```bash
-./build.sh
-./dist/kitup --version
-```
-
-The build creates a temporary virtualenv, installs kitup's runtime
-dependencies into it, and bundles them into the resulting archive. The system
-Python only needs the standard library.
+A standalone zipapp can also be built with `./build.sh`; the result is
+`dist/kitup` and only needs the system Python standard library. The build
+creates a temporary virtualenv, installs kitup's runtime dependencies into it,
+and bundles them into the archive.
 
 ## Quick start
 
@@ -140,28 +125,14 @@ kitup apply
 ```
 
 `list` shows the bundles and tasks without changing anything. `apply` runs
-them.
+them. Every module is idempotent, so applying an unchanged configuration
+changes nothing. Add `--dry-run` to preview changes and `--diff` to see file
+diffs.
 
 ## Commands
 
-```bash
-kitup list
-kitup list -v
-kitup apply
-kitup apply profiles/laptop.py
-kitup apply -n -d
-kitup apply -t packages
-kitup apply -x optional
-kitup apply -b workstation
-kitup apply -B gaming
-```
-
-`list` and `apply` use `./kitup.py` by default. Pass another profile path to use
-a different configuration:
-
-```bash
-kitup apply examples/kitup.py
-```
+Both commands use `./kitup.py` by default; pass another profile path to use a
+different configuration, for example `kitup apply examples/kitup.py`.
 
 Common options:
 
@@ -175,168 +146,37 @@ Common options:
 - `-B BUNDLES`, `--skip-bundles BUNDLES` — exclude bundles with these names.
 - `-c`, `--no-color` — disable colors.
 
-Tags can be comma-separated or repeated:
-
-```bash
-kitup apply -t packages,config
-kitup apply -t packages -t config
-```
-
-Bundle filters use the same syntax. Bundle names match the names shown by
-`kitup list`; excluding a bundle that a selected bundle depends on is an error.
+Tags and bundle filters accept comma-separated values or repeated flags, for
+example `-t packages,config` or `-t packages -t config`. Bundle names match the
+names shown by `kitup list`; excluding a bundle that a selected bundle depends
+on is an error.
 
 ## Profiles
 
-A profile can use normal Python to build a run:
-
-```python
-import os
-
-import config
-
-from bundles import base, gaming, laptop
-
-from kitup import profile
-
-bundles = [base]
-
-if os.environ.get("KITUP_LAPTOP") == "1":
-    bundles.append(laptop)
-
-if os.environ.get("KITUP_GAMING") == "1":
-    bundles.append(gaming)
-
-profile(
-    bundles=bundles,
-    config=[config],
-    description="Fedora workstation",
-)
-```
-
-Profiles can reuse and extend other profiles:
-
-```python
-# base_profile.py
-import config
-
-from bundles import base
-
-from kitup import profile
-
-profile(
-    bundles=[base],
-    config=[config],
-    description="Fedora base",
-)
-```
-
-```python
-# kitup.py
-import base_profile
-import laptop as laptop_config
-from bundles import laptop
-
-from kitup import profile
-
-profile.extend(
-    base_profile,
-    bundles=[laptop],
-    config=[laptop_config],
-    description="ThinkPad",
-)
-```
-
-The result contains the base bundles first, then the laptop-specific bundle,
-with both config files applied in order. Use `profile.use(base_profile)` to
-reuse a profile unchanged.
+A profile is a Python file that imports bundles and declares the run: bundles,
+config sources, description, and default tags. Because it is ordinary Python,
+you can branch, loop, and build the bundle list conditionally. Profiles can
+reuse or extend other profiles with `profile.use()` and `profile.extend()`.
 
 See [docs/profile.md](docs/profile.md) for the complete profile reference.
 
 ## Bundles
 
-Bundles group related tasks. Import task modules in the bundle's
-`__init__.py` and list them in `modules`; the list order defines task order
-within the bundle:
+Bundles group related tasks and are ordinary Python packages. List task modules
+in the bundle's `modules` argument; the list order defines task order within the
+bundle. Bundles can depend on other bundles with `depends_on`; dependencies run
+first, and each bundle runs at most once. Resources such as config files live
+next to the bundle and are read through `ctx.bundle`.
 
-```python
-from kitup.registry import Bundle
-
-from . import packages, services
-
-Bundle("Workstation", modules=[packages, services])
-```
-
-Every module listed in `modules` must declare at least one task with `@task`.
-
-Bundles can depend on other bundles:
-
-```python
-# bundles/workstation/__init__.py
-from bundles import base, repos
-
-from kitup.registry import Bundle
-
-from . import tasks
-
-Bundle("Workstation", depends_on=[base, repos], modules=[tasks])
-```
-
-Dependencies run first, and each bundle runs at most once.
-
-Resources such as config files live next to the bundle:
-
-```text
-bundles/workstation/
-├── __init__.py
-├── tasks.py
-└── files/
-    └── sshd.conf
-```
-
-Read them from a task:
-
-```python
-content = ctx.bundle.read_resource("files/sshd.conf")
-source = ctx.bundle.resource_path("files")
-```
+See [docs/profile.md](docs/profile.md#bundles) for details.
 
 ## Configuration
 
 Configuration values are declared in the profile and exposed as `ctx.config`.
 Sources can be `Path` objects, imported modules, or dictionaries. They are
-applied from left to right; later values win:
-
-```python
-import config
-import configs.laptop
-
-from bundles import workstation
-
-from kitup import profile
-
-profile(
-    bundles=[workstation],
-    config=[
-        config,
-        {"SSH_PORT": 2222},
-        configs.laptop,
-    ],
-)
-```
-
-`config.py` might contain:
-
-```python
-PACKAGES = ["git", "ripgrep", "tmux", "neovim", "podman", "firewalld"]
-FLATPAK_APPLICATIONS = ["com.spotify.Client", "md.obsidian.Obsidian"]
-SSH_PORT = 22
-GIT_NAME = "Ada Lovelace"
-GIT_EMAIL = "ada@example.com"
-```
-
-Only public names from config files become configuration values. Explicit
-mapping keys must be public strings. Relative config paths are resolved relative
-to the profile that declares them.
+applied from left to right; later values win. Only public names become
+configuration values, and relative config paths resolve relative to the profile
+that declares them.
 
 System information is available read-only as `ctx.facts`, including hostname,
 distribution, architecture, kernel, and mounted filesystems. See
@@ -344,79 +184,22 @@ distribution, architecture, kernel, and mounted filesystems. See
 
 ## Task helpers
 
-Tasks receive `ctx`, which provides:
+Tasks receive `ctx`, which provides the merged configuration (`ctx.config`),
+system facts (`ctx.facts`), the current bundle and its resources (`ctx.bundle`),
+command helpers (`ctx.run()` and `ctx.probe()`), and run controls such as
+`ctx.changed()`, `ctx.note()`, `ctx.memo()`, `ctx.skip()`, and `ctx.fail()`.
+Tasks can prompt for input, store values for later tasks, and read earlier task
+results.
 
-```python
-ctx.config  # merged configuration values
-ctx.facts  # system information
-ctx.bundle  # current bundle and its resources
+### Task results and side effects
 
-ctx.run(["systemctl", "reload", "sshd"], sudo=True)  # run with sudo
-ctx.probe(["systemctl", "is-active", "firewalld"])  # read-only query
-ctx.changed({"detail": "x"}, "+x")  # report a change
-ctx.note("extra context")  # add a note
-ctx.memo("key", compute_once)  # cache a value for this run
-ctx.input("key", "Prompt: ")  # prompt for input
-ctx.set("key", value)  # store a value for later tasks
-ctx.get("key")  # read a stored value
-ctx.result(task_func)  # read an earlier task's result
-ctx.results  # all task results for this run
-ctx.register_side_effect(side_effect)  # run work only if this task changed
-ctx.skip("reason")  # skip the task
-ctx.fail("reason")  # fail the task
-```
+Every task result is stored automatically and keyed by the task function, so a
+later task can inspect an earlier task's outcome and return value. Side effects
+are work a task registers to run only when it changes something; they can run
+immediately or be deferred to the end of the bundle.
 
-### Task results
-
-Every task result is stored automatically and keyed by the task function. A
-later task can read it by referencing the earlier function. Task functions may
-also return a value, which is stored in `TaskResult.value`:
-
-```python
-# bundles/base/updates.py
-@task("Check for updates")
-def check_updates(ctx):
-    return ctx.probe(["dnf5", "check-update"])
-
-
-# bundles/base/packages.py
-from .updates import check_updates
-
-
-@task("Apply updates")
-def apply_updates(ctx):
-    result = ctx.result(check_updates)
-    if result.value.returncode != 100:
-        ctx.skip("no updates available")
-    ctx.run(["dnf5", "upgrade", "-y"], sudo=True)
-```
-
-`TaskResult` exposes `status`, `changed`, `ok`, `skipped`, `failed`, `changes`,
-`notes`, and `value`. `ctx.results` returns all results for the run.
-
-### Side effects
-
-A task can register work that should only run when the task changes something:
-
-```python
-from kitup.registry import side_effect, task
-
-
-@side_effect("Reload nginx", one_shot=False)
-def reload_nginx(ctx):
-    ctx.run(["systemctl", "reload", "nginx"], sudo=True)
-
-
-@task("Configure nginx", tags={"web"})
-def configure_nginx(ctx):
-    files.file(ctx, "/etc/nginx/nginx.conf", content="...")
-    ctx.register_side_effect(reload_nginx)
-```
-
-`one_shot=True` (the default) defers the side effect to the end of the bundle and
-runs it at most once per apply run; `one_shot=False` runs it immediately after
-the registering task. Side effects only run when the registering task changes
-something.
+See [task results](docs/profile.md#task-results) and
+[side effects](docs/profile.md#side-effects) for the full APIs.
 
 ## Built-in modules
 
@@ -442,24 +225,10 @@ See [docs/modules/index.md](docs/modules/index.md) for the full API.
 
 ## Privileges
 
-Use `sudo=True` when an operation needs root:
-
-```python
-ctx.run(["systemctl", "reload", "sshd"], sudo=True)
-files.file(
-    ctx,
-    "/etc/ssh/sshd_config.d/99-kitup.conf",
-    content="PermitRootLogin no\n",
-    mode=0o644,
-    sudo=True,
-)
-```
-
+Pass `sudo=True` to `ctx.run()` or a module helper when an operation needs root.
 Package, system service, and system Flatpak operations request sudo
-automatically.
-
-kitup handles sudo prompts and authenticates itself when privileged operations
-are required.
+automatically. kitup handles sudo prompts and authenticates itself when
+privileged operations are required.
 
 ## Examples
 

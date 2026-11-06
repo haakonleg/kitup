@@ -7,29 +7,130 @@ import os
 import posixpath
 import re
 import tempfile
+import zlib
 from collections.abc import Mapping
+from compression import zstd
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, Final
+from typing import Any, BinaryIO, Final, Protocol
 from urllib.error import HTTPError
 from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
 from .._utils import file_ops
-from .._utils.file_helper import apply_metadata, digest_path, replace_path
+from .._utils.file_helper import digest_path, replace_path
 from .._utils.http import open_url, read_response, validate_timeout
+from .._utils.timing import timed
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_mode, require_path
+from ..results import CallResult
+from ..validation import require_bool, require_mode, require_path
 
 _DEFAULT_MAX_BYTES: Final = 10 * 1024 * 1024
+_ACCEPT_ENCODING: Final = "gzip, deflate, zstd"
 _HEADER_NAME: Final = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _HEX_DIGEST: Final = re.compile(r"^[0-9a-f]+$")
+_DECOMPRESSION_ERRORS: Final = (EOFError, zlib.error, zstd.ZstdError)
 
 
 @dataclass(frozen=True, slots=True)
 class _Checksum:
     algorithm: str
     digest: str
+
+
+class _Decoder(Protocol):
+    def decompress(self, data: bytes) -> bytes: ...
+
+    def flush(self) -> bytes: ...
+
+    @property
+    def eof(self) -> bool: ...
+
+
+class _ZlibDecoder:
+    def __init__(self, wbits: int) -> None:
+        self._decompressor = zlib.decompressobj(wbits)
+
+    def decompress(self, data: bytes) -> bytes:
+        return self._decompressor.decompress(data)
+
+    def flush(self) -> bytes:
+        return self._decompressor.flush()
+
+    @property
+    def eof(self) -> bool:
+        return self._decompressor.eof
+
+
+class _ZstdDecoder:
+    def __init__(self) -> None:
+        self._decompressor = zstd.ZstdDecompressor()
+
+    def decompress(self, data: bytes) -> bytes:
+        return self._decompressor.decompress(data)
+
+    def flush(self) -> bytes:
+        return b""
+
+    @property
+    def eof(self) -> bool:
+        return self._decompressor.eof
+
+
+class _HeadersWithoutLength:
+    def __init__(self, headers: Any) -> None:
+        self._headers = headers
+
+    def get(self, name: str, default: Any = None) -> Any:
+        if name.lower() == "content-length":
+            return None
+        return self._headers.get(name, default)
+
+
+class _DecodedResponse:
+    def __init__(self, response: Any, decoder: _Decoder) -> None:
+        self._response = response
+        self._decoder = decoder
+        self.headers = _HeadersWithoutLength(response.headers)
+        self._finished = False
+
+    def read(self, size: int = -1) -> bytes:
+        try:
+            while not self._finished:
+                raw = self._response.read(size)
+                if raw:
+                    data = self._decoder.decompress(raw)
+                    if data:
+                        return data
+                    continue
+
+                self._finished = True
+                data = self._decoder.flush()
+                if not self._decoder.eof:
+                    raise TaskFailed("incomplete compressed download")
+                if data:
+                    return data
+        except _DECOMPRESSION_ERRORS as exc:
+            raise TaskFailed(f"could not decompress download: {exc}") from exc
+        return b""
+
+
+def _decoder_for(response: Any) -> _Decoder | None:
+    value = response.headers.get("Content-Encoding")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TaskFailed("content encoding must be a string")
+    encoding = value.strip().lower()
+    if not encoding or encoding == "identity":
+        return None
+    if encoding == "gzip":
+        return _ZlibDecoder(16 + zlib.MAX_WBITS)
+    if encoding == "deflate":
+        return _ZlibDecoder(zlib.MAX_WBITS)
+    if encoding == "zstd":
+        return _ZstdDecoder()
+    raise TaskFailed(f"unsupported content encoding: {encoding}")
 
 
 def to_file(
@@ -43,7 +144,7 @@ def to_file(
     timeout: float = 30,
     validate_certs: bool = True,
     mode: int | None = None,
-) -> None:
+) -> CallResult:
     """Download ``url`` to ``dest``, replacing it only when needed.
 
     ``dest`` may be an existing directory or end with ``/``, in which case the
@@ -57,43 +158,82 @@ def to_file(
     expected = _parse_checksum(checksum)
     request_headers = _build_headers(headers)
     validate_timeout(timeout)
-    _validate_boolean(validate_certs, "validate_certs")
+    require_bool(validate_certs, "validate_certs")
     require_mode(mode)
-    _validate_boolean(force, "force")
+    require_bool(force, "force")
 
     target, info = _resolve_destination(dest, parts)
     _validate_destination_info(target, info)
     display = _display_url(parts)
 
     if not _needs_download(target, info, force=force, checksum=expected):
-        _reconcile_metadata(ctx, target, info, mode)
-        return
+        return ctx.changed(
+            _reconcile_metadata(
+                ctx,
+                target,
+                info,
+                mode,
+                display=display,
+                unchanged_summary=f"ensure download {display} -> {target}",
+            )
+        )
 
     file_ops.require_parent_local(target)
     if ctx.dry_run:
-        _record_download(ctx, display, target, expected)
-        return
+        return ctx.changed(
+            _record_download(
+                display,
+                target,
+                checksum_dest=None,
+                duration=0.0,
+                size=_file_size(target),
+            )
+        )
 
-    temporary = _download_to_temp(
-        url,
-        display,
-        request_headers,
-        timeout,
-        expected,
-        target.parent,
-        validate_certs=validate_certs,
-    )
+    with timed() as timing:
+        temporary, checksum_dest = _download_to_temp(
+            url,
+            display,
+            request_headers,
+            timeout,
+            expected,
+            target.parent,
+            validate_certs=validate_certs,
+        )
+    duration = timing.duration
     try:
-        if info is not None and _content_matches(target, temporary):
-            _reconcile_metadata(ctx, target, info, mode)
-            return
-        _record_download(ctx, display, target, expected)
+        try:
+            size = temporary.stat().st_size
+        except OSError as exc:
+            raise TaskFailed(f"could not inspect downloaded file: {exc}") from exc
+        if info is not None and _content_matches(target, checksum_dest):
+            return ctx.changed(
+                _reconcile_metadata(
+                    ctx,
+                    target,
+                    info,
+                    mode,
+                    display=display,
+                    unchanged_summary=f"ensure download {display} -> {target}",
+                    checksum_dest=checksum_dest,
+                    duration=duration,
+                    size=size,
+                )
+            )
+        result = _record_download(
+            display,
+            target,
+            checksum_dest=checksum_dest,
+            duration=duration,
+            size=size,
+        )
         try:
             replace_path(temporary, target, mode=mode)
         except ValueError as exc:
             raise TaskFailed(str(exc)) from exc
         except OSError as exc:
             raise TaskFailed(f"could not install {target}: {exc}") from exc
+        return ctx.changed(result)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -117,7 +257,7 @@ def to_bytes(
     expected = _parse_checksum(checksum)
     request_headers = _build_headers(headers)
     validate_timeout(timeout)
-    _validate_boolean(validate_certs, "validate_certs")
+    require_bool(validate_certs, "validate_certs")
     limit = _validate_max_bytes(max_bytes)
     display = _display_url(parts)
 
@@ -136,7 +276,7 @@ def _download_to_temp(
     directory: Path,
     *,
     validate_certs: bool,
-) -> Path:
+) -> tuple[Path, str]:
     try:
         handle, name = tempfile.mkstemp(
             dir=directory,
@@ -149,7 +289,7 @@ def _download_to_temp(
     try:
         with os.fdopen(handle, "wb") as stream:
             with _open_url(url, display, headers, timeout, validate_certs=validate_certs) as response:
-                _read_response(
+                checksum_dest = _read_response(
                     response,
                     stream,
                     expected=expected,
@@ -158,7 +298,7 @@ def _download_to_temp(
                 )
             stream.flush()
             os.fsync(stream.fileno())
-        return temporary
+        return temporary, checksum_dest
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(name)
@@ -194,26 +334,38 @@ def _read_response(
     expected: _Checksum | None,
     max_bytes: int | None,
     display: str,
-) -> None:
-    hasher = hashlib.new(expected.algorithm) if expected is not None else None
+) -> str:
+    decoder = _decoder_for(response)
+    if decoder is not None:
+        response = _DecodedResponse(response, decoder)
+
+    dest_hasher = hashlib.sha256()
+    expected_hasher = hashlib.new(expected.algorithm) if expected is not None else None
+
+    def update(chunk: bytes) -> None:
+        dest_hasher.update(chunk)
+        if expected_hasher is not None:
+            expected_hasher.update(chunk)
+
     read_response(
         response,
         sink,
         max_bytes=max_bytes,
         label="download",
         context=display,
-        on_chunk=hasher.update if hasher is not None else None,
+        on_chunk=update,
     )
 
     if expected is not None:
-        if hasher is None:
+        if expected_hasher is None:
             raise TaskFailed(f"could not verify checksum for {display}")
-        actual = hasher.hexdigest().lower()
+        actual = expected_hasher.hexdigest().lower()
         if actual != expected.digest:
             raise TaskFailed(
                 f"checksum mismatch for {display}: expected {expected.algorithm}:"
                 f"{expected.digest}, got {expected.algorithm}:{actual}"
             )
+    return dest_hasher.hexdigest()
 
 
 def _resolve_destination(
@@ -312,22 +464,17 @@ def _build_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
             if any(ord(character) < 32 and character != "\t" for character in value) or "\x7f" in value:
                 raise TaskFailed(f"header {name!r} value must not contain control characters")
             values[name] = value
+    if not any(name.lower() == "accept-encoding" for name in values):
+        values["Accept-Encoding"] = _ACCEPT_ENCODING
     return values
 
 
 def _validate_max_bytes(max_bytes: int | None) -> int | None:
     if max_bytes is None:
         return None
-    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int):
-        raise TaskFailed("max_bytes must be a positive integer or None")
-    if max_bytes <= 0:
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
         raise TaskFailed("max_bytes must be a positive integer or None")
     return max_bytes
-
-
-def _validate_boolean(value: object, label: str) -> None:
-    if not isinstance(value, bool):
-        raise TaskFailed(f"{label} must be a boolean")
 
 
 def _validate_destination_info(target: Path, info: file_ops.FileInfo | None) -> None:
@@ -358,9 +505,9 @@ def _needs_download(
         raise TaskFailed(f"could not checksum {target}: {exc}") from exc
 
 
-def _content_matches(target: Path, temporary: Path) -> bool:
+def _content_matches(target: Path, checksum_dest: str) -> bool:
     try:
-        return digest_path(target, "sha256") == digest_path(temporary, "sha256")
+        return digest_path(target, "sha256") == checksum_dest
     except (OSError, ValueError) as exc:
         raise TaskFailed(f"could not checksum downloaded file: {exc}") from exc
 
@@ -370,32 +517,75 @@ def _reconcile_metadata(
     target: Path,
     info: file_ops.FileInfo | None,
     mode: int | None,
-) -> None:
+    *,
+    display: str,
+    checksum_dest: str | None = None,
+    duration: float = 0.0,
+    size: int | None = None,
+    unchanged_summary: str | None = None,
+) -> CallResult:
     if info is None or mode is None or info.mode == mode:
-        return
-    ctx.changed(
-        {"path": str(target), "action": "metadata"},
-        f"update metadata for {target}",
+        changed = False
+        summary = unchanged_summary or f"ensure metadata for {target}"
+    else:
+        if not ctx.dry_run:
+            file_ops.apply_metadata_ctx(ctx, target, mode, None, None, sudo=False)
+        changed = True
+        summary = f"update metadata for {target}"
+    return _download_result(
+        display,
+        target,
+        changed=changed,
+        summary=summary,
+        checksum_dest=checksum_dest,
+        duration=duration,
+        size=_file_size(target) if size is None else size,
     )
-    if ctx.dry_run:
-        return
-    try:
-        apply_metadata(target, mode, None, None, info.as_dict(), preserve=True)
-    except OSError as exc:
-        raise TaskFailed(f"could not update metadata for {target}: {exc}") from exc
 
 
 def _record_download(
-    ctx: TaskContext,
     display: str,
     target: Path,
-    checksum: _Checksum | None,
-) -> None:
-    data: dict[str, Any] = {
-        "url": display,
-        "path": str(target),
-        "action": "download",
-    }
-    if checksum is not None:
-        data["checksum"] = f"{checksum.algorithm}:{checksum.digest}"
-    ctx.changed(data, f"download {display} -> {target}")
+    *,
+    checksum_dest: str | None,
+    duration: float,
+    size: int,
+) -> CallResult:
+    return _download_result(
+        display,
+        target,
+        changed=True,
+        summary=f"download {display} -> {target}",
+        checksum_dest=checksum_dest,
+        duration=duration,
+        size=size,
+    )
+
+
+def _download_result(
+    display: str,
+    target: Path,
+    *,
+    changed: bool,
+    summary: str,
+    checksum_dest: str | None,
+    duration: float,
+    size: int,
+) -> CallResult:
+    return CallResult(
+        action="download.to_file",
+        changed=changed,
+        summary=summary,
+        url=display,
+        dest=str(target),
+        checksum_dest=None if checksum_dest is None else f"sha256:{checksum_dest}",
+        duration=duration,
+        size=size,
+    )
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0

@@ -6,6 +6,7 @@ from pathlib import Path
 from ..._utils import file_ops
 from ...context import TaskContext
 from ...errors import TaskFailed
+from ...results import CallResult
 from ...validation import (
     State,
     normalize_strings,
@@ -39,7 +40,7 @@ def registry(
     scope: str = "system",
     path: str | Path | None = None,
     mode: int | None = 0o644,
-) -> None:
+) -> CallResult:
     """Ensure a ``registries.conf.d`` drop-in exists or is absent.
 
     The parent directory must already exist; create it with
@@ -56,17 +57,20 @@ def registry(
     target = _registry_path(name, scope=scope, path=path)
     if state == "absent":
         info = file_ops.stat(ctx, target, sudo=sudo)
-        file_ops.remove(
-            ctx,
-            target,
-            info,
-            force=False,
-            sudo=sudo,
-            summary=f"remove registry {name} from {target}",
-            data={"path": str(target), "registry": name, "action": "registry"},
-            allow_directory=False,
+        return ctx.changed(
+            file_ops.remove(
+                ctx,
+                target,
+                info,
+                action="podman.registry",
+                force=False,
+                sudo=sudo,
+                summary=f"remove registry {name} from {target}",
+                unchanged_summary=f"ensure registry {name} is absent from {target}",
+                data={"path": str(target), "registry": name},
+                allow_directory=False,
+            )
         )
-        return
 
     if location is None or not location.strip():
         raise TaskFailed("registry location is required when state is present")
@@ -82,16 +86,20 @@ def registry(
         blocked=blocked,
         mirrors=wanted_mirrors,
     )
-    file_ops.apply_bytes(
-        ctx,
-        target,
-        content.encode(),
-        mode=mode,
-        owner=None,
-        group=None,
-        summary=f"write registry {name} to {target}",
-        data={"path": str(target), "registry": name, "action": "registry"},
-        sudo=sudo,
+    return ctx.changed(
+        file_ops.apply_bytes(
+            ctx,
+            target,
+            content.encode(),
+            action="podman.registry",
+            mode=mode,
+            owner=None,
+            group=None,
+            summary=f"write registry {name} to {target}",
+            unchanged_summary=f"ensure registry {name} in {target}",
+            data={"path": str(target), "registry": name},
+            sudo=sudo,
+        )
     )
 
 
@@ -105,7 +113,7 @@ def login(
     tls_verify: bool | None = None,
     force: bool = False,
     sudo: bool = False,
-) -> None:
+) -> CallResult:
     """Log in to a container registry using a password from stdin."""
     require_text(registry, "registry")
     require_text(username, "registry username")
@@ -130,19 +138,31 @@ def login(
         )
         == username
     ):
-        return
+        return ctx.changed(
+            action="podman.login",
+            changed=False,
+            summary=f"ensure login to {registry} as {username}",
+            registry=registry,
+            username=username,
+        )
 
-    ctx.changed(
-        {"registry": registry, "username": username, "action": "login"},
-        f"login to {registry} as {username}",
+    call = CallResult(
+        action="podman.login",
+        changed=True,
+        summary=f"login to {registry} as {username}",
+        registry=registry,
+        username=username,
     )
+    if ctx.dry_run:
+        return ctx.changed(call)
     command = [podman_command, "login", f"--username={username}", "--password-stdin"]
     if authfile is not None:
         command.append(f"--authfile={authfile}")
     if tls_verify is not None:
         command.append(f"--tls-verify={'true' if tls_verify else 'false'}")
     command.append(registry)
-    ctx.run(command, stdin=f"{password}\n", sudo=sudo, record=False)
+    ctx.run(command, stdin=f"{password}\n", sudo=sudo)
+    return ctx.changed(call)
 
 
 def logout(
@@ -151,7 +171,7 @@ def logout(
     *,
     authfile: str | Path | None = None,
     sudo: bool = False,
-) -> None:
+) -> CallResult:
     """Log out of a container registry."""
     require_text(registry, "registry")
     if authfile is not None:
@@ -159,17 +179,27 @@ def logout(
 
     podman_command = podman(ctx)
     if _login_status(ctx, podman_command, registry, authfile=authfile, sudo=sudo) is None:
-        return
+        return ctx.changed(
+            action="podman.logout",
+            changed=False,
+            summary=f"ensure logout from {registry}",
+            registry=registry,
+        )
 
-    ctx.changed(
-        {"registry": registry, "action": "logout"},
-        f"logout from {registry}",
+    call = CallResult(
+        action="podman.logout",
+        changed=True,
+        summary=f"logout from {registry}",
+        registry=registry,
     )
+    if ctx.dry_run:
+        return ctx.changed(call)
     command = [podman_command, "logout"]
     if authfile is not None:
         command.append(f"--authfile={authfile}")
     command.append(registry)
-    ctx.run(command, sudo=sudo, record=False)
+    ctx.run(command, sudo=sudo)
+    return ctx.changed(call)
 
 
 def _registry_path(name: str, *, scope: str, path: str | Path | None) -> Path:

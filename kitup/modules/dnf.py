@@ -4,11 +4,11 @@ import re
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse
 
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from ..validation import (
     State,
     normalize_strings,
@@ -30,7 +30,7 @@ def packages(
     group: bool = False,
     weak_deps: bool = False,
     exclude: Iterable[str] | str | None = None,
-) -> None:
+) -> CallResult:
     """Ensure packages or package groups are present or absent.
 
     Names beginning with ``@`` are treated as package groups.
@@ -43,7 +43,7 @@ def packages(
     group_names, package_names = _split_names(wanted, group=group)
     require_state(state, "package")
     if state == "present":
-        _ensure_present(
+        result = _ensure_present(
             ctx,
             group_names=group_names,
             package_names=package_names,
@@ -54,12 +54,13 @@ def packages(
     else:
         if excluded:
             raise TaskFailed("exclude is only supported when state is 'present'")
-        _ensure_absent(
+        result = _ensure_absent(
             ctx,
             group_names=group_names,
             package_names=package_names,
             explicit_group=group,
         )
+    return ctx.changed(result)
 
 
 def swap(
@@ -68,26 +69,36 @@ def swap(
     new: str,
     *,
     allowerasing: bool = False,
-) -> None:
+) -> CallResult:
     """Replace ``old`` with ``new`` unless ``new`` is already installed."""
     require_text(old, "package to remove")
     require_text(new, "package to install")
     if _rpm_installed(ctx, new):
-        return
+        return ctx.changed(
+            action="dnf.swap",
+            changed=False,
+            summary=f"ensure {new} replaces {old}",
+            removed=old,
+            installed=new,
+        )
 
-    ctx.changed(
-        {"removed": old, "installed": new},
-        f"swap {old} -> {new}",
+    result = CallResult(
+        action="dnf.swap",
+        changed=True,
+        summary=f"swap {old} -> {new}",
+        removed=old,
+        installed=new,
     )
+    if ctx.dry_run:
+        return ctx.changed(result)
     command = [_dnf_command(ctx), "swap", "-y", old, new]
     if allowerasing:
         command.append("--allowerasing")
-    ctx.run(command, sudo=True, record=False)
+    ctx.run(command, sudo=True)
 
-    if ctx.dry_run:
-        return
     if not _rpm_installed(ctx, new):
         raise TaskFailed(f"package still missing after swap: {new}")
+    return ctx.changed(result)
 
 
 def _ensure_absent(
@@ -96,27 +107,29 @@ def _ensure_absent(
     group_names: list[str],
     package_names: list[str],
     explicit_group: bool,
-) -> None:
+) -> CallResult:
     installed_groups = _installed_groups(ctx, group_names)
-    installed_packages = [name for name in package_names if _rpm_installed(ctx, name)]
+    installed_packages = _installed_packages(ctx, package_names)
     if not installed_groups and not installed_packages:
-        return
+        return CallResult(
+            action="dnf.packages",
+            changed=False,
+            summary="ensure packages are absent: " + " ".join(_display_names(group_names, package_names)),
+            removed=[],
+            groups=[],
+            packages=[],
+        )
 
-    if installed_groups and installed_packages:
-        removed = _display_names(installed_groups, installed_packages)
-        data: dict[str, Any] = {
-            "removed": removed,
-            "group": False,
-            "groups": installed_groups,
-            "packages": installed_packages,
-        }
-    elif installed_groups:
-        removed = installed_groups
-        data = {"removed": removed, "group": True}
-    else:
-        removed = installed_packages
-        data = {"removed": removed, "group": False}
-    ctx.changed(data, " ".join(f"-{name}" for name in removed))
+    removed = _affected_names(installed_groups, installed_packages)
+    result = CallResult(
+        action="dnf.packages",
+        changed=True,
+        summary=" ".join(f"-{name}" for name in removed),
+        removed=removed,
+        **_package_data(installed_groups, installed_packages),
+    )
+    if ctx.dry_run:
+        return result
 
     specs = _display_names(installed_groups, installed_packages)
     command: list[str]
@@ -124,42 +137,40 @@ def _ensure_absent(
         command = [_dnf_command(ctx), "group", "remove", "-y", *installed_groups]
     else:
         command = [_dnf_command(ctx), "remove", "-y", *specs]
-    ctx.run(command, sudo=True, record=False)
+    ctx.run(command, sudo=True)
 
-    if ctx.dry_run:
-        return
     remaining_groups = _installed_groups(ctx, installed_groups)
-    remaining_packages = [name for name in installed_packages if _rpm_installed(ctx, name)]
+    remaining_packages = _installed_packages(ctx, installed_packages)
     remaining = _display_names(remaining_groups, remaining_packages)
     if remaining:
         raise TaskFailed(f"packages still installed after removal: {', '.join(remaining)}")
+    return result
 
 
-def autoremove(ctx: TaskContext) -> None:
+def autoremove(ctx: TaskContext) -> CallResult:
     """Remove unused package dependencies."""
-    result = ctx.probe(
-        [
-            _dnf_command(ctx),
-            "repoquery",
-            "--unneeded",
-            "--quiet",
-            "--queryformat",
-            "%{name}\n",
-        ],
-        sudo=False,
+    packages = _query_package_names(
+        ctx,
+        ["repoquery", "--unneeded", "--quiet", "--queryformat", "%{name}\n"],
+        "could not list unneeded packages",
     )
-    require_success(result, "could not list unneeded packages")
-
-    packages = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     if not packages:
-        return
+        return ctx.changed(
+            action="dnf.autoremove",
+            changed=False,
+            summary="ensure no unneeded packages",
+            removed=[],
+        )
 
     summary = " ".join(f"-{name}" for name in packages)
-    ctx.changed({"removed": packages}, summary)
-    ctx.run([_dnf_command(ctx), "autoremove", "-y"], sudo=True, record=False)
+    call = CallResult(action="dnf.autoremove", changed=True, summary=summary, removed=packages)
+    if ctx.dry_run:
+        return ctx.changed(call)
+    ctx.run([_dnf_command(ctx), "autoremove", "-y"], sudo=True)
+    return ctx.changed(call)
 
 
-def copr(ctx: TaskContext, project: str, *, state: State = "present") -> None:
+def copr(ctx: TaskContext, project: str, *, state: State = "present") -> CallResult:
     """Ensure a COPR project is enabled or removed."""
     require_state(state, "COPR")
     require_text(project, "COPR project")
@@ -168,25 +179,31 @@ def copr(ctx: TaskContext, project: str, *, state: State = "present") -> None:
     require_success(result, "could not list COPR repositories")
     configured = _copr_configured(result.stdout, project)
 
-    if state == "present":
-        if configured:
-            return
-        ctx.changed({"repository": project, "type": "copr"}, f"enable COPR {project}")
-        ctx.run(
-            [_dnf_command(ctx), "copr", "enable", "-y", project],
-            sudo=True,
-            record=False,
+    if configured == (state == "present"):
+        desired = "enabled" if state == "present" else "removed"
+        return ctx.changed(
+            action="dnf.copr",
+            changed=False,
+            summary=f"ensure COPR {project} is {desired}",
+            repository=project,
         )
-        return
 
-    if not configured:
-        return
-    ctx.changed({"repository": project, "type": "copr"}, f"remove COPR {project}")
-    ctx.run(
-        [_dnf_command(ctx), "copr", "remove", project],
-        sudo=True,
-        record=False,
+    if state == "present":
+        summary = f"enable COPR {project}"
+        command = ["copr", "enable", "-y", project]
+    else:
+        summary = f"remove COPR {project}"
+        command = ["copr", "remove", project]
+    call = CallResult(
+        action="dnf.copr",
+        changed=True,
+        summary=summary,
+        repository=project,
     )
+    if ctx.dry_run:
+        return ctx.changed(call)
+    ctx.run([_dnf_command(ctx), *command], sudo=True)
+    return ctx.changed(call)
 
 
 def _copr_configured(output: str, project: str) -> bool:
@@ -206,7 +223,7 @@ def repository(
     *,
     state: State = "present",
     name: str | None = None,
-) -> None:
+) -> CallResult:
     """Ensure a repository from a .repo file is present or absent."""
     require_state(state, "repository")
 
@@ -220,33 +237,51 @@ def repository(
         filename = _repo_filename(resolved_source, name)
         path = _repository_path(ctx, filename)
         if path.exists():
-            return
-        ctx.changed(
-            {"repository": resolved_source, "path": str(path)},
-            f"add repository {filename}",
+            return ctx.changed(
+                action="dnf.repository",
+                changed=False,
+                summary=f"ensure repository {filename}",
+                repository=resolved_source,
+                path=str(path),
+            )
+        call = CallResult(
+            action="dnf.repository",
+            changed=True,
+            summary=f"add repository {filename}",
+            repository=resolved_source,
+            path=str(path),
         )
-        ctx.run(
-            _add_repository_command(ctx, resolved_source, filename),
-            sudo=True,
-            record=False,
+        command = _add_repository_command(ctx, resolved_source, filename)
+    else:
+        if name is None:
+            raise TaskFailed("repository name is required when state is absent")
+        require_text(name, "repository name")
+        filename = _repo_filename(None, name)
+        path = _repository_path(ctx, filename)
+        if not path.exists():
+            return ctx.changed(
+                action="dnf.repository",
+                changed=False,
+                summary=f"ensure repository {filename} is absent",
+                repository=filename,
+                path=str(path),
+            )
+        call = CallResult(
+            action="dnf.repository",
+            changed=True,
+            summary=f"remove repository {filename}",
+            repository=filename,
+            path=str(path),
         )
-        return
+        command = ["rm", "-f", str(path)]
 
-    if name is None:
-        raise TaskFailed("repository name is required when state is absent")
-    require_text(name, "repository name")
-    filename = _repo_filename(None, name)
-    path = _repository_path(ctx, filename)
-    if not path.exists():
-        return
-    ctx.changed(
-        {"repository": filename, "path": str(path)},
-        f"remove repository {filename}",
-    )
-    ctx.run(["rm", "-f", str(path)], sudo=True, record=False)
+    if ctx.dry_run:
+        return ctx.changed(call)
+    ctx.run(command, sudo=True)
+    return ctx.changed(call)
 
 
-def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> None:
+def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> CallResult:
     """Install release RPMs from URLs or local paths."""
     if isinstance(sources, (str, Path)):
         sources = [sources]
@@ -257,8 +292,25 @@ def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> None:
 
     wanted = unique_strings(_resolve_dnf_source(ctx, source) for source in validated)
     labels = [Path(urlparse(source).path).name or source for source in wanted]
-    ctx.changed({"sources": wanted}, f"install {', '.join(labels)}")
-    ctx.run([_dnf_command(ctx), "install", "-y", *wanted], sudo=True, record=False)
+    names = _rpm_source_names(ctx, wanted)
+    missing = _missing_packages(ctx, names)
+    if not missing:
+        return ctx.changed(
+            action="dnf.rpm",
+            changed=False,
+            summary=f"ensure {', '.join(labels)} installed",
+            installed=[],
+        )
+    call = CallResult(
+        action="dnf.rpm",
+        changed=True,
+        summary=f"install {', '.join(labels)}",
+        installed=missing,
+    )
+    if ctx.dry_run:
+        return ctx.changed(call)
+    ctx.run([_dnf_command(ctx), "install", "-y", *wanted], sudo=True)
+    return ctx.changed(call)
 
 
 def _ensure_present(
@@ -269,27 +321,20 @@ def _ensure_present(
     weak_deps: bool,
     exclude: list[str],
     explicit_group: bool,
-) -> None:
+) -> CallResult:
     missing_groups = _missing_group_names(ctx, group_names)
-    missing_packages = [name for name in package_names if not _rpm_installed(ctx, name)]
+    missing_packages = _missing_packages(ctx, package_names)
     if not missing_groups and not missing_packages:
-        return
+        return CallResult(
+            action="dnf.packages",
+            changed=False,
+            summary="ensure packages are present: " + " ".join(_display_names(group_names, package_names)),
+            added=[],
+            groups=[],
+            packages=[],
+        )
 
-    if missing_groups and missing_packages:
-        added = _display_names(missing_groups, missing_packages)
-        data: dict[str, Any] = {
-            "added": added,
-            "group": False,
-            "groups": missing_groups,
-            "packages": missing_packages,
-        }
-    elif missing_groups:
-        added = missing_groups
-        data = {"added": added, "group": True}
-    else:
-        added = missing_packages
-        data = {"added": added, "group": False}
-
+    added = _affected_names(missing_groups, missing_packages)
     options: list[str] = []
     if not weak_deps:
         options.append("--setopt=install_weak_deps=False")
@@ -309,16 +354,23 @@ def _ensure_present(
     else:
         command = [_dnf_command(ctx), "install", "-y", *options, *specs]
 
-    ctx.changed(data, " ".join(f"+{name}" for name in added))
-    ctx.run(command, sudo=True, record=False)
-
+    result = CallResult(
+        action="dnf.packages",
+        changed=True,
+        summary=" ".join(f"+{name}" for name in added),
+        added=added,
+        **_package_data(missing_groups, missing_packages),
+    )
     if ctx.dry_run:
-        return
+        return result
+    ctx.run(command, sudo=True)
+
     remaining_groups = _missing_group_names(ctx, missing_groups)
-    remaining_packages = [name for name in missing_packages if not _rpm_installed(ctx, name)]
+    remaining_packages = _missing_packages(ctx, missing_packages)
     remaining = _display_names(remaining_groups, remaining_packages)
     if remaining:
         raise TaskFailed(f"packages still missing after install: {', '.join(remaining)}")
+    return result
 
 
 def _resolve_dnf_source(ctx: TaskContext, source: str | Path) -> str:
@@ -326,6 +378,23 @@ def _resolve_dnf_source(ctx: TaskContext, source: str | Path) -> str:
     if urlparse(text).scheme:
         return text
     return str(ctx.resolve_source(text))
+
+
+def _rpm_source_names(ctx: TaskContext, sources: list[str]) -> list[str]:
+    names = _query_package_names(
+        ctx,
+        ["repoquery", "--queryformat", "%{name}\n", *sources],
+        "could not query RPM sources",
+    )
+    if not names:
+        raise TaskFailed("could not determine package names from RPM sources")
+    return names
+
+
+def _query_package_names(ctx: TaskContext, args: list[str], message: str) -> list[str]:
+    result = ctx.probe([_dnf_command(ctx), *args], sudo=False)
+    require_success(result, message)
+    return unique_strings(line.strip() for line in result.stdout.splitlines() if line.strip())
 
 
 def _repo_filename(source: str | Path | None, name: str | None) -> str:
@@ -387,6 +456,18 @@ def _display_names(groups: list[str], packages: list[str]) -> list[str]:
     return [f"@{name}" for name in groups] + list(packages)
 
 
+def _affected_names(groups: list[str], packages: list[str]) -> list[str]:
+    if groups and packages:
+        return _display_names(groups, packages)
+    return groups or packages
+
+
+def _package_data(groups: list[str], packages: list[str]) -> dict[str, list[str]]:
+    if groups and packages:
+        return {"groups": groups, "packages": packages}
+    return {}
+
+
 def _missing_group_names(ctx: TaskContext, names: list[str]) -> list[str]:
     installed = set(_installed_groups(ctx, names))
     return [name for name in names if name not in installed]
@@ -430,3 +511,11 @@ def _dnf_command(ctx: TaskContext) -> str:
 def _rpm_installed(ctx: TaskContext, name: str) -> bool:
     """Return whether an RPM package is installed."""
     return ctx.probe(["rpm", "-q", name], sudo=False).returncode == 0
+
+
+def _installed_packages(ctx: TaskContext, names: list[str]) -> list[str]:
+    return [name for name in names if _rpm_installed(ctx, name)]
+
+
+def _missing_packages(ctx: TaskContext, names: list[str]) -> list[str]:
+    return [name for name in names if not _rpm_installed(ctx, name)]

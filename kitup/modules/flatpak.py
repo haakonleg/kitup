@@ -5,6 +5,7 @@ from collections.abc import Iterable
 
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from ..validation import (
     State,
     normalize_strings,
@@ -26,7 +27,7 @@ def remote(
     state: State = "present",
     scope: str = "system",
     gpg_verify: bool = True,
-) -> None:
+) -> CallResult:
     """Ensure a Flatpak remote repository is present or absent."""
     require_state(state, "flatpak")
     flag = _scope_flag(ctx, scope)
@@ -37,12 +38,25 @@ def remote(
             raise TaskFailed("flatpak remote URL is required when state is present")
         require_text(url, "flatpak remote URL")
         if name in _remote_names(ctx, flag):
-            return
+            return ctx.changed(
+                action="flatpak.remote",
+                changed=False,
+                summary=f"ensure remote {name}",
+                remote=name,
+                url=url,
+                scope=scope,
+            )
 
-        ctx.changed(
-            {"remote": name, "url": url, "scope": scope},
-            f"add remote {name}",
+        call = CallResult(
+            action="flatpak.remote",
+            changed=True,
+            summary=f"add remote {name}",
+            remote=name,
+            url=url,
+            scope=scope,
         )
+        if ctx.dry_run:
+            return ctx.changed(call)
         command = [
             _flatpak(ctx),
             "remote-add",
@@ -52,21 +66,32 @@ def remote(
         if not gpg_verify:
             command.append("--no-gpg-verify")
         command.extend([name, url])
-        ctx.run(command, sudo=scope == "system", record=False)
-        return
+        ctx.run(command, sudo=scope == "system")
+        return ctx.changed(call)
 
     if name not in _remote_names(ctx, flag):
-        return
+        return ctx.changed(
+            action="flatpak.remote",
+            changed=False,
+            summary=f"ensure remote {name} is absent",
+            remote=name,
+            scope=scope,
+        )
 
-    ctx.changed(
-        {"remote": name, "scope": scope},
-        f"remove remote {name}",
+    call = CallResult(
+        action="flatpak.remote",
+        changed=True,
+        summary=f"remove remote {name}",
+        remote=name,
+        scope=scope,
     )
+    if ctx.dry_run:
+        return ctx.changed(call)
     ctx.run(
         [_flatpak(ctx), "remote-delete", flag, name],
         sudo=scope == "system",
-        record=False,
     )
+    return ctx.changed(call)
 
 
 def packages(
@@ -76,7 +101,7 @@ def packages(
     state: State = "present",
     scope: str = "system",
     remote: str | None = None,
-) -> None:
+) -> CallResult:
     """Ensure Flatpak applications or runtimes are present or absent."""
     require_state(state, "flatpak")
     flag = _scope_flag(ctx, scope)
@@ -94,11 +119,22 @@ def packages(
     if state == "present":
         missing = [name for name in wanted if not _matching_refs(name, installed)]
         if not missing:
-            return
-        ctx.changed(
-            {"added": missing, "scope": scope},
-            " ".join(f"+{name}" for name in missing),
+            return ctx.changed(
+                action="flatpak.packages",
+                changed=False,
+                summary="ensure flatpaks are present: " + " ".join(wanted),
+                added=[],
+                scope=scope,
+            )
+        call = CallResult(
+            action="flatpak.packages",
+            changed=True,
+            summary=" ".join(f"+{name}" for name in missing),
+            added=missing,
+            scope=scope,
         )
+        if ctx.dry_run:
+            return ctx.changed(call)
         command = [
             _flatpak(ctx),
             "install",
@@ -109,34 +145,41 @@ def packages(
         if remote is not None:
             command.append(remote)
         command.extend(missing)
-        ctx.run(command, sudo=scope == "system", record=False)
-        if ctx.dry_run:
-            return
+        ctx.run(command, sudo=scope == "system")
         remaining_installed = _installed_refs(ctx, flag)
         remaining = [name for name in missing if not _matching_refs(name, remaining_installed)]
         if remaining:
             raise TaskFailed(f"flatpak refs still missing after install: {', '.join(remaining)}")
-        return
+        return ctx.changed(call)
 
     present = [name for name in wanted if _matching_refs(name, installed)]
     if not present:
-        return
+        return ctx.changed(
+            action="flatpak.packages",
+            changed=False,
+            summary="ensure flatpaks are absent: " + " ".join(wanted),
+            removed=[],
+            scope=scope,
+        )
     targets = unique_strings(ref for name in present for ref in _matching_refs(name, installed))
-    ctx.changed(
-        {"removed": targets, "scope": scope},
-        " ".join(f"-{name}" for name in targets),
+    call = CallResult(
+        action="flatpak.packages",
+        changed=True,
+        summary=" ".join(f"-{name}" for name in targets),
+        removed=targets,
+        scope=scope,
     )
+    if ctx.dry_run:
+        return ctx.changed(call)
     ctx.run(
         [_flatpak(ctx), "uninstall", "-y", "--noninteractive", flag, *targets],
         sudo=scope == "system",
-        record=False,
     )
-    if ctx.dry_run:
-        return
     remaining_installed = _installed_refs(ctx, flag)
     remaining = [name for name in present if _matching_refs(name, remaining_installed)]
     if remaining:
         raise TaskFailed(f"flatpak refs still installed after removal: {', '.join(remaining)}")
+    return ctx.changed(call)
 
 
 def _scope_flag(ctx: TaskContext, scope: str) -> str:

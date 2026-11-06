@@ -3,7 +3,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import systemd
 
-from .helpers import FakeCommandRunner, FakeSudo, completed, make_context
+from .helpers import FakeCommandRunner, FakeSudo, call_data, completed, make_context
 
 
 def response(returncode: int = 0, stdout: str = ""):
@@ -49,6 +49,7 @@ def test_enable_and_start(tmp_path):
     ]
     assert command.calls[1][1]["sudo"] is True
     assert command.calls[3][1]["sudo"] is True
+    assert ctx.changes[0].action == "systemd.unit"
 
 
 def test_disable_and_stop(tmp_path):
@@ -107,3 +108,5 @@ def test_daemon_reload_records_a_change(tmp_path):
 
     assert command.calls[0][0] == ["systemctl", "daemon-reload"]
     assert len(ctx.changes) == 1
+    assert ctx.changes[0].action == "systemd.daemon_reload"
+    assert call_data(ctx.changes[0]) == {"scope": "system"}

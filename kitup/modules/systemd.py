@@ -3,6 +3,7 @@
 from typing import Final, Literal
 
 from ..context import TaskContext
+from ..results import CallResult
 from ..validation import require_scope, require_state, require_text
 
 type SystemdState = Literal["started", "stopped"]
@@ -31,45 +32,66 @@ def unit(
     enabled: bool | None = None,
     state: SystemdState | None = None,
     scope: str = "system",
-) -> None:
+) -> CallResult:
     """Ensure a unit's enabled and active state."""
     require_text(unit, "systemd unit")
     base = _command(ctx, scope)
     desired = None if state is None else _desired_active(state)
 
+    actions: list[str] = []
+    summaries: list[str] = []
     if enabled is not None:
         current_enabled = _is_enabled(ctx, base, unit)
         if current_enabled != enabled:
-            _converge(ctx, base, unit, "enable" if enabled else "disable", scope)
+            action = "enable" if enabled else "disable"
+            actions.append(action)
+            summaries.append(f"{_PAST_TENSE[action]} {unit}")
+            if not ctx.dry_run:
+                ctx.run([*base, action, unit], sudo=scope == "system")
 
     if desired is not None:
         active = _is_active(ctx, base, unit)
         if active != desired:
-            _converge(ctx, base, unit, "start" if desired else "stop", scope)
+            action = "start" if desired else "stop"
+            actions.append(action)
+            summaries.append(f"{_PAST_TENSE[action]} {unit}")
+            if not ctx.dry_run:
+                ctx.run([*base, action, unit], sudo=scope == "system")
 
-
-def daemon_reload(ctx: TaskContext, *, scope: str = "system") -> None:
-    """Reload systemd manager configuration."""
-    _reload(ctx, scope)
-
-
-def _converge(
-    ctx: TaskContext,
-    base: list[str],
-    unit: str,
-    action: str,
-    scope: str,
-) -> None:
-    ctx.changed(
-        {"unit": unit, "scope": scope, "action": action},
-        f"{_PAST_TENSE[action]} {unit}",
+    if not actions:
+        wanted: list[str] = []
+        if enabled is not None:
+            wanted.append("enabled" if enabled else "disabled")
+        if state is not None:
+            wanted.append(state)
+        summary = f"ensure {unit} is {' and '.join(wanted)}"
+    else:
+        summary = "; ".join(summaries)
+    return ctx.changed(
+        action="systemd.unit",
+        changed=bool(actions),
+        summary=summary,
+        unit=unit,
+        scope=scope,
+        actions=actions,
     )
-    ctx.run([*base, action, unit], sudo=scope == "system", record=False)
 
 
-def _reload(ctx: TaskContext, scope: str) -> None:
+def daemon_reload(ctx: TaskContext, *, scope: str = "system") -> CallResult:
+    """Reload systemd manager configuration."""
     base = _command(ctx, scope)
+    if ctx.dry_run:
+        return ctx.changed(
+            action="systemd.daemon_reload",
+            summary=f"would reload systemd ({scope})",
+            scope=scope,
+        )
     ctx.run([*base, "daemon-reload"], sudo=scope == "system")
+    return ctx.changed(
+        action="systemd.daemon_reload",
+        summary=f"reload systemd ({scope})",
+        scope=scope,
+    )
 
 
 def _command(ctx: TaskContext, scope: str) -> list[str]:

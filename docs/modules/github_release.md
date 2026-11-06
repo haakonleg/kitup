@@ -16,11 +16,15 @@ download files; use [`download`](download.md) with an asset's URL and digest.
 
 Return the latest published full release for a public repository.
 
+### Parameters
+
 - `project` — repository in `owner/repo` form.
 - `timeout` — request timeout in seconds.
 
 GitHub defines the latest release as the most recent non-draft,
 non-prerelease release. Use `by_tag()` to fetch a prerelease.
+
+Returns a [`Release`](#release) object. This method records no call.
 
 ```python
 @task("Show latest uv release")
@@ -34,6 +38,14 @@ def show_latest_uv(ctx):
 Return the published release for `tag`. Tags are URL-encoded, so tags containing
 `/` work.
 
+### Parameters
+
+- `project` — repository in `owner/repo` form.
+- `tag` — release tag name.
+- `timeout` — request timeout in seconds.
+
+Returns a [`Release`](#release) object. This method records no call.
+
 ```python
 release = github_release.by_tag(ctx, "owner/project", "v1.2.3-rc.1")
 ```
@@ -42,6 +54,13 @@ release = github_release.by_tag(ctx, "owner/project", "v1.2.3-rc.1")
 
 Return the single asset whose name matches the regular expression `pattern`.
 Matching uses `re.search`, so `^` and `$` can anchor the pattern when needed.
+
+### Parameters
+
+- `project` — repository in `owner/repo` form.
+- `pattern` — regular expression matched against asset names.
+- `tag` — optional release tag. Defaults to the latest release.
+- `timeout` — request timeout in seconds.
 
 By default the asset is selected from the latest release. Pass `tag` to select a
 specific release:
@@ -63,6 +82,8 @@ asset = github_release.by_asset(
 
 The task fails when the regex is invalid, when no asset matches, or when more
 than one asset matches. The error lists the available or matching asset names.
+
+Returns an [`Asset`](#asset) object. This method records no call.
 
 ## `Release`
 

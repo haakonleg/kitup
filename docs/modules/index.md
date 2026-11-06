@@ -1,12 +1,40 @@
 # Modules
 
 Built-in modules provide idempotent operations for bundle tasks. Each function
-accepts `ctx` first, and all mutating operations honor `--dry-run`.
+accepts `ctx` first. Methods inspect the current system state and change only
+what is needed, and mutating operations honor `--dry-run`.
 
 ```python
 from kitup.modules import dnf, files
 from kitup.registry import task
 ```
+
+## Return values
+
+Methods that manage system state return a `CallResult`. It records what the call
+did and the data fields documented on each module page:
+
+- `action` — method identifier, such as `"files.file"`.
+- `changed` — `True` when the call changed something, `False` when the system
+  already matched the requested state.
+- `summary` — short human-readable description of the result.
+- Method-specific fields, such as `path` for `files.file()`.
+
+```python
+result = files.file(ctx, "/etc/example.conf", content="value\n")
+
+if result.changed:
+    ctx.note(result.summary)
+```
+
+Results can be read as attributes or as dictionary keys, for example
+`result.changed` or `result["path"]`.
+
+Some methods only read data and return it directly instead of a `CallResult`.
+For example, `download.to_bytes()` returns `bytes`. These methods do not record
+changes.
+
+Each module page documents its parameters, result fields, and usage examples.
 
 - [dnf](dnf.md) — RPM packages, groups, repositories, and COPR
 - [flatpak](flatpak.md) — Flatpak remotes, applications, and runtimes

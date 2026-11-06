@@ -11,7 +11,7 @@ from kitup.modules import files
 from kitup.output import Output
 from kitup.registry import Bundle
 
-from .helpers import FakeSudo, PassthroughSudo, make_context
+from .helpers import FakeSudo, PassthroughSudo, call_data, make_context
 
 
 def context(tmp_path, *, dry_run=False, diff=False):
@@ -42,9 +42,12 @@ def test_file_creates_file_and_is_idempotent(tmp_path):
     assert path.read_text() == "value = 1\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert len(ctx.changes) == 1
+    assert ctx.changes[0].action == "files.file"
 
     files.file(ctx, path, content="value = 1\n", mode=0o600)
     assert len(ctx.changes) == 1
+    assert len(ctx.calls) == 2
+    assert ctx.calls[1].changed is False
 
 
 def test_file_updates_metadata_without_rewriting(tmp_path):
@@ -180,6 +183,9 @@ def test_file_without_content_preserves_existing_content_and_mode(tmp_path):
     assert path.read_text() == "keep me\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert ctx.changes == []
+    assert len(ctx.calls) == 1
+    assert ctx.calls[0].changed is False
+    assert ctx.calls[0].summary == f"ensure file {path}"
 
 
 def test_file_new_file_uses_default_mode(tmp_path):
@@ -371,6 +377,7 @@ def test_line_add_replace_and_remove(tmp_path):
     count = len(ctx.changes)
     files.line(ctx, path, "TWO", match=r"^TWO$")
     assert len(ctx.changes) == count
+    assert ctx.calls[-1].summary == f"ensure line in {path}"
 
 
 def test_line_appends_after_missing_final_newline(tmp_path):
@@ -385,6 +392,7 @@ def test_line_appends_after_missing_final_newline(tmp_path):
     count = len(ctx.changes)
     files.line(ctx, path, "four")
     assert len(ctx.changes) == count
+    assert ctx.calls[-1].summary == f"ensure line in {path}"
 
 
 def test_file_refuses_fifo(tmp_path):
@@ -407,8 +415,14 @@ def test_block_add_update_and_remove(tmp_path):
     assert "one" not in path.read_text()
     assert "two\n" in path.read_text()
 
+    files.block(ctx, path, "managed", "two\n")
+    assert ctx.calls[-1].summary == f"ensure managed block in {path}"
+
     files.block(ctx, path, "managed", "", state="absent")
     assert "managed" not in path.read_text()
+
+    files.block(ctx, path, "managed", "", state="absent")
+    assert ctx.calls[-1].summary == f"ensure managed block is absent from {path}"
 
 
 def test_block_missing_end_marker_is_an_error(tmp_path):
@@ -430,6 +444,7 @@ def test_directory_creates_and_is_idempotent(tmp_path):
 
     files.directory(ctx, path, mode=0o700)
     assert len(ctx.changes) == 1
+    assert ctx.calls[-1].summary == f"ensure directory {path}"
 
 
 def test_directory_refuses_file_in_both_states(tmp_path):
@@ -540,10 +555,12 @@ def test_copy_preserves_mode_and_is_idempotent(tmp_path):
 
     assert dest.read_text() == source.read_text()
     assert stat.S_IMODE(dest.stat().st_mode) == 0o755
+    assert call_data(ctx.calls[-1]) == {"path": str(dest), "src": str(source)}
 
     count = len(ctx.changes)
     files.copy(ctx, source, dest)
     assert len(ctx.changes) == count
+    assert ctx.calls[-1].summary == f"ensure {dest} from {source}"
 
 
 def test_copy_replaces_destination_symlink(tmp_path):
@@ -608,11 +625,13 @@ def test_move_moves_file_and_is_idempotent(tmp_path):
     assert dest.read_text() == "value\n"
     assert stat.S_IMODE(dest.stat().st_mode) == 0o600
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data["action"] == "move"
+    assert ctx.changes[0].action == "files.move"
+    assert call_data(ctx.changes[0]) == {"dest": str(dest), "src": str(source)}
 
     files.move(ctx, source, dest)
 
     assert len(ctx.changes) == 1
+    assert ctx.calls[-1].summary == f"ensure {dest} is moved from {source}"
 
 
 def test_move_replaces_destination_file(tmp_path):
@@ -667,7 +686,8 @@ def test_move_reconciles_metadata_when_source_is_gone(tmp_path):
 
     assert stat.S_IMODE(dest.stat().st_mode) == 0o640
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data["action"] == "metadata"
+    assert ctx.changes[0].action == "files.move"
+    assert call_data(ctx.changes[0]) == {"dest": str(dest), "src": str(source)}
 
     unchanged = context(tmp_path)
     files.move(unchanged, source, dest, mode=0o640)

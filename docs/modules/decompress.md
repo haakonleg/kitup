@@ -4,7 +4,6 @@ Extract tar and zip archives, or decompress single compressed files.
 
 ```python
 from kitup.modules import decompress
-from kitup.registry import task
 ```
 
 Both functions are idempotent: only differences are written. Files that are no
@@ -14,19 +13,31 @@ longer present in the source are not removed.
 
 Extract an archive into the directory `dest`.
 
-- `src` resolves like `files.copy()`: a bare filename comes from the bundle's
-  `files/` directory, other relative paths from the bundle directory, and
+### Parameters
+
+- `src` — archive source. A bare filename resolves to the bundle's `files/`
+  directory, other relative paths resolve against the bundle directory, and
   absolute paths are used as-is.
-- `dest` must be a real directory or a missing path whose parent exists. The
-  directory is created when missing.
-- `creates` is a path, relative to `dest` unless absolute. When it exists the
+- `dest` — destination directory. It is created when missing; its parent must
+  exist.
+- `creates` — path, relative to `dest` unless absolute. When it exists the
   archive is skipped.
-- `strip_components` removes that many leading path components before filtering.
-- `include` and `exclude` are glob-style patterns matched against the stripped
+- `strip_components` — number of leading path components to remove before
+  filtering.
+- `include` and `exclude` — glob-style patterns matched against the stripped
   relative path. When `include` is given, only matching entries are extracted;
   `exclude` then removes matches. A pattern such as `*.txt` also matches nested
   files. Excluding a directory does not exclude its children.
-- `mode` overrides the mode of extracted regular files.
+- `mode` — overrides the mode of extracted regular files.
+
+### Result fields
+
+- `src` — resolved archive path.
+- `dest` — destination directory.
+- `files` — selected archive entries relative to `dest`, including files and
+  symlinks but not directories. Empty when `creates` skips the archive.
+- `size` — total size in bytes of regular files under `dest`; `0` when `dest`
+  does not exist.
 
 ```python
 from pathlib import Path
@@ -52,42 +63,37 @@ The format is detected from the archive contents, not the filename:
 
 ### Behavior
 
-- Directories that already exist are left unchanged. New directories use the
-  archive mode (default `0o755`); implicit parent directories use `0o755`.
-- With `mode=None`, existing files keep their current mode and new files use the
-  archive mode (`0o644` by default).
-- Symlinks are compared and replaced only when their target differs. A real
-  directory is never replaced.
-- Hardlinks, device nodes, FIFOs, and other special members are rejected.
-- When the same path appears more than once, the last entry wins.
-- Archive ownership is not restored; files and directories are owned by the
-  user running kitup.
-- Dry runs compare the archive without creating `dest` or writing entries.
-
-### Safety
-
-- Absolute member paths, `..` components, and NUL bytes are rejected.
-- Archives that place a file or symlink where another entry needs a directory
-  are rejected.
-- Existing symlinks inside `dest` are never followed while creating parents, so
-  an archive cannot write outside `dest`.
-- Symlink targets are created as recorded in the archive; kitup never follows
-  them during extraction.
+- Existing directories are left unchanged. New files use the archive mode
+  unless `mode` is set.
+- Symlinks are replaced only when their target differs.
+- Archive ownership is not restored; extracted files are owned by the user
+  running kitup.
+- Absolute member paths, `..` components, and entries that would write outside
+  `dest` are rejected.
 - A `dest` that is a symlink or a file is rejected.
+- Dry runs compare the archive without creating `dest` or writing files.
 
 ## `file(ctx, src, dest, *, mode=None)`
 
 Decompress a single compressed file.
 
-- Supported formats: gzip, bzip2, xz, and zstd, detected from the contents.
-- `src` resolves against the bundle like `archive()`.
-- `dest` may be a file path, an existing directory, or end with `/`. A directory
-  destination uses the source filename with its `.gz`, `.bz2`, `.xz`, `.zst`, or
-  `.zstd` suffix removed.
-- Archive sources are rejected; use `archive()` for tar and zip files.
-- With `mode=None`, an existing destination keeps its mode and a new one is
-  created with `0o644`.
-- An existing destination symlink is rejected rather than followed.
+### Parameters
+
+- `src` — compressed source, resolved like `archive()`.
+- `dest` — destination file, existing directory, or path ending with `/`. A
+  directory destination uses the source filename with its `.gz`, `.bz2`, `.xz`,
+  `.zst`, or `.zstd` suffix removed.
+- `mode` — overrides the destination mode. Existing files keep their mode when
+  omitted; new files use `0o644`.
+
+Supported formats are gzip, bzip2, xz, and zstd, detected from the contents.
+Archive sources are rejected; use `archive()` for tar and zip files. An existing
+destination symlink is rejected rather than followed.
+
+### Result fields
+
+- `dest` — destination file.
+- `src` — resolved compressed source.
 
 ```python
 from pathlib import Path

@@ -211,6 +211,7 @@ def test_latest_returns_release_and_assets(tmp_path, api_server):
     assert "kitup" not in user_agent.lower()
     assert state.header(0, "Authorization") is None
     assert ctx.changes == []
+    assert ctx.calls == []
 
 
 def test_by_tag_encodes_the_tag(tmp_path, api_server):
@@ -362,6 +363,7 @@ def test_dry_run_still_fetches_and_records_no_changes(tmp_path, api_server):
     assert release.tag == "v1.2.3"
     assert state.paths == ["/repos/owner/repo/releases/latest"]
     assert ctx.changes == []
+    assert ctx.calls == []
 
 
 def test_environment_tokens_are_ignored(tmp_path, api_server, monkeypatch):

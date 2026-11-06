@@ -11,6 +11,8 @@ from kitup.registry import task
 
 Manage a Flatpak remote repository.
 
+### Parameters
+
 - `name` — remote name, for example `flathub`.
 - `url` — repository location. Required for `"present"`; ignored for `"absent"`.
 - `state` — `"present"` or `"absent"`.
@@ -21,6 +23,12 @@ Manage a Flatpak remote repository.
 `"present"` adds the remote only when the name is missing. An existing remote is
 left unchanged, including its URL. `"absent"` removes the remote; if installed
 applications still use it, the task fails.
+
+### Result fields
+
+- `remote` — remote name.
+- `scope` — `"system"` or `"user"`.
+- `url` — repository URL (present-state results only).
 
 ```python
 @task("Add Flathub", tags={"flatpak"})
@@ -46,6 +54,8 @@ def add_local_repository(ctx):
 
 Ensure Flatpak applications or runtimes are installed or removed.
 
+### Parameters
+
 - `names` — an ID or full ref, or an iterable of them. A single string is one
   entry.
 - `state` — `"present"` or `"absent"`.
@@ -59,6 +69,14 @@ ref such as `org.gnome.Calculator/x86_64/stable` or
 `"present"` installs only missing refs. `"absent"` removes only installed refs.
 `remote` only selects the source for new installs; an already-installed app is
 not moved or reinstalled.
+
+### Result fields
+
+- `added` — refs installed (present results).
+- `removed` — refs removed (absent results).
+- `scope` — `"system"` or `"user"`.
+
+No-change results use an empty `added` or `removed` list.
 
 ```python
 @task("Install Flatpak apps", tags={"flatpak"})
@@ -80,5 +98,3 @@ def remove_flatpak_app(ctx):
 - `flatpak` must be installed.
 - `scope="system"` requests sudo. `scope="user"` never uses sudo and fails when
   kitup runs as root.
-- Updates, permission overrides, bundles, and `.flatpakref` files are out of
-  scope.

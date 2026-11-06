@@ -10,6 +10,9 @@ from kitup.modules import download
 
 Download a URL to a destination file.
 
+### Parameters
+
+- `url` — HTTP(S) source URL.
 - `dest` may be a file path, an existing directory, or end with `/`. A directory
   destination uses the URL basename.
 - `force=False` leaves an existing destination alone unless `checksum` is given
@@ -22,6 +25,16 @@ Download a URL to a destination file.
   trusted hosts with self-signed certificates.
 - `mode=None` preserves an existing mode; new files default to `0o644`.
   Ownership is never changed.
+
+### Result fields
+
+- `url` — sanitized source URL.
+- `dest` — destination path.
+- `checksum_dest` — SHA-256 checksum of the downloaded file in
+  `sha256:<digest>` form; `None` when no download was performed.
+- `duration` — elapsed download time in seconds; `0.0` when no download was
+  performed.
+- `size` — size of the destination file in bytes.
 
 ```python
 from pathlib import Path
@@ -60,9 +73,17 @@ as changed only when its bytes differ. Dry runs do not contact the remote server
 
 Download a URL into memory and return its raw bytes.
 
+### Parameters
+
+- `url` — HTTP(S) source URL.
 - `checksum` is verified before returning.
+- `headers` adds request headers.
+- `timeout` is the network timeout in seconds.
+- `validate_certs=False` disables TLS certificate verification.
 - `max_bytes` limits the response size. Set it to `None` to disable the limit.
   The default is 10 MiB.
+
+Returns the raw response body as `bytes`. This method records no call.
 
 ```python
 @task("Read example metadata")
@@ -80,6 +101,10 @@ Prefer `to_file()` for large files.
   use `files.copy(...)` when the destination should be owned by the privileged
   user.
 - Only `http` and `https` URLs are supported. Redirects are followed.
-- Content encoding is not automatically decompressed.
+- Requests send `Accept-Encoding: gzip, deflate, zstd` by default. Override it
+  through `headers` to request a different encoding, for example
+  `headers={"Accept-Encoding": "identity"}`.
+- Content encodings `gzip`, `deflate`, and `zstd` are decoded automatically.
+  Other content encodings fail the task.
 - Checksum URLs, authentication, client certificates, and non-HTTP(S) URLs are
   not supported.

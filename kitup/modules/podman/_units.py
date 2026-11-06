@@ -6,6 +6,7 @@ from pathlib import Path
 from ..._utils import file_ops
 from ...context import TaskContext
 from ...errors import TaskFailed
+from ...results import CallResult
 from ...validation import (
     require_bool,
     require_choice,
@@ -42,7 +43,7 @@ def generate_systemd(
     requires: str | Iterable[str] = (),
     after: str | Iterable[str] = (),
     mode: int | None = 0o644,
-) -> None:
+) -> CallResult:
     """Generate a systemd unit for a container.
 
     ``podman generate systemd`` is deprecated upstream in favor of Quadlet.
@@ -113,14 +114,18 @@ def generate_systemd(
         raise TaskFailed(f"podman generated an empty systemd unit for {name}")
 
     target = destination / filename
-    file_ops.apply_bytes(
-        ctx,
-        target,
-        result.stdout.encode(),
-        mode=mode,
-        owner=None,
-        group=None,
-        summary=f"write systemd unit for {name} to {target}",
-        data={"path": str(target), "container": name, "action": "unit"},
-        sudo=sudo,
+    return ctx.changed(
+        file_ops.apply_bytes(
+            ctx,
+            target,
+            result.stdout.encode(),
+            action="podman.generate_systemd",
+            mode=mode,
+            owner=None,
+            group=None,
+            summary=f"write systemd unit for {name} to {target}",
+            unchanged_summary=f"ensure systemd unit for {name} in {target}",
+            data={"path": str(target), "container": name},
+            sudo=sudo,
+        )
     )

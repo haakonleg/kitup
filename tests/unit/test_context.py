@@ -5,28 +5,79 @@ import pytest
 
 from kitup.errors import TaskFailed
 from kitup.registry import Bundle, side_effect
-from kitup.results import Status, TaskResult
+from kitup.results import CallResult, Status, TaskResult
 
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
 
 
+def _noop(ctx):
+    return None
+
+
 def task_for(name: str = "test"):
     bundle = Bundle("test")
-    add_task(bundle, lambda ctx: None, name=name)
+    add_task(bundle, _noop, name=name)
     return bundle.tasks[0]
 
 
 def test_changed_and_notes_are_task_scoped(tmp_path):
     context = make_context(tmp_path)
+    result = CallResult(action="test.task", changed=True, summary="+git", added=["git"])
 
-    context.changed({"added": ["git"]}, "+git")
+    assert context.changed(result) is result
     context.note("note")
-    assert [change.summary for change in context.changes] == ["+git"]
+    assert context.calls == [result]
+    assert context.changes == [result]
     assert context.notes == ["note"]
 
     context.begin_task(task_for())
+    assert context.calls == []
     assert context.changes == []
     assert context.notes == []
+
+
+def test_changed_builds_and_records_a_call(tmp_path):
+    context = make_context(tmp_path)
+
+    result = context.changed(action="test.method", summary="+pkg", package="pkg")
+
+    assert isinstance(result, CallResult)
+    assert result.action == "test.method"
+    assert result.changed is True
+    assert result.summary == "+pkg"
+    assert result.package == "pkg"
+    assert context.calls == [result]
+    assert context.changes == [result]
+
+
+def test_changed_defaults_action_to_the_task_function(tmp_path):
+    context = make_context(tmp_path)
+    context.begin_task(task_for())
+
+    result = context.changed(summary="+pkg")
+
+    assert result.action == "task._noop"
+
+
+def test_call_result_requires_a_non_empty_action(tmp_path):
+    with pytest.raises(TypeError):
+        CallResult(changed=True, summary="+pkg")  # type: ignore[call-arg]
+    with pytest.raises(ValueError, match="action"):
+        CallResult(action="", changed=True, summary="+pkg")
+
+    context = make_context(tmp_path)
+    with pytest.raises(ValueError, match="action"):
+        context.changed(action="", summary="+pkg")
+
+
+def test_changed_can_build_a_no_change_call(tmp_path):
+    context = make_context(tmp_path)
+
+    result = context.changed(changed=False, summary="ensure pkg", package="pkg")
+
+    assert result.changed is False
+    assert context.calls == [result]
+    assert context.changes == []
 
 
 def test_memo_is_cached_across_tasks(tmp_path):
@@ -140,57 +191,7 @@ def test_results_survive_begin_task(tmp_path):
     assert context.result(task.func) is result
 
 
-def test_creates_guard_skips_command_and_resolves_cwd(tmp_path):
-    command = FakeCommandRunner()
-    context = make_context(tmp_path, command=command)
-    marker = tmp_path / "marker"
-    marker.write_text("exists")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "marker").write_text("exists")
-
-    context.run(["touch", str(marker)], creates=marker)
-    context.run(["touch", "marker"], creates="marker", cwd=work)
-
-    assert command.calls == []
-    assert context.changes == []
-
-
-def test_unless_guard_is_evaluated_even_in_dry_run(tmp_path):
-    command = FakeCommandRunner(returncode=0)
-    context = make_context(tmp_path, dry_run=True, command=command)
-
-    context.run(["install", "thing"], unless=["test", "-e", "/thing"])
-
-    assert command.calls == [
-        (
-            ["test", "-e", "/thing"],
-            {
-                "cwd": None,
-                "env": None,
-                "sudo": False,
-                "timeout": 600,
-                "check": False,
-                "refresh_sudo": False,
-            },
-        )
-    ]
-    assert context.changes == []
-
-
-def test_dry_run_records_but_does_not_execute_mutating_command(tmp_path):
-    command = FakeCommandRunner()
-    context = make_context(tmp_path, dry_run=True, command=command)
-
-    context.run(["dnf5", "install", "-y", "git"])
-
-    assert command.calls == []
-    assert len(context.changes) == 1
-    assert context.changes[0].summary == "would run: dnf5 install -y git"
-    assert context.changes[0].data["reason"] == "would run unconditionally"
-
-
-def test_command_runs_and_records_change(tmp_path):
+def test_run_executes_the_command_and_returns_its_process(tmp_path):
     command = FakeCommandRunner()
     context = make_context(tmp_path, command=command)
 
@@ -198,8 +199,31 @@ def test_command_runs_and_records_change(tmp_path):
 
     assert result.returncode == 0
     assert command.calls[0][0] == ["dnf5", "install", "-y", "git"]
-    assert len(context.changes) == 1
-    assert context.changes[0].data == {"argv": ["dnf5", "install", "-y", "git"]}
+    assert context.calls == []
+
+
+def test_run_does_not_handle_guards_or_dry_run(tmp_path):
+    command = FakeCommandRunner()
+    context = make_context(tmp_path, dry_run=True, command=command)
+
+    context.run(["touch", "file"])
+
+    assert command.calls[0][0] == ["touch", "file"]
+    assert context.calls == []
+
+    with pytest.raises(TypeError):
+        context.run(["true"], creates="marker")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        context.run(["true"], unless=["true"])  # type: ignore[call-arg]
+
+
+def test_run_forwards_check(tmp_path):
+    command = FakeCommandRunner()
+    context = make_context(tmp_path, command=command)
+
+    context.run(["probe"], check=False)
+
+    assert command.calls[0][1]["check"] is False
 
 
 def test_probe_returns_nonzero_result_instead_of_failing(tmp_path):
@@ -242,7 +266,7 @@ def test_sudo_is_revalidated_when_credentials_expire(tmp_path):
     assert sudo.reasons == [expected, expected]
 
 
-def test_dry_run_mutating_command_requests_sudo_but_does_not_execute(tmp_path):
+def test_run_requests_sudo_even_in_dry_run(tmp_path):
     command = FakeCommandRunner()
     sudo = FakeSudo()
     context = make_context(tmp_path, dry_run=True, command=command, sudo=sudo)
@@ -251,31 +275,16 @@ def test_dry_run_mutating_command_requests_sudo_but_does_not_execute(tmp_path):
     context.run(["install"], sudo=True)
 
     assert sudo.refresh_count == 1
-    assert command.calls == []
-    assert len(context.changes) == 1
+    assert command.calls[0][0] == ["install"]
 
 
-def test_stdin_is_only_passed_to_the_real_command(tmp_path):
+def test_stdin_is_passed_to_the_command(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [lambda argv: 1, lambda argv: 0]
     context = make_context(tmp_path, command=command)
 
-    context.run(["login"], unless=["check"], stdin="secret\n")
+    context.run(["login"], stdin="secret\n")
 
-    assert "stdin" not in command.calls[0][1]
-    assert command.calls[1][1]["stdin"] == "secret\n"
-
-
-def test_guard_can_run_against_nonzero_result(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [lambda argv: 1, lambda argv: 0]
-    context = make_context(tmp_path, command=command)
-
-    result = context.run(["install"], unless=["test", "-e", "/thing"])
-
-    assert len(command.calls) == 2
-    assert result.returncode == 0
-    assert len(context.changes) == 1
+    assert command.calls[0][1]["stdin"] == "secret\n"
 
 
 def test_bundle_is_the_owning_bundle_for_the_current_task(tmp_path):

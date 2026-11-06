@@ -33,20 +33,18 @@ class CommandRunner:
         sudo: bool = False,
         timeout: float = 600,
         check: bool = True,
-        refresh_sudo: bool = True,
         stdin: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run an argv-style command and return its completed process.
 
         When ``stdin`` is set, it is written to the command's standard input.
+        Callers that use ``sudo=True`` must ensure credentials are valid.
         """
         command = [str(part) for part in normalize_strings(argv)]
         if not command:
             raise TaskFailed("empty command")
 
         if sudo:
-            if refresh_sudo:
-                self.privileges.refresh()
             command = self.privileges.wrap(command)
 
         command_env = None

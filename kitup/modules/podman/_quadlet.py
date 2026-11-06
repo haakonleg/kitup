@@ -7,6 +7,7 @@ from pathlib import Path
 from ..._utils import file_ops
 from ...context import TaskContext
 from ...errors import TaskFailed
+from ...results import CallResult
 from ...validation import require_mode, require_non_negative_int, require_scope, require_text
 from ._common import (
     NATIVE_QUADLET_KEYS,
@@ -33,7 +34,7 @@ def quadlet(
     install_target: str | None = None,
     stop_timeout: int | None = None,
     mode: int | None = 0o644,
-) -> None:
+) -> CallResult:
     """Write a Quadlet ``.container`` file.
 
     The parent directory must already exist. The Quadlet is written but not
@@ -77,16 +78,20 @@ def quadlet(
         extra_lines=extra_lines,
         install_target=target,
     )
-    file_ops.apply_bytes(
-        ctx,
-        path,
-        content.encode(),
-        mode=mode,
-        owner=None,
-        group=None,
-        summary=f"write quadlet {name} to {path}",
-        data={"path": str(path), "container": name, "action": "quadlet"},
-        sudo=sudo,
+    return ctx.changed(
+        file_ops.apply_bytes(
+            ctx,
+            path,
+            content.encode(),
+            action="podman.quadlet",
+            mode=mode,
+            owner=None,
+            group=None,
+            summary=f"write quadlet {name} to {path}",
+            unchanged_summary=f"ensure quadlet {name} in {path}",
+            data={"path": str(path), "container": name},
+            sudo=sudo,
+        )
     )
 
 

@@ -14,8 +14,8 @@ from .errors import SkipTask, TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
 from .registry import Bundle, SideEffect, Task
-from .results import Change, TaskResult
-from .validation import normalize_strings, require_text
+from .results import CallResult, TaskResult
+from .validation import require_text
 
 _MISSING: Final = object()
 
@@ -52,7 +52,7 @@ class TaskContext:
         self.command = command
         self.output = output
 
-        self._changes: list[Change] = []
+        self._calls: list[CallResult] = []
         self._notes: list[str] = []
         self._memo: dict[str, Any] = {}
         self._results: dict[Callable[..., Any], TaskResult] = {}
@@ -66,9 +66,14 @@ class TaskContext:
         self.privileged_worker: PrivilegedWorker = PrivilegedWorker(self)
 
     @property
-    def changes(self) -> list[Change]:
-        """Return the changes recorded for the current task."""
-        return list(self._changes)
+    def calls(self) -> list[CallResult]:
+        """Return all calls recorded for the current task."""
+        return list(self._calls)
+
+    @property
+    def changes(self) -> list[CallResult]:
+        """Return the calls that changed something for the current task."""
+        return [call for call in self._calls if call.changed]
 
     @property
     def notes(self) -> list[str]:
@@ -118,7 +123,7 @@ class TaskContext:
 
     def begin_task(self, task: Task, *, is_side_effect: bool = False) -> None:
         """Reset task-scoped state while retaining per-run state."""
-        self._changes.clear()
+        self._calls.clear()
         self._notes.clear()
         self._task_name = task.name
         self._bundle = task.bundle
@@ -169,73 +174,37 @@ class TaskContext:
         self,
         argv: str | Sequence[str],
         *,
-        mutates: bool = True,
-        creates: str | Path | None = None,
-        unless: str | Sequence[str] | None = None,
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
         sudo: bool = False,
         timeout: float = 600,
-        record: bool = True,
+        check: bool = True,
         stdin: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        """Run a command, honoring guards and dry-run.
+        """Run a command and return its completed process.
 
-        Only commands run with ``sudo=True`` request sudo credentials. Cached
-        credentials are checked again before every privileged operation.
-        ``stdin`` is passed to the command but never to an ``unless`` probe.
+        This is a pure command runner: it never records changes, evaluates
+        guards, or handles dry-run. Only commands run with ``sudo=True``
+        request sudo credentials; cached credentials are checked again before
+        every privileged operation.
         """
-        command = [str(part) for part in normalize_strings(argv)]
-        if not command:
-            raise TaskFailed("empty command")
-
-        if creates is not None:
-            marker = Path(creates)
-            if cwd is not None and not marker.is_absolute():
-                marker = Path(cwd) / marker
-            if marker.exists():
-                return _skipped(command)
-
         if sudo:
             self.ensure_sudo()
 
-        run_options: dict[str, Any] = {
-            "cwd": cwd,
-            "env": env,
-            "sudo": sudo,
-            "timeout": timeout,
-            "refresh_sudo": False,
-        }
-
-        if unless is not None:
-            probe = self.command.run(normalize_strings(unless), check=False, **run_options)
-            if probe.returncode == 0:
-                return _skipped(command)
-
-        if mutates and self.dry_run:
-            if record:
-                self._changes.append(
-                    Change(
-                        {"argv": command, "reason": "would run unconditionally"},
-                        f"would run: {' '.join(command)}",
-                    )
-                )
-            return _skipped(command)
-
-        if mutates:
-            result = self.command.run(command, stdin=stdin, **run_options)
-            if record:
-                self._changes.append(Change({"argv": command}, " ".join(command)))
-            return result
-
-        # Probes are queries: a nonzero exit is data for the caller, not a
-        # task failure.
-        return self.command.run(command, check=False, stdin=stdin, **run_options)
+        return self.command.run(
+            argv,
+            cwd=cwd,
+            env=env,
+            sudo=sudo,
+            timeout=timeout,
+            check=check,
+            stdin=stdin,
+        )
 
     def probe(self, argv: str | Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        """Run a query command without recording a change."""
-        kwargs.pop("mutates", None)
-        return self.run(argv, mutates=False, **kwargs)
+        """Run a query command without failing on a nonzero exit."""
+        kwargs.pop("check", None)
+        return self.run(argv, check=False, **kwargs)
 
     def skip(self, reason: str = "") -> Never:
         """Skip the current task before making any changes."""
@@ -245,9 +214,48 @@ class TaskContext:
         """Fail the current task with the given reason."""
         raise TaskFailed(reason)
 
-    def changed(self, data: dict[str, Any], summary: str) -> None:
-        """Record one module-level change for the current task."""
-        self._changes.append(Change(data, summary))
+    @overload
+    def changed(self, result: CallResult) -> CallResult: ...
+
+    @overload
+    def changed(
+        self,
+        *,
+        action: str | None = None,
+        changed: bool = True,
+        summary: str,
+        **data: Any,
+    ) -> CallResult: ...
+
+    def changed(
+        self,
+        result: CallResult | None = None,
+        *,
+        action: str | None = None,
+        changed: bool = True,
+        summary: str = "",
+        **data: Any,
+    ) -> CallResult:
+        """Record one module-level call for the current task and return it.
+
+        Pass an existing ``CallResult`` or keyword data to build one. Module
+        methods pass ``action="<module>.<method>"``; user task code may omit it
+        and gets ``task.<function name>``.
+        """
+        if result is None:
+            result = CallResult(
+                action=self._default_action() if action is None else action,
+                changed=changed,
+                summary=summary,
+                **data,
+            )
+        self._calls.append(result)
+        return result
+
+    def _default_action(self) -> str:
+        if self._task is not None:
+            return f"task.{self._task.func.__name__}"
+        return "task"
 
     def note(self, detail: str) -> None:
         """Attach an informational note to the current task line."""
@@ -311,7 +319,3 @@ class TaskContext:
         if default is _MISSING:
             raise TaskFailed(f"no stored value for key: {key}")
         return default
-
-
-def _skipped(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess(argv, 0, "", "")

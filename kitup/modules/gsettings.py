@@ -4,6 +4,7 @@ from typing import Any
 
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from ..validation import State, require_state, require_text
 
 
@@ -14,7 +15,7 @@ def key(
     value: Any = None,
     *,
     state: State = "present",
-) -> None:
+) -> CallResult:
     """Manage a gsettings key, or reset it to its schema default."""
     require_state(state, "gsettings")
     require_text(schema, "gsettings schema")
@@ -23,27 +24,39 @@ def key(
         raise TaskFailed("gsettings must run as the target user, not root")
 
     if state == "absent":
-        _reset(ctx, schema, key)
-        return
+        return ctx.changed(_reset(ctx, schema, key))
     if value is None:
         raise TaskFailed("value is required when state is present")
 
     desired = _format_value(value)
     if _read(ctx, schema, key) == desired:
-        return
+        return ctx.changed(
+            action="gsettings.key",
+            changed=False,
+            summary=f"ensure {schema} {key}={desired}",
+            schema=schema,
+            key=key,
+            value=value,
+        )
 
-    ctx.changed(
-        {"schema": schema, "key": key, "value": value},
-        f"{schema} {key}={desired}",
+    call = CallResult(
+        action="gsettings.key",
+        changed=True,
+        summary=f"set {schema} {key}={desired}",
+        schema=schema,
+        key=key,
+        value=value,
     )
+    if ctx.dry_run:
+        return ctx.changed(call)
     ctx.run(
         ["gsettings", "set", schema, key, desired],
         sudo=False,
-        record=False,
     )
+    return ctx.changed(call)
 
 
-def _reset(ctx: TaskContext, schema: str, key: str) -> None:
+def _reset(ctx: TaskContext, schema: str, key: str) -> CallResult:
     # Read first so a missing schema or key fails before recording a change.
     current = _read(ctx, schema, key)
     default = ctx.probe(
@@ -52,17 +65,28 @@ def _reset(ctx: TaskContext, schema: str, key: str) -> None:
         env={"GSETTINGS_BACKEND": "memory"},
     )
     if default.returncode == 0 and current == _normalize(default.stdout):
-        return
+        return CallResult(
+            action="gsettings.key",
+            changed=False,
+            summary=f"ensure {schema} {key} is reset",
+            schema=schema,
+            key=key,
+        )
 
-    ctx.changed(
-        {"schema": schema, "key": key, "state": "absent"},
-        f"reset {schema} {key}",
+    call = CallResult(
+        action="gsettings.key",
+        changed=True,
+        summary=f"reset {schema} {key}",
+        schema=schema,
+        key=key,
     )
+    if ctx.dry_run:
+        return call
     ctx.run(
         ["gsettings", "reset", schema, key],
         sudo=False,
-        record=False,
     )
+    return call
 
 
 def _read(ctx: TaskContext, schema: str, key: str) -> str:

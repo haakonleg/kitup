@@ -11,6 +11,8 @@ from kitup.registry import task
 
 Ensure a local user account exists or is absent.
 
+### Parameters
+
 - `name` — login name.
 - `state` — `"present"` or `"absent"`.
 - `uid` — numeric UID. Applied only when creating a user; an existing user with
@@ -30,6 +32,12 @@ Remove files separately if needed.
 
 Supplementary group membership is managed with `membership()`; `user()` does
 not accept a group list.
+
+### Result fields
+
+- `user` — login name.
+- `changed_attributes` — changed attributes such as `group`, `home`, `shell`, or
+  `password` (modify results only).
 
 ```python
 @task("Create deployment user", tags={"users"})
@@ -55,10 +63,16 @@ def remove_old_user(ctx):
 
 Ensure a local group exists or is absent.
 
+### Parameters
+
 - `name` — group name.
 - `state` — `"present"` or `"absent"`.
 - `gid` — numeric GID. Applied only when creating a group; an existing group
   with a different GID fails.
+
+### Result fields
+
+- `group` — group name.
 
 ```python
 @task("Create application group", tags={"users"})
@@ -75,11 +89,18 @@ def remove_old_group(ctx):
 
 Ensure a user is a supplementary member of a group.
 
+### Parameters
+
 - `user` — existing login name.
 - `group` — existing group name.
 - `state="present"` adds the user to the group's supplementary member list.
 - `state="absent"` removes the user from the group's supplementary member
   list.
+
+### Result fields
+
+- `user` — login name.
+- `group` — group name.
 
 ```python
 @task("Grant docker access", tags={"users"})

@@ -181,19 +181,15 @@ class Runner:
             detail = f"{type(exc).__name__}: {exc}"
             error = exc
 
-        if status is Status.SKIPPED:
-            changes = []
-            notes = []
-        else:
-            changes = self.context.changes
-            notes = self.context.notes
-            if status is Status.OK and changes:
-                status = Status.CHANGED
+        calls = self.context.calls
+        notes = [] if status is Status.SKIPPED else self.context.notes
+        if status is Status.OK and any(call.changed for call in calls):
+            status = Status.CHANGED
 
         result = TaskResult(
             task=task,
             status=status,
-            changes=changes,
+            calls=calls,
             notes=notes,
             detail=detail,
             duration=self.output.task_elapsed,

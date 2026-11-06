@@ -5,7 +5,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import sysctl
 
-from .helpers import FakeCommandRunner, FakeSudo, completed, make_context
+from .helpers import FakeCommandRunner, FakeSudo, call_data, completed, make_context
 
 
 def response(returncode: int = 0, stdout: str = "", stderr: str = ""):
@@ -147,7 +147,12 @@ def test_runtime_only_when_file_is_none(tmp_path):
         ["sysctl", "-w", "vm.swappiness=10"],
     ]
     assert command.calls[1][1]["sudo"] is True
-    assert ctx.changes[0].data == {"key": "vm.swappiness", "value": "10"}
+    assert call_data(ctx.changes[0]) == {
+        "key": "vm.swappiness",
+        "value": "10",
+        "runtime": True,
+    }
+    assert ctx.changes[0].action == "sysctl.key"
     assert ctx.changes[0].summary == "set vm.swappiness=10"
     assert list(tmp_path.glob("*.conf")) == []
 
@@ -177,7 +182,14 @@ def test_file_is_updated_and_runtime_is_set(tmp_path):
         ["sysctl", "-n", "vm.swappiness"],
         ["sysctl", "-w", "vm.swappiness=10"],
     ]
-    assert len(ctx.changes) == 2  # file edit plus runtime set
+    assert len(ctx.changes) == 1
+    assert call_data(ctx.changes[0]) == {
+        "key": "vm.swappiness",
+        "value": "10",
+        "runtime": True,
+        "path": str(conf),
+    }
+    assert ctx.changes[0].summary == f"set vm.swappiness in {conf}; set vm.swappiness=10"
 
 
 def test_file_is_created_when_missing(tmp_path):
@@ -215,7 +227,7 @@ def test_absent_removes_entries(tmp_path):
 
     assert conf.read_text() == "other = 1\n"
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data["state"] == "absent"
+    assert call_data(ctx.changes[0]) == {"path": str(conf), "key": "vm.swappiness"}
     assert ctx.changes[0].summary == f"remove vm.swappiness from {conf}"
 
 
@@ -228,6 +240,7 @@ def test_absent_is_a_noop_when_the_entry_is_missing(tmp_path):
 
     assert conf.read_text() == "other = 1\n"
     assert ctx.changes == []
+    assert ctx.calls[0].summary == f"ensure vm.swappiness is absent from {conf}"
 
 
 def test_absent_without_file_is_rejected(tmp_path):
@@ -248,7 +261,13 @@ def test_dry_run_reports_without_mutating(tmp_path):
 
     assert conf.read_text() == "vm.swappiness = 60\n"
     assert [call[0] for call in command.calls] == [["sysctl", "-n", "vm.swappiness"]]
-    assert len(ctx.changes) == 2  # file edit and runtime set are both reported
+    assert len(ctx.changes) == 1
+    assert call_data(ctx.changes[0]) == {
+        "key": "vm.swappiness",
+        "value": "10",
+        "runtime": True,
+        "path": str(conf),
+    }
 
 
 def test_bool_and_int_values_are_formatted(tmp_path):

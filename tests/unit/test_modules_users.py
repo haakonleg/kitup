@@ -7,7 +7,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import users
 
-from .helpers import FakeCommandRunner, completed, make_context
+from .helpers import FakeCommandRunner, call_data, completed, make_context
 
 PASSWORD = "$6$kitup-test$LOewqL.rBYltdCYVJzzJvj2GJPwRIYtIRATKZWYBHuVQqgpiBQ4EmSwr926LJv.g5VmhlqkdCa6.DgSfJ8I420"
 
@@ -218,8 +218,11 @@ def test_create_user_with_attributes(tmp_path):
         "shell": "/bin/zsh",
     }
     assert store.shadows["alice"] == PASSWORD
-    assert ctx.changes[0].data == {"user": "alice", "action": "create"}
-    assert ctx.changes[0].summary == "create user alice"
+    assert call_data(ctx.changes[0]) == {
+        "user": "alice",
+    }
+    assert ctx.changes[0].action == "users.user"
+    assert ctx.changes[0].summary == "create user alice; set password for alice"
     assert commands(store) == [
         ["getent", "passwd", "alice"],
         ["getent", "group", "devs"],
@@ -292,10 +295,9 @@ def test_modify_user_attributes(tmp_path):
         "home": "/srv/alice",
         "shell": "/bin/zsh",
     }
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "user": "alice",
-        "action": "modify",
-        "fields": ["group", "home", "shell"],
+        "changed_attributes": ["group", "home", "shell"],
     }
     assert ["usermod", "-g", "devs", "-d", "/srv/alice", "-s", "/bin/zsh", "alice"] in commands(store)
 
@@ -336,7 +338,10 @@ def test_password_is_set_only_when_different(tmp_path):
     users.user(ctx, "alice", password=PASSWORD)
 
     assert store.shadows["alice"] == PASSWORD
-    assert ctx.changes[0].data == {"user": "alice", "action": "password"}
+    assert call_data(ctx.changes[0]) == {
+        "user": "alice",
+        "changed_attributes": ["password"],
+    }
     assert PASSWORD not in str(ctx.changes)
     assert all(PASSWORD not in command for command in commands(store))
     assert ["chpasswd", "-e"] in commands(store)
@@ -360,7 +365,8 @@ def test_remove_user_leaves_home(tmp_path):
     users.user(ctx, "alice", state="absent")
 
     assert "alice" not in store.users
-    assert ctx.changes[0].data == {"user": "alice", "action": "remove"}
+    assert call_data(ctx.changes[0]) == {"user": "alice"}
+    assert ctx.changes[0].action == "users.user"
     assert ctx.changes[0].summary == "remove user alice"
     assert ["userdel", "alice"] in commands(store)
 
@@ -380,7 +386,8 @@ def test_create_group(tmp_path):
     users.group(ctx, "devs", gid=1500)
 
     assert store.groups["devs"] == {"gid": 1500, "members": []}
-    assert ctx.changes[0].data == {"group": "devs", "action": "create"}
+    assert call_data(ctx.changes[0]) == {"group": "devs"}
+    assert ctx.changes[0].action == "users.group"
     assert ["groupadd", "-g", "1500", "devs"] in commands(store)
 
 
@@ -431,7 +438,8 @@ def test_remove_group(tmp_path):
     users.group(ctx, "devs", state="absent")
 
     assert "devs" not in store.groups
-    assert ctx.changes[0].data == {"group": "devs", "action": "remove"}
+    assert call_data(ctx.changes[0]) == {"group": "devs"}
+    assert ctx.changes[0].action == "users.group"
     assert ["groupdel", "devs"] in commands(store)
 
 
@@ -465,7 +473,8 @@ def test_membership_add_and_remove(tmp_path):
     users.membership(ctx, "alice", "devs")
 
     assert store.groups["devs"]["members"] == ["alice"]
-    assert ctx.changes[0].data == {"user": "alice", "group": "devs", "action": "add"}
+    assert call_data(ctx.changes[0]) == {"user": "alice", "group": "devs"}
+    assert ctx.changes[0].action == "users.membership"
 
     before = len(store.calls)
     second, _ = make_users_context(tmp_path, accounts=store)
@@ -481,7 +490,8 @@ def test_membership_add_and_remove(tmp_path):
     users.membership(third, "alice", "devs", state="absent")
 
     assert store.groups["devs"]["members"] == []
-    assert third.changes[0].data == {"user": "alice", "group": "devs", "action": "remove"}
+    assert call_data(third.changes[0]) == {"user": "alice", "group": "devs"}
+    assert third.changes[0].action == "users.membership"
 
 
 def test_membership_primary_group_present_is_noop(tmp_path):
@@ -539,8 +549,11 @@ def test_dry_run_reports_without_mutating(tmp_path):
     )
     users.group(ctx, "newgroup", gid=1600)
 
-    assert ctx.changes[0].data == {"user": "alice", "action": "create"}
-    assert ctx.changes[1].data == {"group": "newgroup", "action": "create"}
+    assert call_data(ctx.changes[0]) == {
+        "user": "alice",
+    }
+    assert call_data(ctx.changes[1]) == {"group": "newgroup"}
+    assert ctx.changes[1].action == "users.group"
     assert "alice" not in store.users
     assert "newgroup" not in store.groups
     assert not any(command[0] in {"useradd", "groupadd", "chpasswd"} for command in commands(store))

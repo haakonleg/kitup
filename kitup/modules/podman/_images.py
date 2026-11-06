@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ...context import TaskContext
 from ...errors import TaskFailed
+from ...results import CallResult
 from ...validation import (
     State,
     normalize_strings,
@@ -40,7 +41,7 @@ def image(
     force: bool = False,
     timeout: float = 600,
     sudo: bool = False,
-) -> None:
+) -> CallResult:
     """Ensure an image is present locally or absent.
 
     ``name`` is the local image name. ``source`` optionally names a
@@ -67,38 +68,59 @@ def image(
     podman_command = podman(ctx)
     if state == "present":
         if pull != "always" and image_exists(ctx, podman_command, name, sudo=sudo):
-            return
+            data = {"image": name}
+            if source is not None:
+                data["source"] = source
+            return ctx.changed(
+                action="podman.image",
+                changed=False,
+                summary=f"ensure image {name}",
+                **data,
+            )
         if pull == "never":
             raise TaskFailed(f"image is not present locally: {name}")
         platform_args = ["--platform", platform] if platform is not None else []
-        data = {"image": name, "action": "pull"}
+        data = {"image": name}
         summary = f"pull {name}"
         if source is not None:
             data["source"] = source
             summary = f"pull {name} from {source}"
-        ctx.changed(data, summary)
+        call = CallResult(action="podman.image", changed=True, summary=summary, **data)
+        if ctx.dry_run:
+            return ctx.changed(call)
         ctx.run(
             [podman_command, "pull", *platform_args, pull_source],
             timeout=timeout,
             sudo=sudo,
-            record=False,
         )
-        if source is not None and not ctx.dry_run and not image_exists(ctx, podman_command, name, sudo=sudo):
+        if source is not None and not image_exists(ctx, podman_command, name, sudo=sudo):
             raise TaskFailed(f"image is missing after pull: {name}")
-        return
+        return ctx.changed(call)
 
     if not image_exists(ctx, podman_command, name, sudo=sudo):
-        return
-    ctx.changed({"image": name, "action": "remove"}, f"remove image {name}")
+        return ctx.changed(
+            action="podman.image",
+            changed=False,
+            summary=f"ensure image {name} is absent",
+            image=name,
+        )
+    call = CallResult(
+        action="podman.image",
+        changed=True,
+        summary=f"remove image {name}",
+        image=name,
+    )
+    if ctx.dry_run:
+        return ctx.changed(call)
     force_args = ["--force"] if force else []
     ctx.run(
         [podman_command, "rmi", *force_args, name],
         timeout=timeout,
         sudo=sudo,
-        record=False,
     )
-    if not ctx.dry_run and image_exists(ctx, podman_command, name, sudo=sudo):
+    if image_exists(ctx, podman_command, name, sudo=sudo):
         raise TaskFailed(f"image is still present after removal: {name}")
+    return ctx.changed(call)
 
 
 def build(
@@ -113,7 +135,7 @@ def build(
     no_cache: bool = False,
     timeout: float = 600,
     sudo: bool = False,
-) -> None:
+) -> CallResult:
     """Build an image from a context directory.
 
     Relative paths resolve like other source paths: a bare name under the
@@ -139,7 +161,13 @@ def build(
     argument_args = build_arg_args(build_args)
     podman_command = podman(ctx)
     if not force and image_exists(ctx, podman_command, tag, sudo=sudo):
-        return
+        return ctx.changed(
+            action="podman.build",
+            changed=False,
+            summary=f"ensure image {tag}",
+            image=tag,
+            context=str(context_path),
+        )
 
     command = [podman_command, "build", "-t", tag]
     if containerfile_path is not None:
@@ -151,13 +179,19 @@ def build(
         command.append("--no-cache")
     command.append(str(context_path))
 
-    ctx.changed(
-        {"image": tag, "context": str(context_path), "action": "build"},
-        f"build {tag} from {context_path}",
+    call = CallResult(
+        action="podman.build",
+        changed=True,
+        summary=f"build {tag} from {context_path}",
+        image=tag,
+        context=str(context_path),
     )
-    ctx.run(command, timeout=timeout, sudo=sudo, record=False)
-    if not ctx.dry_run and not image_exists(ctx, podman_command, tag, sudo=sudo):
+    if ctx.dry_run:
+        return ctx.changed(call)
+    ctx.run(command, timeout=timeout, sudo=sudo)
+    if not image_exists(ctx, podman_command, tag, sudo=sudo):
         raise TaskFailed(f"image is missing after build: {tag}")
+    return ctx.changed(call)
 
 
 def tag(
@@ -166,7 +200,7 @@ def tag(
     targets: str | Iterable[str],
     *,
     sudo: bool = False,
-) -> None:
+) -> CallResult:
     """Add one or more target names to a local image."""
     require_text(image, "image name")
     wanted = unique_strings(normalize_strings(targets))
@@ -177,10 +211,22 @@ def tag(
     source_id = image_id(ctx, podman_command, image, sudo=sudo)
     changed = [target for target in wanted if image_id_or_none(ctx, podman_command, target, sudo=sudo) != source_id]
     if not changed:
-        return
+        return ctx.changed(
+            action="podman.tag",
+            changed=False,
+            summary=f"ensure tags for {image}",
+            source=image,
+            targets=[],
+        )
 
-    ctx.changed(
-        {"source": image, "targets": changed, "action": "tag"},
-        f"tag {image} as {', '.join(changed)}",
+    call = CallResult(
+        action="podman.tag",
+        changed=True,
+        summary=f"tag {image} as {', '.join(changed)}",
+        source=image,
+        targets=changed,
     )
-    ctx.run([podman_command, "tag", image, *changed], sudo=sudo, record=False)
+    if ctx.dry_run:
+        return ctx.changed(call)
+    ctx.run([podman_command, "tag", image, *changed], sudo=sudo)
+    return ctx.changed(call)

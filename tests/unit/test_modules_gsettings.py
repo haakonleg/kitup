@@ -3,7 +3,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import gsettings
 
-from .helpers import FakeCommandRunner, FakeSudo, completed, make_context
+from .helpers import FakeCommandRunner, FakeSudo, call_data, completed, make_context
 
 
 def response(returncode: int = 0, stdout: str = "", stderr: str = ""):
@@ -36,7 +36,7 @@ def test_string_value_is_set_with_gvariant_quoting(tmp_path):
         "'it\\'s dark'",
     ]
     assert command.calls[1][1]["sudo"] is False
-    assert ctx.changes[0].data["value"] == "it's dark"
+    assert call_data(ctx.changes[0])["value"] == "it's dark"
 
 
 def test_bool_int_and_list_values_are_formatted(tmp_path):
@@ -106,11 +106,11 @@ def test_absent_resets_the_key(tmp_path):
     ]
     assert command.calls[1][1]["env"] == {"GSETTINGS_BACKEND": "memory"}
     assert command.calls[2][1]["sudo"] is False
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "schema": "org.example",
         "key": "theme",
-        "state": "absent",
     }
+    assert ctx.changes[0].action == "gsettings.key"
     assert ctx.changes[0].summary == "reset org.example theme"
 
 

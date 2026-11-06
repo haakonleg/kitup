@@ -12,8 +12,10 @@ from kitup.registry import task
 
 Set a sysctl key, or remove its entry from a configuration file.
 
-- `name` — dot-separated key, for example `vm.swappiness`. Slashes are
-  normalized to dots, so `net/ipv4/ip_forward` works too.
+### Parameters
+
+- `name` — dot-separated key, for example `vm.swappiness`. Slashes are accepted
+  as separators, so `net/ipv4/ip_forward` works too.
 - `value` — desired value: `str`, `int`, `float`, or `bool` (`True`/`False`
   become `1`/`0`). Required when `state="present"`.
 - `state` — `"present"` or `"absent"`.
@@ -21,6 +23,14 @@ Set a sysctl key, or remove its entry from a configuration file.
   `/etc/sysctl.d/99-kitup.conf`. When given, a `name = value` entry is also
   managed in that file. When `None` (the default), only the runtime value is
   changed.
+
+### Result fields
+
+- `key` — normalized key name.
+- `value` — formatted desired value (present results).
+- `runtime` — whether the runtime value changed (present results).
+- `path` — managed sysctl file (present results when `file` is set; absent
+  results).
 
 ```python
 @task("Reduce swap usage", tags={"tuning"})
@@ -40,22 +50,15 @@ def forget_panic(ctx):
 
 ## Behavior
 
-- `state="present"` reads the current value with `sysctl -n` first. An unknown
-  key fails the task before any change is made. When the value differs,
-  `sysctl -w name=value` applies it at runtime; multi-value keys (such as
-  `kernel.printk`) are compared with normalized whitespace.
-- When `file` is set, an existing entry whose value already matches is left
-  untouched, regardless of spacing around `=` or its position in the file.
-  Otherwise all existing `name = ...` lines are removed and `name = value` is
-  appended. A missing file is created with mode `0o644`; an existing file
-  keeps its mode. Commented-out lines are left alone. The parent directory
-  must exist. `--dry-run` reports the change without writing, and `--diff`
-  prints a unified diff for the file.
-- `state="absent"` requires `file` and removes every matching entry from it.
-  The runtime value is not changed; it persists until the next reboot.
+- `state="present"` sets the runtime value. An unknown key fails the task before
+  any change is made.
+- When `file` is set, the entry is created or updated. An entry that already has
+  the desired value is left untouched. The parent directory must exist.
+  `--dry-run` reports the change without writing, and `--diff` prints a unified
+  diff for the file.
+- `state="absent"` requires `file` and removes matching entries. The runtime
+  value is not changed; it persists until the next reboot.
 
 ## Notes
 
-- `sysctl` must be installed.
 - All mutating operations request sudo automatically.
-- Only Linux is supported.

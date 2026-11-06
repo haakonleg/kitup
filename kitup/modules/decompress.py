@@ -26,6 +26,7 @@ from .._utils.file_helper import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from ..validation import normalize_strings, require_mode, require_path, require_text
 
 try:
@@ -77,7 +78,7 @@ def archive(
     include: str | Iterable[str] | None = None,
     exclude: str | Iterable[str] | None = None,
     mode: int | None = None,
-) -> None:
+) -> CallResult:
     """Extract a tar or zip archive into ``dest``, replacing only differences.
 
     ``src`` resolves like :func:`kitup.modules.files.copy`: a bare filename is
@@ -109,11 +110,20 @@ def archive(
         if not marker.is_absolute():
             marker = target / marker
         if _lstat(marker) is not None:
-            return
+            return ctx.changed(
+                action="decompress.archive",
+                changed=False,
+                summary=f"ensure {target} from {source}",
+                src=str(source),
+                dest=str(target),
+                files=[],
+                size=_directory_size(target),
+            )
 
     opened = _open_archive(source)
     try:
         entries = _select_entries(opened, strip, includes, excludes)
+        files = _archive_files(entries)
         changed = _reconcile(
             ctx,
             opened,
@@ -125,16 +135,24 @@ def archive(
     finally:
         opened.close()
 
+    size = _directory_size(target)
     if not changed:
-        return
-    ctx.changed(
-        {
-            "path": str(target),
-            "source": str(source),
-            "action": "archive",
-            "changed": len(changed),
-        },
-        f"extract {len(changed)} paths from {source} -> {target}",
+        return ctx.changed(
+            action="decompress.archive",
+            changed=False,
+            summary=f"ensure {target} from {source}",
+            src=str(source),
+            dest=str(target),
+            files=files,
+            size=size,
+        )
+    return ctx.changed(
+        action="decompress.archive",
+        summary=f"extract {len(changed)} paths from {source} -> {target}",
+        src=str(source),
+        dest=str(target),
+        files=files,
+        size=size,
     )
 
 
@@ -144,7 +162,7 @@ def file(
     dest: str | Path,
     *,
     mode: int | None = None,
-) -> None:
+) -> CallResult:
     """Decompress a single-file compression format into ``dest``.
 
     Supported formats are gzip, bzip2, xz, and zstd, detected from the file
@@ -191,12 +209,11 @@ def file(
 
     if not needs_write:
         if _reconcile_metadata(target, info, mode=mode, dry_run=ctx.dry_run):
-            _record_file_change(ctx, target, source)
-        return
+            return ctx.changed(_file_change(target, source, changed=True))
+        return ctx.changed(_file_change(target, source, changed=False))
 
     if ctx.dry_run:
-        _record_file_change(ctx, target, source)
-        return
+        return ctx.changed(_file_change(target, source, changed=True))
 
     try:
         temporary = _decompress_to_temp(source, target.parent)
@@ -212,13 +229,17 @@ def file(
         raise TaskFailed(f"could not write {target}: {exc}") from exc
     finally:
         temporary.unlink(missing_ok=True)
-    _record_file_change(ctx, target, source)
+    return ctx.changed(_file_change(target, source, changed=True))
 
 
-def _record_file_change(ctx: TaskContext, target: Path, source: Path) -> None:
-    ctx.changed(
-        {"path": str(target), "source": str(source), "action": "decompress"},
-        f"decompress {source} -> {target}",
+def _file_change(target: Path, source: Path, *, changed: bool) -> CallResult:
+    summary = f"decompress {source} -> {target}" if changed else f"ensure {target} from {source}"
+    return CallResult(
+        action="decompress.file",
+        changed=changed,
+        summary=summary,
+        dest=str(target),
+        src=str(source),
     )
 
 
@@ -518,6 +539,28 @@ def _select_entries(
         raise TaskFailed(f"could not read archive: {exc}") from exc
     _require_no_conflicts(selected)
     return selected
+
+
+def _archive_files(entries: dict[str, _Member]) -> list[str]:
+    """Return selected file and symlink entries relative to the destination."""
+    return sorted(name for name, member in entries.items() if member.kind != "dir")
+
+
+def _directory_size(path: Path) -> int:
+    """Return the total size of regular files under ``path`` in bytes."""
+    info = _lstat(path)
+    if info is None or not stat.S_ISDIR(info.st_mode):
+        return 0
+    total = 0
+    try:
+        for root, _directories, names in os.walk(path, followlinks=False):
+            for name in names:
+                file_info = _lstat(Path(root) / name)
+                if file_info is not None and stat.S_ISREG(file_info.st_mode):
+                    total += file_info.st_size
+    except OSError as exc:
+        raise TaskFailed(f"could not measure {path}: {exc}") from exc
+    return total
 
 
 def _iter_members(

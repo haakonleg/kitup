@@ -7,6 +7,7 @@ from typing import Final
 from .._utils import file_ops
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from ..validation import State, require_state, require_text
 
 _KEY_PATTERN: Final = r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*"
@@ -19,7 +20,7 @@ def key(
     *,
     state: State = "present",
     file: str | Path | None = None,
-) -> None:
+) -> CallResult:
     """Set a sysctl key at runtime and optionally persist it in a file.
 
     ``file=None`` changes only the runtime value. When ``file`` is an absolute
@@ -35,19 +36,37 @@ def key(
     if state == "absent":
         if target is None:
             raise TaskFailed("state 'absent' requires a sysctl file")
-        _remove_entry(ctx, target, key_name)
-        return
+        return ctx.changed(_remove_entry(ctx, target, key_name))
 
     if value is None:
         raise TaskFailed("value is required when state is present")
     desired = _format_value(value)
 
     current = _read_runtime(ctx, key_name)
+    file_call = _write_entry(ctx, target, key_name, desired) if target is not None else None
+    runtime_changed = _normalize_ws(current) != _normalize_ws(desired)
+    summaries: list[str] = []
+    if file_call is not None and file_call.changed:
+        summaries.append(file_call.summary)
+    if runtime_changed:
+        summaries.append(f"set {key_name}={desired}")
+    data: dict[str, object] = {
+        "key": key_name,
+        "value": desired,
+        "runtime": runtime_changed,
+    }
     if target is not None:
-        _write_entry(ctx, target, key_name, desired)
-    if _normalize_ws(current) != _normalize_ws(desired):
-        ctx.changed({"key": key_name, "value": desired}, f"set {key_name}={desired}")
-        ctx.run(["sysctl", "-w", f"{key_name}={desired}"], sudo=True, record=False)
+        data["path"] = str(target)
+    changed = runtime_changed or (file_call is not None and file_call.changed)
+    result = CallResult(
+        action="sysctl.key",
+        changed=changed,
+        summary="; ".join(summaries) if summaries else f"ensure {key_name}={desired}",
+        **data,
+    )
+    if runtime_changed and not ctx.dry_run:
+        ctx.run(["sysctl", "-w", f"{key_name}={desired}"], sudo=True)
+    return ctx.changed(result)
 
 
 def _normalize_name(name: str) -> str:
@@ -95,25 +114,32 @@ def _entry_pattern(name: str) -> re.Pattern[str]:
     return re.compile(r"^\s*" + re.escape(name) + r"\s*=")
 
 
-def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> None:
+def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> CallResult:
     pattern = _entry_pattern(name)
     text = _read_text(ctx, target)
     lines = text.splitlines(keepends=True)
     matches = [line for line in lines if pattern.search(line)]
     if len(matches) == 1 and _entry_value(matches[0]) == _normalize_ws(desired):
         # Keep the existing line, including its spacing and position.
-        return
+        return CallResult(
+            action="sysctl.key",
+            changed=False,
+            summary=f"ensure {name} in {target}",
+            path=str(target),
+            key=name,
+        )
     remaining = [line for line in lines if not pattern.search(line)]
     if remaining and not remaining[-1].endswith("\n"):
         remaining[-1] += "\n"
     remaining.append(f"{name} = {desired}\n")
-    _apply_text(
+    return _apply_text(
         ctx,
         target,
         text,
         "".join(remaining),
         summary=f"set {name} in {target}",
-        data={"path": str(target), "key": name, "action": "edit"},
+        unchanged_summary=f"ensure {name} in {target}",
+        data={"path": str(target), "key": name},
     )
 
 
@@ -122,17 +148,18 @@ def _entry_value(line: str) -> str:
     return _normalize_ws(value)
 
 
-def _remove_entry(ctx: TaskContext, target: Path, name: str) -> None:
+def _remove_entry(ctx: TaskContext, target: Path, name: str) -> CallResult:
     pattern = _entry_pattern(name)
     text = _read_text(ctx, target)
     new_text = "".join(line for line in text.splitlines(keepends=True) if not pattern.search(line))
-    _apply_text(
+    return _apply_text(
         ctx,
         target,
         text,
         new_text,
         summary=f"remove {name} from {target}",
-        data={"path": str(target), "key": name, "action": "edit", "state": "absent"},
+        unchanged_summary=f"ensure {name} is absent from {target}",
+        data={"path": str(target), "key": name},
     )
 
 
@@ -144,13 +171,20 @@ def _apply_text(
     *,
     summary: str,
     data: dict[str, object],
-) -> None:
+    unchanged_summary: str | None = None,
+) -> CallResult:
     if new_text == old_text:
-        return
-    file_ops.apply_bytes(
+        return CallResult(
+            action="sysctl.key",
+            changed=False,
+            summary=unchanged_summary or summary,
+            **data,
+        )
+    return file_ops.apply_bytes(
         ctx,
         target,
         new_text.encode(),
+        action="sysctl.key",
         mode=None,
         owner=None,
         group=None,

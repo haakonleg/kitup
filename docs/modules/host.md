@@ -12,14 +12,15 @@ from kitup.registry import task
 
 Ensure the static and/or pretty system hostname.
 
+### Parameters
+
 - `name` — static hostname, for example `workstation`. `None` leaves it
   unmanaged.
 - `pretty` — pretty hostname, for example `Workstation`. `None` leaves it
   unmanaged; an empty string clears it.
 
 At least one of `name` or `pretty` is required. Static hostnames must be valid
-lower-case DNS names and must not contain `?`. Surrounding whitespace is trimmed
-from `pretty`.
+lower-case DNS names.
 
 ```python
 @task("Configure the hostname")
@@ -32,12 +33,17 @@ def clear_pretty_hostname(ctx):
     host.hostname(ctx, pretty="")
 ```
 
-Only the requested hostname forms are changed. `host.hostname(ctx, name)` does
-not modify the pretty or transient hostname.
+Only the requested hostname forms are changed.
+
+### Result fields
+
+- `hostnames` — mapping of the requested `"static"` and `"pretty"` names.
 
 ## `timezone(ctx, zone)`
 
 Ensure the system time zone.
+
+### Parameters
 
 - `zone` — IANA time zone name, for example `Europe/Oslo`.
 
@@ -50,9 +56,15 @@ def set_timezone(ctx):
 Setting the time zone may also adjust the RTC when it is configured as local
 time.
 
+### Result fields
+
+- `timezone` — requested time zone.
+
 ## `ntp(ctx, enabled)`
 
 Enable or disable network time synchronization.
+
+### Parameters
 
 - `enabled` — `True` to enable, `False` to disable.
 
@@ -64,9 +76,15 @@ def enable_ntp(ctx):
 
 Fails when network time synchronization is unavailable.
 
+### Result fields
+
+- `ntp` — requested boolean state.
+
 ## `rtc_local(ctx, enabled=False)`
 
 Configure whether the hardware clock is interpreted as local time.
+
+### Parameters
 
 - `enabled` — `False` keeps the RTC in UTC (the default); `True` switches it to
   local time.
@@ -79,10 +97,16 @@ def keep_rtc_utc(ctx):
 
 Changing the RTC mode may adjust the system clock.
 
+### Result fields
+
+- `rtc_local` — requested boolean state.
+
 ## `locale(ctx, values)`
 
 Ensure system locale variables, leaving variables that are not listed
 unchanged.
+
+### Parameters
 
 - `values` — mapping of locale variable names to values, for example
   `{"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"}`.
@@ -98,20 +122,14 @@ def set_locale(ctx):
     host.locale(ctx, {"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"})
 ```
 
-`LC_ALL` is rejected. `LANGUAGE` must be a single locale name; colon-separated
-lists are rejected.
+`LC_ALL` is not supported, and `LANGUAGE` must be a single locale name.
 
-## Behavior
+### Result fields
 
-- Every function reads the current state first and changes only what differs.
-  A second run with the same arguments reports no changes.
-- `--dry-run` reports the changes without modifying the system.
-- Mutations request sudo automatically.
-- Changes are verified after the mutation, except for NTP.
+- `locale` — mapping of the managed variables.
 
 ## Notes
 
 - Requires systemd.
 - `locale` only sets and updates variables; it cannot remove them.
-- Kernel command line locale settings take precedence over `/etc/locale.conf`.
 - Locale changes may require a new session or reboot to take effect.

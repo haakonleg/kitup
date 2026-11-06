@@ -8,6 +8,7 @@ from typing import Final
 
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from ..validation import (
     State,
     require_bool,
@@ -51,7 +52,7 @@ def user(
     shell: str | Path | None = None,
     create_home: bool = True,
     password: str | None = None,
-) -> None:
+) -> CallResult:
     """Ensure a local user account exists with the requested attributes.
 
     ``state="absent"`` removes the account but leaves the home directory.
@@ -76,39 +77,52 @@ def user(
     current = _probe_user(ctx, name)
     if state == "absent":
         if current is None:
-            return
-        ctx.changed({"user": name, "action": "remove"}, f"remove user {name}")
-        ctx.run(["userdel", name], sudo=True, record=False)
+            return ctx.changed(
+                action="users.user",
+                changed=False,
+                summary=f"ensure user {name} is absent",
+                user=name,
+            )
+        call = CallResult(
+            action="users.user",
+            changed=True,
+            summary=f"remove user {name}",
+            user=name,
+        )
         if ctx.dry_run:
-            return
+            return ctx.changed(call)
+        ctx.run(["userdel", name], sudo=True)
         if _probe_user(ctx, name) is not None:
             raise TaskFailed(f"user still exists after removal: {name}")
-        return
+        return ctx.changed(call)
 
     desired_gid = _resolve_primary_gid(ctx, group) if group is not None else None
     if current is None:
-        _create_user(
+        return ctx.changed(
+            _create_user(
+                ctx,
+                name,
+                uid=uid,
+                group=group,
+                gid=desired_gid,
+                home=home_path,
+                shell=shell_path,
+                create_home=create_home,
+                password=password,
+            )
+        )
+
+    return ctx.changed(
+        _modify_user(
             ctx,
-            name,
+            current,
             uid=uid,
             group=group,
             gid=desired_gid,
             home=home_path,
             shell=shell_path,
-            create_home=create_home,
             password=password,
         )
-        return
-
-    _modify_user(
-        ctx,
-        current,
-        uid=uid,
-        group=group,
-        gid=desired_gid,
-        home=home_path,
-        shell=shell_path,
-        password=password,
     )
 
 
@@ -118,7 +132,7 @@ def group(
     *,
     state: State = "present",
     gid: int | None = None,
-) -> None:
+) -> CallResult:
     """Ensure a local group exists or is absent."""
     require_state(state, "group")
     _require_name(name, "group name")
@@ -128,33 +142,54 @@ def group(
     current = _probe_group(ctx, name)
     if state == "absent":
         if current is None:
-            return
-        ctx.changed({"group": name, "action": "remove"}, f"remove group {name}")
-        ctx.run(["groupdel", name], sudo=True, record=False)
+            return ctx.changed(
+                action="users.group",
+                changed=False,
+                summary=f"ensure group {name} is absent",
+                group=name,
+            )
+        call = CallResult(
+            action="users.group",
+            changed=True,
+            summary=f"remove group {name}",
+            group=name,
+        )
         if ctx.dry_run:
-            return
+            return ctx.changed(call)
+        ctx.run(["groupdel", name], sudo=True)
         if _probe_group(ctx, name) is not None:
             raise TaskFailed(f"group still exists after removal: {name}")
-        return
+        return ctx.changed(call)
 
     if current is None:
         command = ["groupadd"]
         if gid is not None:
             command.extend(["-g", str(gid)])
         command.append(name)
-        ctx.changed({"group": name, "action": "create"}, f"create group {name}")
-        ctx.run(command, sudo=True, record=False)
+        call = CallResult(
+            action="users.group",
+            changed=True,
+            summary=f"create group {name}",
+            group=name,
+        )
         if ctx.dry_run:
-            return
+            return ctx.changed(call)
+        ctx.run(command, sudo=True)
         created = _probe_group(ctx, name)
         if created is None:
             raise TaskFailed(f"group was not created: {name}")
         if gid is not None and created.gid != gid:
             raise TaskFailed(f"group {name} has GID {created.gid}, expected {gid}")
-        return
+        return ctx.changed(call)
 
     if gid is not None and gid != current.gid:
         raise TaskFailed(f"changing an existing GID is not supported: {name} has GID {current.gid}, requested {gid}")
+    return ctx.changed(
+        action="users.group",
+        changed=False,
+        summary=f"ensure group {name}",
+        group=name,
+    )
 
 
 def membership(
@@ -163,7 +198,7 @@ def membership(
     group: str,
     *,
     state: State = "present",
-) -> None:
+) -> CallResult:
     """Ensure a user is a supplementary member of a group."""
     require_state(state, "group membership")
     _require_name(user, "user name")
@@ -178,37 +213,62 @@ def membership(
 
     if account.gid == target.gid:
         if state == "present":
-            return
+            return ctx.changed(
+                action="users.membership",
+                changed=False,
+                summary=f"ensure {user} is in group {group}",
+                user=user,
+                group=group,
+            )
         raise TaskFailed(f"cannot remove {user} from primary group {group}; change the primary group with users.user()")
 
     is_member = user in target.members
     if state == "present":
         if is_member:
-            return
-        ctx.changed(
-            {"user": user, "group": group, "action": "add"},
-            f"add {user} to group {group}",
+            return ctx.changed(
+                action="users.membership",
+                changed=False,
+                summary=f"ensure {user} is in group {group}",
+                user=user,
+                group=group,
+            )
+        call = CallResult(
+            action="users.membership",
+            changed=True,
+            summary=f"add {user} to group {group}",
+            user=user,
+            group=group,
         )
-        ctx.run(["gpasswd", "-a", user, group], sudo=True, record=False)
         if ctx.dry_run:
-            return
+            return ctx.changed(call)
+        ctx.run(["gpasswd", "-a", user, group], sudo=True)
         updated = _probe_group(ctx, group)
         if updated is None or user not in updated.members:
             raise TaskFailed(f"{user} is still not a member of group {group}")
-        return
+        return ctx.changed(call)
 
     if not is_member:
-        return
-    ctx.changed(
-        {"user": user, "group": group, "action": "remove"},
-        f"remove {user} from group {group}",
+        return ctx.changed(
+            action="users.membership",
+            changed=False,
+            summary=f"ensure {user} is not in group {group}",
+            user=user,
+            group=group,
+        )
+    call = CallResult(
+        action="users.membership",
+        changed=True,
+        summary=f"remove {user} from group {group}",
+        user=user,
+        group=group,
     )
-    ctx.run(["gpasswd", "-d", user, group], sudo=True, record=False)
     if ctx.dry_run:
-        return
+        return ctx.changed(call)
+    ctx.run(["gpasswd", "-d", user, group], sudo=True)
     updated = _probe_group(ctx, group)
     if updated is None or user in updated.members:
         raise TaskFailed(f"{user} is still a member of group {group}")
+    return ctx.changed(call)
 
 
 def _create_user(
@@ -222,7 +282,7 @@ def _create_user(
     shell: str | None,
     create_home: bool,
     password: str | None,
-) -> None:
+) -> CallResult:
     command = ["useradd"]
     command.append("-m" if create_home else "-M")
     if uid is not None:
@@ -235,10 +295,18 @@ def _create_user(
         command.extend(["-s", shell])
     command.append(name)
 
-    ctx.changed({"user": name, "action": "create"}, f"create user {name}")
-    ctx.run(command, sudo=True, record=False)
+    summary = f"create user {name}"
+    if password is not None:
+        summary = f"{summary}; set password for {name}"
+    call = CallResult(
+        action="users.user",
+        changed=True,
+        summary=summary,
+        user=name,
+    )
     if ctx.dry_run:
-        return
+        return call
+    ctx.run(command, sudo=True)
 
     created = _probe_user(ctx, name)
     if created is None:
@@ -247,6 +315,7 @@ def _create_user(
     if password is not None:
         _write_password(ctx, name, password)
         _verify_password(ctx, name, password)
+    return call
 
 
 def _modify_user(
@@ -259,7 +328,7 @@ def _modify_user(
     home: str | None,
     shell: str | None,
     password: str | None,
-) -> None:
+) -> CallResult:
     if uid is not None and uid != current.uid:
         raise TaskFailed(
             f"changing an existing UID is not supported: {current.name} has UID {current.uid}, requested {uid}"
@@ -279,43 +348,47 @@ def _modify_user(
         command.extend(["-s", shell])
         fields.append("shell")
 
+    password_changed = password is not None and _probe_shadow(ctx, current.name) != password
+    changed_fields = [*fields, "password"] if password_changed else fields
+    summaries: list[str] = []
+    if fields:
+        summaries.append(f"modify user {current.name}")
+    if password_changed:
+        summaries.append(f"set password for {current.name}")
+    call = CallResult(
+        action="users.user",
+        changed=bool(changed_fields),
+        summary="; ".join(summaries) if summaries else f"ensure user {current.name}",
+        user=current.name,
+        changed_attributes=changed_fields,
+    )
+    if ctx.dry_run:
+        return call
+
     if fields:
         command.append(current.name)
-        ctx.changed(
-            {"user": current.name, "action": "modify", "fields": fields},
-            f"modify user {current.name}",
+        ctx.run(command, sudo=True)
+        updated = _probe_user(ctx, current.name)
+        if updated is None:
+            raise TaskFailed(f"user disappeared after modification: {current.name}")
+        _verify_user(
+            updated,
+            uid=None,
+            gid=gid if "group" in fields else None,
+            home=home if "home" in fields else None,
+            shell=shell if "shell" in fields else None,
         )
-        ctx.run(command, sudo=True, record=False)
-        if not ctx.dry_run:
-            updated = _probe_user(ctx, current.name)
-            if updated is None:
-                raise TaskFailed(f"user disappeared after modification: {current.name}")
-            _verify_user(
-                updated,
-                uid=None,
-                gid=gid if "group" in fields else None,
-                home=home if "home" in fields else None,
-                shell=shell if "shell" in fields else None,
-            )
 
-    if password is not None:
-        _set_password(ctx, current.name, password)
-
-
-def _set_password(ctx: TaskContext, name: str, password: str) -> None:
-    if _probe_shadow(ctx, name) == password:
-        return
-    ctx.changed({"user": name, "action": "password"}, f"set password for {name}")
-    _write_password(ctx, name, password)
-    if ctx.dry_run:
-        return
-    _verify_password(ctx, name, password)
+    if password_changed and password is not None:
+        _write_password(ctx, current.name, password)
+        _verify_password(ctx, current.name, password)
+    return call
 
 
 def _write_password(ctx: TaskContext, name: str, password: str) -> None:
     # Keep the hash out of argv so it cannot leak through process listings or
     # command-failure output.
-    ctx.run(["chpasswd", "-e"], stdin=f"{name}:{password}\n", sudo=True, record=False)
+    ctx.run(["chpasswd", "-e"], stdin=f"{name}:{password}\n", sudo=True)
 
 
 def _verify_password(ctx: TaskContext, name: str, password: str) -> None:

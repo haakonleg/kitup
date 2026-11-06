@@ -10,6 +10,7 @@ from typing import Any, cast
 from .._privileged.protocol import Request
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from .file_helper import (
     apply_metadata,
     read_path,
@@ -166,17 +167,20 @@ def apply_bytes(
     path: Path,
     content: bytes,
     *,
+    action: str,
     mode: int | None,
     owner: str | int | None,
     group: str | int | None,
     summary: str,
     data: dict[str, object],
     sudo: bool,
-) -> None:
-    """Write bytes idempotently, reporting content and metadata changes.
+    unchanged_summary: str | None = None,
+) -> CallResult:
+    """Write bytes idempotently, returning the resulting call.
 
     Existing symlinks are replaced rather than followed. ``mode=None``
     preserves an existing mode and uses ``0o644`` for new files.
+    ``unchanged_summary`` describes the desired state when nothing changes.
     """
     info = stat(ctx, path, sudo=sudo)
     is_link = info.is_symlink if info is not None else False
@@ -201,21 +205,25 @@ def apply_bytes(
         )
     )
     if not content_differs and not metadata_changed:
-        return
+        return CallResult(
+            action=action,
+            changed=False,
+            summary=unchanged_summary or summary,
+            **data,
+        )
 
     require_parent(ctx, path, sudo=sudo)
     if content_differs:
         _emit_diff(ctx, path, old, content)
     if ctx.dry_run:
         resolve_metadata(owner, group)
-    ctx.changed(data, summary)
-    if ctx.dry_run:
-        return
+        return CallResult(action=action, changed=True, summary=summary, **data)
 
     if content_differs:
         _write_bytes(ctx, path, content, resolved, owner, group, sudo=sudo)
     else:
         apply_metadata_ctx(ctx, path, resolved, owner, group, sudo=sudo)
+    return CallResult(action=action, changed=True, summary=summary, **data)
 
 
 def apply_metadata_ctx(
@@ -251,40 +259,48 @@ def remove(
     path: Path,
     info: FileInfo | None,
     *,
+    action: str,
     force: bool,
     sudo: bool,
     summary: str | None = None,
     data: dict[str, object] | None = None,
     allow_directory: bool = True,
-) -> None:
+    unchanged_summary: str | None = None,
+) -> CallResult:
     """Remove a file, symlink, or directory idempotently.
 
     ``info`` is the result of :func:`stat`; pass ``None`` when the path is
-    missing. When ``summary`` or ``data`` are omitted, record a generic
-    ``rmdir``/``remove`` change.
+    missing. When ``summary`` or ``data`` are omitted, use a generic
+    ``rmdir``/``remove`` summary and data. ``unchanged_summary`` describes the
+    desired state when the path is already absent.
     """
-    if info is None:
-        return
-    is_dir = info.is_dir and not info.is_symlink
-    if is_dir and not allow_directory:
+    is_dir = info is not None and info.is_dir and not info.is_symlink
+    if info is not None and is_dir and not allow_directory:
         raise TaskFailed(f"path is a directory: {path}")
     action = "rmdir" if is_dir and not force else "remove"
     if data is None:
-        data = {"path": str(path), "action": action}
+        data = {"path": str(path)}
     if summary is None:
         summary = f"{action} {path}"
-    ctx.changed(data, summary)
+    if info is None:
+        return CallResult(
+            action=action,
+            changed=False,
+            summary=unchanged_summary or f"ensure {path} is absent",
+            **data,
+        )
     if ctx.dry_run:
-        return
+        return CallResult(action=action, changed=True, summary=summary, **data)
     if privileged(ctx, sudo=sudo):
         worker_request(ctx, "remove", path=str(path), force=force)
-        return
+        return CallResult(action=action, changed=True, summary=summary, **data)
     try:
         remove_path(path, force=force)
     except OSError as exc:
         if is_dir and not force:
             raise TaskFailed(f"directory is not empty: {path}") from exc
         raise TaskFailed(f"could not remove {path}: {exc}") from exc
+    return CallResult(action=action, changed=True, summary=summary, **data)
 
 
 def _write_bytes(

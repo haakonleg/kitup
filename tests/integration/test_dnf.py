@@ -146,10 +146,43 @@ def test_install_local_rpm(tmp_path: Path) -> None:
 
         @task("install local RPM")
         def install_rpm(ctx):
-            dnf.rpm(ctx, {str(TEST_RPM)!r})
+            result = dnf.rpm(ctx, {str(TEST_RPM)!r})
+            assert result.installed == [{TEST_PACKAGE!r}], result.installed
         """,
     )
     assert run_kitup("apply", root) == 0
+    assert rpm_installed(TEST_PACKAGE)
+
+
+def test_install_local_rpm_is_idempotent(tmp_path: Path) -> None:
+    first_root = write_bundle(
+        tmp_path / "first",
+        "dnf_rpm_first",
+        f"""
+        from kitup.modules import dnf
+
+        @task("install local RPM")
+        def install_rpm(ctx):
+            result = dnf.rpm(ctx, {str(TEST_RPM)!r})
+            assert result.installed == [{TEST_PACKAGE!r}], result.installed
+        """,
+    )
+    assert run_kitup("apply", first_root) == 0
+    assert rpm_installed(TEST_PACKAGE)
+
+    second_root = write_bundle(
+        tmp_path / "second",
+        "dnf_rpm_second",
+        f"""
+        from kitup.modules import dnf
+
+        @task("install local RPM")
+        def install_rpm(ctx):
+            result = dnf.rpm(ctx, {str(TEST_RPM)!r})
+            assert result.installed == [], result.installed
+        """,
+    )
+    assert run_kitup("apply", second_root) == 0
     assert rpm_installed(TEST_PACKAGE)
 
 

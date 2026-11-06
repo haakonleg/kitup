@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 
 from ...context import TaskContext
 from ...errors import TaskFailed
+from ...results import CallResult
 from ...validation import require_bool, require_non_negative_int, require_state, require_text
 from ._common import (
     CONTAINER_STATES,
@@ -30,7 +31,7 @@ def container(
     stop_timeout: int | None = None,
     timeout: float = 600,
     sudo: bool = False,
-) -> None:
+) -> CallResult:
     """Ensure a container is created, started, stopped, or absent.
 
     Existing containers are never modified. Use ``recreate=True`` to apply a
@@ -55,50 +56,74 @@ def container(
     if status is not None and status not in CONTAINER_STATUSES:
         raise TaskFailed(f"unexpected container status for {name}: {status!r}")
 
+    actions: list[str] = []
+    summaries: list[str] = []
     if recreate:
         if image is None:
             raise TaskFailed("container image is required when recreate is True")
         if status is not None:
-            _remove_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
+            actions.append("remove")
+            summaries.append(f"remove container {name}")
+            if not ctx.dry_run:
+                _remove_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
         status = None
 
     if status is None:
         if state in ("present", "started"):
             if image is None:
                 raise TaskFailed(f"container image is required to create {name}")
-            _create_container(
-                ctx,
-                podman_command,
-                name,
-                image,
-                command=command,
-                options=options,
-                stop_timeout=stop_timeout,
-                timeout=timeout,
-                sudo=sudo,
-            )
+            actions.append("create")
+            summaries.append(f"create container {name}")
+            if not ctx.dry_run:
+                _create_container(
+                    ctx,
+                    podman_command,
+                    name,
+                    image,
+                    command=command,
+                    options=options,
+                    stop_timeout=stop_timeout,
+                    timeout=timeout,
+                    sudo=sudo,
+                )
             if state == "started":
-                _start_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
-        return
-
-    if state == "present":
-        return
-    if state == "started":
+                actions.append("start")
+                summaries.append(f"start container {name}")
+                if not ctx.dry_run:
+                    _start_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
+    elif state == "started":
         if status != "running":
-            _start_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
-        return
-    if state == "stopped":
+            actions.append("start")
+            summaries.append(f"start container {name}")
+            if not ctx.dry_run:
+                _start_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
+    elif state == "stopped":
         if status == "running":
-            _stop_container(
-                ctx,
-                podman_command,
-                name,
-                stop_timeout=stop_timeout,
-                timeout=timeout,
-                sudo=sudo,
-            )
-        return
-    _remove_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
+            actions.append("stop")
+            summaries.append(f"stop container {name}")
+            if not ctx.dry_run:
+                _stop_container(
+                    ctx,
+                    podman_command,
+                    name,
+                    stop_timeout=stop_timeout,
+                    timeout=timeout,
+                    sudo=sudo,
+                )
+    elif state == "absent":
+        actions.append("remove")
+        summaries.append(f"remove container {name}")
+        if not ctx.dry_run:
+            _remove_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
+
+    return ctx.changed(
+        action="podman.container",
+        changed=bool(actions),
+        summary="; ".join(summaries) if summaries else f"ensure container {name} is {state}",
+        container=name,
+        image=image,
+        actions=actions,
+    )
 
 
 def _create_container(
@@ -120,12 +145,8 @@ def _create_container(
     arguments.append(image)
     arguments.extend(container_command(command))
 
-    ctx.changed(
-        {"container": name, "image": image, "action": "create"},
-        f"create container {name}",
-    )
-    ctx.run(arguments, timeout=timeout, sudo=sudo, record=False)
-    if not ctx.dry_run and container_status(ctx, podman_command, name, sudo=sudo) is None:
+    ctx.run(arguments, timeout=timeout, sudo=sudo)
+    if container_status(ctx, podman_command, name, sudo=sudo) is None:
         raise TaskFailed(f"container is missing after create: {name}")
 
 
@@ -137,10 +158,7 @@ def _start_container(
     timeout: float,
     sudo: bool,
 ) -> None:
-    ctx.changed({"container": name, "action": "start"}, f"start container {name}")
-    ctx.run([podman_command, "start", name], timeout=timeout, sudo=sudo, record=False)
-    if ctx.dry_run:
-        return
+    ctx.run([podman_command, "start", name], timeout=timeout, sudo=sudo)
     status = container_status(ctx, podman_command, name, sudo=sudo)
     if status is None:
         raise TaskFailed(f"container is missing after start: {name}")
@@ -160,13 +178,12 @@ def _stop_container(
     timeout: float,
     sudo: bool,
 ) -> None:
-    ctx.changed({"container": name, "action": "stop"}, f"stop container {name}")
     arguments = [podman_command, "stop"]
     if stop_timeout is not None:
         arguments.append(f"--time={stop_timeout}")
     arguments.append(name)
-    ctx.run(arguments, timeout=timeout, sudo=sudo, record=False)
-    if not ctx.dry_run and container_status(ctx, podman_command, name, sudo=sudo) == "running":
+    ctx.run(arguments, timeout=timeout, sudo=sudo)
+    if container_status(ctx, podman_command, name, sudo=sudo) == "running":
         raise TaskFailed(f"container did not stop: {name}")
 
 
@@ -178,12 +195,10 @@ def _remove_container(
     timeout: float,
     sudo: bool,
 ) -> None:
-    ctx.changed({"container": name, "action": "remove"}, f"remove container {name}")
     ctx.run(
         [podman_command, "rm", "--force", name],
         timeout=timeout,
         sudo=sudo,
-        record=False,
     )
-    if not ctx.dry_run and container_status(ctx, podman_command, name, sudo=sudo) is not None:
+    if container_status(ctx, podman_command, name, sudo=sudo) is not None:
         raise TaskFailed(f"container is still present after removal: {name}")

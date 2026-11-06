@@ -108,12 +108,19 @@ def test_archive_extracts_and_is_idempotent(tmp_path, tar_archive):
     assert (dest / "app/link").is_symlink()
     assert os.readlink(dest / "app/link") == "bin/run"
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data["action"] == "archive"
+    call = ctx.changes[0]
+    assert call.action == "decompress.archive"
+    assert call.src == str(tar_archive)
+    assert call.dest == str(dest)
+    assert call.files == ["app/bin/run", "app/etc/config.ini", "app/link"]
+    assert call.size == (dest / "app/bin/run").stat().st_size + (dest / "app/etc/config.ini").stat().st_size
 
     second = make_context(tmp_path)
     decompress.archive(second, tar_archive, dest)
 
     assert second.changes == []
+    assert second.calls[0].files == call.files
+    assert second.calls[0].size == call.size
 
 
 def test_archive_extracts_zip(tmp_path):
@@ -175,7 +182,7 @@ def test_archive_rewrites_changed_content(tmp_path, tar_archive):
 
     assert target.read_bytes() == b"key=value\n"
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data["changed"] == 1
+    assert ctx.changes[0].files == ["app/bin/run", "app/etc/config.ini", "app/link"]
 
 
 def test_archive_preserves_or_overrides_existing_modes(tmp_path, tar_archive):
@@ -229,6 +236,8 @@ def test_archive_creates_guard_skips_extraction(tmp_path, tar_archive):
 
     assert ctx.changes == []
     assert not (dest / "app").exists()
+    assert ctx.calls[0].files == []
+    assert ctx.calls[0].size == (dest / "marker").stat().st_size
 
 
 def test_archive_dry_run_reports_without_writing(tmp_path, tar_archive):
@@ -239,7 +248,8 @@ def test_archive_dry_run_reports_without_writing(tmp_path, tar_archive):
 
     assert not dest.exists()
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data["changed"] > 0
+    assert ctx.changes[0].files == ["app/bin/run", "app/etc/config.ini", "app/link"]
+    assert ctx.changes[0].size == 0
 
 
 @pytest.mark.parametrize("name", ["../evil", "/absolute", "a/../../evil"])
@@ -508,9 +518,12 @@ def test_file_decompresses_and_is_idempotent(tmp_path, suffix, compress):
     assert dest.read_bytes() == b"payload\n"
     assert stat.S_IMODE(dest.stat().st_mode) == 0o644
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data["action"] == "decompress"
+    assert ctx.changes[0].action == "decompress.file"
+    assert ctx.changes[0].dest == str(dest)
+    assert ctx.changes[0].src == str(source)
 
     second = make_context(tmp_path)
     decompress.file(second, source, dest)
 
     assert second.changes == []
+    assert second.calls[0].summary == f"ensure {dest} from {source}"

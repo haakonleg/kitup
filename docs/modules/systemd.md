@@ -11,10 +11,19 @@ from kitup.registry import task
 
 Manage a unit's enabled and active state.
 
+### Parameters
+
 - `unit` — unit name, for example `sshd.service`.
 - `enabled` — `True`, `False`, or `None` to leave unchanged.
 - `state` — `"started"`, `"stopped"`, or `None` to leave unchanged.
 - `scope` — `"system"` or `"user"`.
+
+### Result fields
+
+- `unit` — unit name.
+- `scope` — `"system"` or `"user"`.
+- `actions` — list of `"enable"`, `"disable"`, `"start"`, or `"stop"` actions
+  performed; empty when nothing changed.
 
 ```python
 @task("Enable example service")
@@ -25,6 +34,14 @@ def enable_example_service(ctx):
 ## `daemon_reload(ctx, *, scope="system")`
 
 Reload systemd manager configuration.
+
+### Parameters
+
+- `scope` — `"system"` or `"user"`.
+
+### Result fields
+
+- `scope` — `"system"` or `"user"`.
 
 ## Notes
 

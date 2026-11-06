@@ -3,7 +3,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import flatpak
 
-from .helpers import FakeCommandRunner, FakeSudo, completed, make_context
+from .helpers import FakeCommandRunner, FakeSudo, call_data, completed, make_context
 
 REMOTE = "flathub"
 REMOTE_URL = "https://dl.flathub.org/repo/flathub.flatpakrepo"
@@ -52,11 +52,12 @@ def test_remote_present_adds_missing_remote(tmp_path):
     ]
     assert command.calls[0][1]["sudo"] is False
     assert command.calls[1][1]["sudo"] is True
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "remote": REMOTE,
         "url": REMOTE_URL,
         "scope": "system",
     }
+    assert ctx.changes[0].action == "flatpak.remote"
     assert ctx.changes[0].summary == f"add remote {REMOTE}"
 
 
@@ -114,7 +115,7 @@ def test_remote_absent_removes_existing_remote(tmp_path):
         REMOTE,
     ]
     assert command.calls[1][1]["sudo"] is True
-    assert ctx.changes[0].data == {"remote": REMOTE, "scope": "system"}
+    assert call_data(ctx.changes[0]) == {"remote": REMOTE, "scope": "system"}
     assert ctx.changes[0].summary == f"remove remote {REMOTE}"
 
 
@@ -177,7 +178,7 @@ def test_packages_present_installs_missing_refs(tmp_path):
     ]
     assert command.calls[1][1]["sudo"] is True
     assert command.calls[2][0] == LIST
-    assert ctx.changes[0].data == {"added": [APP], "scope": "system"}
+    assert call_data(ctx.changes[0]) == {"added": [APP], "scope": "system"}
     assert ctx.changes[0].summary == f"+{APP}"
 
 
@@ -200,7 +201,7 @@ def test_packages_present_installs_only_missing_refs(tmp_path):
         "--system",
         RUNTIME,
     ]
-    assert ctx.changes[0].data == {"added": [RUNTIME], "scope": "system"}
+    assert call_data(ctx.changes[0]) == {"added": [RUNTIME], "scope": "system"}
 
 
 def test_packages_full_refs_and_kind_prefixes_match_exactly(tmp_path):
@@ -236,7 +237,7 @@ def test_packages_absent_removes_installed_ref(tmp_path):
         APP_REF,
     ]
     assert command.calls[1][1]["sudo"] is True
-    assert ctx.changes[0].data == {"removed": [APP_REF], "scope": "system"}
+    assert call_data(ctx.changes[0]) == {"removed": [APP_REF], "scope": "system"}
     assert ctx.changes[0].summary == f"-{APP_REF}"
 
 
@@ -266,7 +267,7 @@ def test_packages_absent_removes_all_branches_of_a_bare_id(tmp_path):
         APP_REF,
         "org.example.App/x86_64/beta",
     ]
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "removed": [APP_REF, "org.example.App/x86_64/beta"],
         "scope": "system",
     }

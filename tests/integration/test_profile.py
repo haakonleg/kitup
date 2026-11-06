@@ -35,7 +35,7 @@ def test_composed_profiles_merge_config_and_dependencies(tmp_path: Path, capsys:
         @task("show merged config")
         def show(ctx):
             value = f"{ctx.config.BASE}/{ctx.config.CHILD}"
-            ctx.changed({"value": value}, value)
+            ctx.changed(summary=value, value=value)
         """,
     )
     write(
@@ -57,7 +57,7 @@ def test_composed_profiles_merge_config_and_dependencies(tmp_path: Path, capsys:
 
         @task("extra")
         def extra(ctx):
-            ctx.changed({}, "extra")
+            ctx.changed(summary="extra")
         """,
     )
     write(

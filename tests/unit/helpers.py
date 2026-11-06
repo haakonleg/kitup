@@ -7,6 +7,12 @@ from typing import Any
 
 from kitup.context import TaskContext
 from kitup.registry import Bundle
+from kitup.results import CallResult
+
+
+def call_data(result: CallResult) -> dict[str, Any]:
+    """Return a call's data fields without the reserved keys."""
+    return {key: value for key, value in result.items() if key not in {"action", "changed", "summary"}}
 
 
 class FakeCommandRunner:

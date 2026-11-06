@@ -11,7 +11,7 @@ from kitup.modules import template
 from kitup.output import Output
 from kitup.registry import Bundle
 
-from .helpers import PassthroughSudo, make_context
+from .helpers import PassthroughSudo, call_data, make_context
 
 
 def context(tmp_path, *, config=None, facts=None, dry_run=False, diff=False):
@@ -68,8 +68,8 @@ def test_file_renders_config_facts_and_variables(tmp_path):
     assert dest.read_text() == "port=2222\nhost=example\nfact=example\nuser=ada\n"
     assert stat.S_IMODE(dest.stat().st_mode) == 0o644
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data["action"] == "template"
-    assert ctx.changes[0].data["source"] == str(source)
+    assert ctx.changes[0].action == "template.file"
+    assert call_data(ctx.changes[0]) == {"dest": str(dest), "src": str(source)}
 
 
 def test_file_is_idempotent(tmp_path):
@@ -83,6 +83,7 @@ def test_file_is_idempotent(tmp_path):
 
     assert dest.read_text() == "value=1\n"
     assert len(ctx.changes) == 1
+    assert ctx.calls[-1].summary == f"ensure {dest} from {source}"
 
 
 def test_file_preserves_trailing_newline(tmp_path):
@@ -275,7 +276,7 @@ def test_file_preserves_existing_mode_and_applies_explicit_mode(tmp_path):
 
     template.file(ctx, source, dest, mode=0o640)
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data["action"] == "template"
+    assert ctx.changes[0].action == "template.file"
     assert stat.S_IMODE(dest.stat().st_mode) == 0o640
 
 

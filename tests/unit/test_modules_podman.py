@@ -6,7 +6,7 @@ from kitup.errors import TaskFailed
 from kitup.modules import podman
 from kitup.registry import Bundle
 
-from .helpers import FakeCommandRunner, FakeSudo, completed, make_context
+from .helpers import FakeCommandRunner, FakeSudo, call_data, completed, make_context
 
 PODMAN = "/usr/bin/podman"
 IMAGE = "localhost/example:latest"
@@ -65,7 +65,8 @@ def test_image_present_pulls_missing_image(tmp_path):
         [PODMAN, "image", "exists", IMAGE],
         [PODMAN, "pull", IMAGE],
     ]
-    assert ctx.changes[0].data == {"image": IMAGE, "action": "pull"}
+    assert call_data(ctx.changes[0]) == {"image": IMAGE}
+    assert ctx.changes[0].action == "podman.image"
 
 
 def test_image_present_is_a_noop_when_present(tmp_path):
@@ -127,7 +128,8 @@ def test_image_absent_removes_existing_image(tmp_path):
         [PODMAN, "rmi", IMAGE],
         [PODMAN, "image", "exists", IMAGE],
     ]
-    assert ctx.changes[0].data == {"image": IMAGE, "action": "remove"}
+    assert call_data(ctx.changes[0]) == {"image": IMAGE}
+    assert ctx.changes[0].action == "podman.image"
 
 
 def test_image_absent_is_a_noop_when_missing(tmp_path):
@@ -181,10 +183,9 @@ def test_image_source_pulls_and_verifies_local_name(tmp_path):
         [PODMAN, "pull", "oci-archive:/tmp/pull.tar"],
         [PODMAN, "image", "exists", IMAGE],
     ]
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "image": IMAGE,
         "source": "oci-archive:/tmp/pull.tar",
-        "action": "pull",
     }
 
 
@@ -224,7 +225,8 @@ def test_image_source_absent_removes_local_name(tmp_path):
         [PODMAN, "rmi", IMAGE],
         [PODMAN, "image", "exists", IMAGE],
     ]
-    assert ctx.changes[0].data == {"image": IMAGE, "action": "remove"}
+    assert call_data(ctx.changes[0]) == {"image": IMAGE}
+    assert ctx.changes[0].action == "podman.image"
 
 
 def test_image_source_pull_verification_failure_is_reported(tmp_path):
@@ -273,10 +275,9 @@ def test_build_creates_missing_tag(tmp_path):
     podman.build(ctx, build_dir, tag=IMAGE)
 
     assert calls(command)[1] == [PODMAN, "build", "-t", IMAGE, str(build_dir)]
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "image": IMAGE,
         "context": str(build_dir),
-        "action": "build",
     }
 
 
@@ -456,10 +457,9 @@ def test_tag_adds_missing_and_different_targets(tmp_path):
         "localhost/one:latest",
         "localhost/two:latest",
     ]
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "source": IMAGE,
         "targets": ["localhost/one:latest", "localhost/two:latest"],
-        "action": "tag",
     }
 
 
@@ -508,9 +508,10 @@ def test_container_started_creates_and_starts_missing_container(tmp_path):
         [PODMAN, "container", "inspect", "--format", "{{.State.Status}}", CONTAINER],
     ]
     assert [change.summary for change in ctx.changes] == [
-        f"create container {CONTAINER}",
-        f"start container {CONTAINER}",
+        f"create container {CONTAINER}; start container {CONTAINER}",
     ]
+    assert ctx.changes[0].action == "podman.container"
+    assert call_data(ctx.changes[0])["actions"] == ["create", "start"]
 
 
 def test_container_started_starts_existing_stopped_container(tmp_path):
@@ -634,10 +635,9 @@ def test_container_recreate_removes_creates_and_starts(tmp_path):
     podman.container(ctx, CONTAINER, image=IMAGE, recreate=True)
 
     assert [change.summary for change in ctx.changes] == [
-        f"remove container {CONTAINER}",
-        f"create container {CONTAINER}",
-        f"start container {CONTAINER}",
+        f"remove container {CONTAINER}; create container {CONTAINER}; start container {CONTAINER}",
     ]
+    assert call_data(ctx.changes[0])["actions"] == ["remove", "create", "start"]
 
 
 def test_container_recreate_rejects_stopped_and_absent(tmp_path):
@@ -813,10 +813,9 @@ def test_registry_present_writes_toml(tmp_path):
         'location = "mirror.example.com"\n'
     )
     assert stat.S_IMODE(target.stat().st_mode) == 0o644
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "path": str(target),
         "registry": "example",
-        "action": "registry",
     }
 
 
@@ -827,6 +826,7 @@ def test_registry_is_idempotent_and_rewrites_changed_content(tmp_path):
     podman.registry(ctx, "example", location="docker.io", path=target)
     podman.registry(ctx, "example", location="docker.io", path=target)
     assert len(ctx.changes) == 1
+    assert ctx.calls[-1].summary == f"ensure registry example in {target}"
     assert "prefix =" not in target.read_text()
 
     podman.registry(ctx, "example", location="quay.io", path=target)
@@ -846,6 +846,7 @@ def test_registry_absent_removes_file(tmp_path):
 
     podman.registry(ctx, "example", state="absent", path=target)
     assert len(ctx.changes) == 1
+    assert ctx.calls[-1].summary == f"ensure registry example is absent from {target}"
 
 
 def test_registry_absent_rejects_directory(tmp_path):
@@ -933,10 +934,9 @@ def test_login_uses_password_stdin(tmp_path):
         REGISTRY,
     ]
     assert command.calls[1][1]["stdin"] == "secret\n"
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "registry": REGISTRY,
         "username": "kitup",
-        "action": "login",
     }
 
 
@@ -1029,10 +1029,9 @@ def test_generate_systemd_writes_unit(tmp_path):
     target = tmp_path / f"container-{CONTAINER}.service"
     assert target.read_text() == UNIT
     assert calls(command) == [[PODMAN, "generate", "systemd", "--name", "--no-header", CONTAINER]]
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "path": str(target),
         "container": CONTAINER,
-        "action": "unit",
     }
 
 
@@ -1045,6 +1044,8 @@ def test_generate_systemd_is_idempotent(tmp_path):
     podman.generate_systemd(ctx, CONTAINER, dest=tmp_path)
 
     assert len(ctx.changes) == 1
+    target = tmp_path / f"container-{CONTAINER}.service"
+    assert ctx.calls[-1].summary == f"ensure systemd unit for {CONTAINER} in {target}"
 
 
 def test_generate_systemd_flags(tmp_path):
@@ -1191,10 +1192,9 @@ def test_quadlet_renders_sections(tmp_path):
         "[Install]\n"
         "WantedBy=multi-user.target\n"
     )
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "path": str(target),
         "container": CONTAINER,
-        "action": "quadlet",
     }
 
 
@@ -1273,6 +1273,8 @@ def test_quadlet_is_idempotent(tmp_path):
     podman.quadlet(ctx, CONTAINER, image=IMAGE, dest=tmp_path)
 
     assert len(ctx.changes) == 1
+    target = tmp_path / f"{CONTAINER}.container"
+    assert ctx.calls[-1].summary == f"ensure quadlet {CONTAINER} in {target}"
 
 
 def test_quadlet_user_scope_uses_user_directory(tmp_path, monkeypatch):
@@ -1358,4 +1360,5 @@ def test_dry_run_does_not_mutate_containers(tmp_path):
     podman.container(ctx, CONTAINER, image=IMAGE)
 
     assert calls(command) == [[PODMAN, "container", "inspect", "--format", "{{.State.Status}}", CONTAINER]]
-    assert len(ctx.changes) == 2
+    assert len(ctx.changes) == 1
+    assert call_data(ctx.changes[0])["actions"] == ["create", "start"]

@@ -1,7 +1,10 @@
+import gzip
 import hashlib
 import http.server
 import stat
 import threading
+import zlib
+from compression import zstd
 
 import pytest
 
@@ -16,6 +19,13 @@ class ServerState:
         self.payload = b"downloaded\n"
         self.requests = 0
         self.headers: list[dict[str, str]] = []
+
+
+def sent_header(state: ServerState, name: str) -> str | None:
+    for key, value in state.headers[-1].items():
+        if key.lower() == name.lower():
+            return value
+    return None
 
 
 @pytest.fixture
@@ -35,6 +45,35 @@ def http_server(monkeypatch):
                 body = b"short"
                 self.send_response(200)
                 self.send_header("Content-Length", "100")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if self.path == "/brotli":
+                self.send_response(200)
+                self.send_header("Content-Encoding", "br")
+                self.send_header("Content-Length", str(len(state.payload)))
+                self.end_headers()
+                self.wfile.write(state.payload)
+                return
+            if self.path == "/truncated-gzip":
+                body = gzip.compress(state.payload)[:-5]
+                self.send_response(200)
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            compressed = {
+                "/gzip": ("gzip", gzip.compress),
+                "/deflate": ("deflate", zlib.compress),
+                "/zstd": ("zstd", zstd.compress),
+            }
+            if self.path in compressed:
+                encoding, compress = compressed[self.path]
+                body = compress(state.payload)
+                self.send_response(200)
+                self.send_header("Content-Encoding", encoding)
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
                 return
@@ -67,18 +106,97 @@ def test_to_file_downloads_and_is_idempotent(tmp_path, http_server):
     target = tmp_path / "file.txt"
     ctx = make_context(tmp_path)
 
-    download.to_file(ctx, f"{base}/file.txt", target)
+    result = download.to_file(ctx, f"{base}/file.txt", target)
 
     assert target.read_bytes() == state.payload
     assert stat.S_IMODE(target.stat().st_mode) == 0o644
     assert state.requests == 1
     assert len(ctx.changes) == 1
+    assert result.action == "download.to_file"
+    assert sent_header(state, "Accept-Encoding") == "gzip, deflate, zstd"
+    assert result.url == f"{base}/file.txt"
+    assert result.dest == str(target)
+    assert result.checksum_dest == f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
+    assert result.duration >= 0
+    assert result.size == len(state.payload)
+    assert "path" not in result
+    assert "checksum" not in result
 
     second = make_context(tmp_path)
     download.to_file(second, f"{base}/file.txt", target)
 
     assert state.requests == 1
     assert second.changes == []
+    assert second.calls[0].summary == f"ensure download {base}/file.txt -> {target}"
+    assert second.calls[0].dest == str(target)
+    assert second.calls[0].checksum_dest is None
+    assert second.calls[0].duration == 0.0
+    assert second.calls[0].size == len(state.payload)
+
+
+def test_to_file_preserves_explicit_accept_encoding(tmp_path, http_server):
+    state, base = http_server
+    target = tmp_path / "file.txt"
+
+    download.to_file(
+        make_context(tmp_path),
+        f"{base}/file.txt",
+        target,
+        headers={"accept-encoding": "identity"},
+    )
+
+    assert sent_header(state, "Accept-Encoding") == "identity"
+
+
+@pytest.mark.parametrize("path", ["/gzip", "/deflate", "/zstd"])
+def test_to_file_decodes_content_encoding(tmp_path, http_server, path):
+    state, base = http_server
+    target = tmp_path / "file.txt"
+
+    result = download.to_file(make_context(tmp_path), f"{base}{path}", target)
+
+    assert target.read_bytes() == state.payload
+    assert result.checksum_dest == f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
+    assert result.size == len(state.payload)
+
+
+@pytest.mark.parametrize("path", ["/gzip", "/deflate", "/zstd"])
+def test_to_bytes_decodes_content_encoding(tmp_path, http_server, path):
+    state, base = http_server
+
+    content = download.to_bytes(make_context(tmp_path), f"{base}{path}")
+
+    assert content == state.payload
+
+
+def test_to_file_verifies_checksum_after_decompression(tmp_path, http_server):
+    state, base = http_server
+    target = tmp_path / "file.txt"
+    checksum = f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
+
+    download.to_file(make_context(tmp_path), f"{base}/gzip", target, checksum=checksum)
+
+    assert target.read_bytes() == state.payload
+
+
+def test_to_file_rejects_unsupported_content_encoding(tmp_path, http_server):
+    _, base = http_server
+    target = tmp_path / "file.txt"
+
+    with pytest.raises(TaskFailed, match="unsupported content encoding"):
+        download.to_file(make_context(tmp_path), f"{base}/brotli", target)
+
+    assert not target.exists()
+
+
+def test_to_file_rejects_truncated_compressed_response(tmp_path, http_server):
+    _, base = http_server
+    target = tmp_path / "file.txt"
+
+    with pytest.raises(TaskFailed, match=r"decompress|incomplete"):
+        download.to_file(make_context(tmp_path), f"{base}/truncated-gzip", target)
+
+    assert not target.exists()
 
 
 def test_to_file_force_refreshes_only_changed_content(tmp_path, http_server):
@@ -91,6 +209,9 @@ def test_to_file_force_refreshes_only_changed_content(tmp_path, http_server):
 
     assert state.requests == 2
     assert same.changes == []
+    assert same.calls[0].checksum_dest == f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
+    assert same.calls[0].duration >= 0
+    assert same.calls[0].size == len(state.payload)
 
     state.payload = b"changed\n"
     changed = make_context(tmp_path)
@@ -112,6 +233,9 @@ def test_to_file_checksum_skips_matching_file(tmp_path, http_server):
 
     assert state.requests == 0
     assert ctx.changes == []
+    assert ctx.calls[0].dest == str(target)
+    assert ctx.calls[0].checksum_dest is None
+    assert ctx.calls[0].size == len(state.payload)
 
 
 def test_to_file_checksum_mismatch_replaces_file(tmp_path, http_server):
@@ -155,6 +279,10 @@ def test_to_file_dry_run_does_not_fetch_or_write(tmp_path, http_server):
     assert state.requests == 0
     assert not target.exists()
     assert len(ctx.changes) == 1
+    assert ctx.changes[0].dest == str(target)
+    assert ctx.changes[0].checksum_dest is None
+    assert ctx.changes[0].duration == 0.0
+    assert ctx.changes[0].size == 0
 
 
 def test_to_file_uses_url_basename_for_directory_destination(tmp_path, http_server):
@@ -261,7 +389,9 @@ def test_to_bytes_returns_content_and_verifies_checksum(tmp_path, http_server):
 
     assert content == state.payload
     assert state.requests == 1
+    assert sent_header(state, "Accept-Encoding") == "gzip, deflate, zstd"
     assert ctx.changes == []
+    assert ctx.calls == []
 
 
 def test_to_bytes_enforces_max_bytes(tmp_path, http_server):

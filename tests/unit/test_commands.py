@@ -122,14 +122,14 @@ def test_stdin_is_piped_to_the_process(monkeypatch):
     assert received == ["secret\n"]
 
 
-def test_sudo_is_refreshed_and_wrapped(monkeypatch):
+def test_sudo_is_wrapped(monkeypatch):
     calls = patch_popen(monkeypatch, FakeProcess())
     sudo = FakeSudo()
     runner = CommandRunner(sudo)  # type: ignore[arg-type]
 
     runner.run(["dnf5", "install"], sudo=True)
 
-    assert sudo.refresh_count == 1
+    assert sudo.refresh_count == 0
     assert calls[0][0] == ["sudo", "-n", "--", "dnf5", "install"]
 
 

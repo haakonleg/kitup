@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from ..validation import (
     require_bool,
     require_choice,
@@ -37,7 +38,7 @@ _LOCALE_KEYS: Final = frozenset(
 type _HostnameKind = Literal["static", "pretty"]
 
 
-def hostname(ctx: TaskContext, name: str | None = None, *, pretty: str | None = None) -> None:
+def hostname(ctx: TaskContext, name: str | None = None, *, pretty: str | None = None) -> CallResult:
     """Ensure the static and/or pretty system hostname.
 
     ``name`` manages the static hostname. ``pretty`` manages the pretty
@@ -49,13 +50,23 @@ def hostname(ctx: TaskContext, name: str | None = None, *, pretty: str | None = 
     static = None if name is None else _require_hostname(name)
     pretty_name = None if pretty is None else _require_pretty(pretty)
 
+    calls: list[CallResult] = []
+    hostnames: dict[str, str] = {}
     if static is not None:
-        _converge_hostname(ctx, "static", static)
+        calls.append(_converge_hostname(ctx, "static", static))
+        hostnames["static"] = static
     if pretty_name is not None:
-        _converge_hostname(ctx, "pretty", pretty_name)
+        calls.append(_converge_hostname(ctx, "pretty", pretty_name))
+        hostnames["pretty"] = pretty_name
+    return ctx.changed(
+        action="host.hostname",
+        changed=any(call.changed for call in calls),
+        summary="; ".join(call.summary for call in calls),
+        hostnames=hostnames,
+    )
 
 
-def timezone(ctx: TaskContext, zone: str) -> None:
+def timezone(ctx: TaskContext, zone: str) -> CallResult:
     """Ensure the system time zone."""
     _require_token(zone, "time zone")
     try:
@@ -65,64 +76,97 @@ def timezone(ctx: TaskContext, zone: str) -> None:
 
     current = _timedatectl_property(ctx, "Timezone")
     if current == zone:
-        return
+        return ctx.changed(
+            action="host.timezone",
+            changed=False,
+            summary=f"ensure time zone {zone}",
+            timezone=zone,
+        )
 
-    ctx.changed({"timezone": zone}, f"set time zone {zone}")
-    ctx.run(["timedatectl", "set-timezone", zone], sudo=True, record=False)
+    call = CallResult(
+        action="host.timezone",
+        changed=True,
+        summary=f"set time zone {zone}",
+        timezone=zone,
+    )
     if ctx.dry_run:
-        return
+        return ctx.changed(call)
+    ctx.run(["timedatectl", "set-timezone", zone], sudo=True)
     if _timedatectl_property(ctx, "Timezone") != zone:
         raise TaskFailed(f"time zone did not change to {zone!r}")
+    return ctx.changed(call)
 
 
 def ntp(
     ctx: TaskContext,
     enabled: bool,  # noqa: FBT001 - positional boolean matches the module API
-) -> None:
+) -> CallResult:
     """Enable or disable network time synchronization."""
     require_bool(enabled, "enabled")
 
     values = _timedatectl_show(ctx, "CanNTP", "NTP")
     current = _parse_yes_no(values["NTP"], "NTP")
+    action = "enable" if enabled else "disable"
     if current == enabled:
-        return
+        return ctx.changed(
+            action="host.ntp",
+            changed=False,
+            summary=f"ensure network time synchronization is {action}d",
+            ntp=enabled,
+        )
     if not _parse_yes_no(values["CanNTP"], "CanNTP"):
         raise TaskFailed("network time synchronization is not available (CanNTP=no)")
 
-    action = "enable" if enabled else "disable"
-    ctx.changed({"ntp": enabled}, f"{action} network time synchronization")
+    call = CallResult(
+        action="host.ntp",
+        changed=True,
+        summary=f"{action} network time synchronization",
+        ntp=enabled,
+    )
+    if ctx.dry_run:
+        return ctx.changed(call)
     ctx.run(
         ["timedatectl", "set-ntp", "true" if enabled else "false"],
         sudo=True,
-        record=False,
     )
+    return ctx.changed(call)
 
 
 def rtc_local(
     ctx: TaskContext,
     enabled: bool = False,  # noqa: FBT001, FBT002 - positional boolean matches the module API
-) -> None:
+) -> CallResult:
     """Configure whether the hardware clock is interpreted as local time."""
     require_bool(enabled, "enabled")
 
     current = _parse_yes_no(_timedatectl_property(ctx, "LocalRTC"), "LocalRTC")
-    if current == enabled:
-        return
-
     mode = "local time" if enabled else "UTC"
-    ctx.changed({"rtc_local": enabled}, f"set RTC to {mode}")
+    if current == enabled:
+        return ctx.changed(
+            action="host.rtc_local",
+            changed=False,
+            summary=f"ensure RTC is {mode}",
+            rtc_local=enabled,
+        )
+
+    call = CallResult(
+        action="host.rtc_local",
+        changed=True,
+        summary=f"set RTC to {mode}",
+        rtc_local=enabled,
+    )
+    if ctx.dry_run:
+        return ctx.changed(call)
     ctx.run(
         ["timedatectl", "set-local-rtc", "1" if enabled else "0", "--adjust-system-clock"],
         sudo=True,
-        record=False,
     )
-    if ctx.dry_run:
-        return
     if _parse_yes_no(_timedatectl_property(ctx, "LocalRTC"), "LocalRTC") != enabled:
         raise TaskFailed(f"RTC mode did not change to {mode}")
+    return ctx.changed(call)
 
 
-def locale(ctx: TaskContext, values: Mapping[str, str]) -> None:
+def locale(ctx: TaskContext, values: Mapping[str, str]) -> CallResult:
     """Ensure system locale variables, leaving unmanaged variables unchanged."""
     if not isinstance(values, Mapping):
         raise TaskFailed("locale values must be a mapping")
@@ -138,35 +182,60 @@ def locale(ctx: TaskContext, values: Mapping[str, str]) -> None:
             raise TaskFailed("LANGUAGE must be a single locale name")
         desired[key] = value
 
+    assignments = [f"{key}={value}" for key, value in desired.items()]
     current = _localectl_status(ctx)
     if all(_locale_satisfied(current, key, value) for key, value in desired.items()):
-        return
+        return ctx.changed(
+            action="host.locale",
+            changed=False,
+            summary=f"ensure locale {' '.join(assignments)}",
+            locale=desired,
+        )
 
-    assignments = [f"{key}={value}" for key, value in desired.items()]
-    ctx.changed({"locale": desired}, f"set locale {' '.join(assignments)}")
-    ctx.run(["localectl", "set-locale", *assignments], sudo=True, record=False)
+    call = CallResult(
+        action="host.locale",
+        changed=True,
+        summary=f"set locale {' '.join(assignments)}",
+        locale=desired,
+    )
     if ctx.dry_run:
-        return
+        return ctx.changed(call)
+    ctx.run(["localectl", "set-locale", *assignments], sudo=True)
 
     updated = _localectl_status(ctx)
     for key, value in desired.items():
         if not _locale_satisfied(updated, key, value):
             raise TaskFailed(f"locale variable {key} did not change to {value!r}")
+    return ctx.changed(call)
 
 
-def _converge_hostname(ctx: TaskContext, kind: _HostnameKind, desired: str) -> None:
+def _converge_hostname(ctx: TaskContext, kind: _HostnameKind, desired: str) -> CallResult:
     current = _hostnamectl_get(ctx, kind)
-    if current == desired:
-        return
-
     clearing = kind == "pretty" and desired == ""
+    if current == desired:
+        summary = "ensure pretty hostname is cleared" if clearing else f"ensure {kind} hostname {desired}"
+        return CallResult(
+            action="host.hostname",
+            changed=False,
+            summary=summary,
+            hostname=desired,
+            kind=kind,
+        )
+
     summary = "clear pretty hostname" if clearing else f"set {kind} hostname {desired}"
-    ctx.changed({"hostname": desired, "kind": kind}, summary)
-    ctx.run(["hostnamectl", "hostname", f"--{kind}", desired], sudo=True, record=False)
+    call = CallResult(
+        action="host.hostname",
+        changed=True,
+        summary=summary,
+        hostname=desired,
+        kind=kind,
+    )
     if ctx.dry_run:
-        return
+        return call
+    ctx.run(["hostnamectl", "hostname", f"--{kind}", desired], sudo=True)
     if _hostnamectl_get(ctx, kind) != desired:
         raise TaskFailed(f"{kind} hostname did not change to {desired!r}")
+    return call
 
 
 def _hostnamectl_get(ctx: TaskContext, kind: _HostnameKind) -> str:

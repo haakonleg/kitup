@@ -3,7 +3,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import git
 
-from .helpers import FakeCommandRunner, completed, make_context
+from .helpers import FakeCommandRunner, call_data, completed, make_context
 
 URL = "https://example.test/repo.git"
 OLD_URL = "https://example.test/old.git"
@@ -49,13 +49,12 @@ def test_clone_when_destination_is_missing(tmp_path):
     ]
     assert command.calls[1][1]["env"] == {"GIT_TERMINAL_PROMPT": "0"}
     assert command.calls[1][1]["sudo"] is False
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
         "repo": URL,
         "dest": str(dest),
         "version": "HEAD",
-        "single_branch": False,
-        "depth": None,
     }
+    assert ctx.changes[0].action == "git.repo"
     assert ctx.changes[0].summary == f"clone {URL} into {dest}"
 
 
@@ -181,11 +180,12 @@ def test_existing_repo_behind_remote_is_updated(tmp_path):
         ["git", "-C", str(dest), "rev-parse", "HEAD"],
     ]
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].data == {
+    assert call_data(ctx.changes[0]) == {
+        "repo": URL,
+        "dest": str(dest),
         "before": OLD,
         "after": NEW,
         "version": "HEAD",
-        "dest": str(dest),
     }
     assert ctx.changes[0].summary == f"update {dest} {OLD[:12]}..{NEW[:12]}"
 
@@ -388,10 +388,16 @@ def test_url_change_triggers_fetch_and_update_even_when_update_is_false(tmp_path
         ["git", "-C", str(dest), "rev-parse", "HEAD"],
     ]
     assert [change.summary for change in ctx.changes] == [
-        f"set remote URL of {dest} to {URL}",
-        f"update {dest} {OLD[:12]}..{NEW[:12]}",
+        f"set remote URL of {dest} to {URL}; update {dest} {OLD[:12]}..{NEW[:12]}",
     ]
-    assert ctx.changes[0].data == {"repo": URL, "dest": str(dest), "previous_url": OLD_URL}
+    assert call_data(ctx.changes[0]) == {
+        "repo": URL,
+        "dest": str(dest),
+        "version": "HEAD",
+        "previous_url": OLD_URL,
+        "before": OLD,
+        "after": NEW,
+    }
 
 
 def test_url_change_without_drift_only_sets_the_url(tmp_path):
@@ -432,7 +438,14 @@ def test_missing_origin_remote_is_added(tmp_path):
     git.repo(ctx, URL, dest, update=False)
 
     assert command.calls[2][0] == ["git", "-C", str(dest), "remote", "add", "origin", URL]
-    assert ctx.changes[0].data == {"repo": URL, "dest": str(dest)}
+    assert call_data(ctx.changes[0]) == {
+        "repo": URL,
+        "dest": str(dest),
+        "version": "HEAD",
+        "previous_url": None,
+        "before": NEW,
+        "after": NEW,
+    }
 
 
 def test_dry_run_clone_records_without_running(tmp_path):

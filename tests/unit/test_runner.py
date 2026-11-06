@@ -1,6 +1,7 @@
 from io import StringIO
 
 from kitup.errors import PrivilegeError, TaskFailed
+from kitup.modules import command
 from kitup.output import Output
 from kitup.registry import Bundle, side_effect
 from kitup.resolver import resolve
@@ -57,7 +58,7 @@ def test_status_inference_and_summary(tmp_path):
     skipped = Bundle("skipped")
 
     add_task(ok, lambda ctx: None)
-    add_task(changed, lambda ctx: ctx.changed({"x": 1}, "+x"))
+    add_task(changed, lambda ctx: ctx.changed(summary="+x", x=1))
     add_task(skipped, lambda ctx: ctx.skip("not needed"))
 
     code, text, _ = run_plan(tmp_path, [ok, changed, skipped])
@@ -69,12 +70,48 @@ def test_status_inference_and_summary(tmp_path):
     assert "Summary: 1 changed, 1 ok, 1 skipped, 0 failed, 0 not run" in text
 
 
+def test_no_change_call_is_recorded_but_keeps_the_task_ok(tmp_path):
+    bundle = Bundle("base")
+
+    def check(ctx):
+        ctx.changed(changed=False, summary="ensure thing")
+
+    add_task(bundle, check, name="Check")
+
+    code, _, context = run_plan(tmp_path, [bundle])
+
+    result = context.result(check)
+    assert code == 0
+    assert result.status is Status.OK
+    assert len(result.calls) == 1
+    assert result.calls[0].changed is False
+    assert result.changes == []
+
+
+def test_calls_recorded_before_skip_are_retained(tmp_path):
+    bundle = Bundle("base")
+
+    def check(ctx):
+        ctx.changed(summary="prepared")
+        ctx.skip("done")
+
+    add_task(bundle, check, name="Check")
+
+    code, _, context = run_plan(tmp_path, [bundle])
+
+    result = context.result(check)
+    assert code == 0
+    assert result.status is Status.SKIPPED
+    assert [call.summary for call in result.calls] == ["prepared"]
+    assert [call.summary for call in result.changes] == ["prepared"]
+
+
 def test_later_task_reads_previous_result(tmp_path):
     seen = []
     bundle = Bundle("base")
 
     def check(ctx):
-        ctx.changed({"available": True}, "+updates")
+        ctx.changed(summary="+updates", available=True)
         return "release-1"
 
     def apply(ctx):
@@ -117,7 +154,7 @@ def test_dry_run_result_is_available(tmp_path):
     bundle = Bundle("base")
 
     def check(ctx):
-        ctx.changed({"would": "change"}, "would change")
+        ctx.changed(summary="would change", would="change")
 
     def apply(ctx):
         result = ctx.result(check)
@@ -217,7 +254,7 @@ def test_privilege_error_preserves_changes_and_notes(tmp_path):
     bundle = Bundle("base")
 
     def fail(ctx):
-        ctx.changed({"step": "prepared"}, "prepared")
+        ctx.changed(summary="prepared", step="prepared")
         ctx.note("a note")
         raise PrivilegeError("no credentials")
 
@@ -298,7 +335,7 @@ def test_changed_task_triggers_one_shot_side_effect_at_end_of_bundle(tmp_path):
 
     def install(ctx):
         calls.append("install")
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(effect)
 
     add_task(bundle, install, name="Install")
@@ -318,7 +355,7 @@ def test_changed_task_triggers_immediate_side_effect_before_next_task(tmp_path):
 
     def configure(ctx):
         calls.append("configure")
-        ctx.changed({}, "+conf")
+        ctx.changed(summary="+conf")
         ctx.register_side_effect(effect)
 
     add_task(bundle, configure, name="Configure")
@@ -390,7 +427,7 @@ def test_deferred_side_effects_run_before_the_next_bundle(tmp_path):
 
     def install(ctx):
         calls.append("install")
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(effect)
 
     add_task(base, install, name="Install")
@@ -413,7 +450,7 @@ def test_immediate_side_effects_can_affect_later_tasks(tmp_path):
     effect = side_effect("Reload", one_shot=False)(reload)
 
     def configure(ctx):
-        ctx.changed({}, "+conf")
+        ctx.changed(summary="+conf")
         ctx.register_side_effect(effect)
 
     def check(ctx):
@@ -435,7 +472,7 @@ def test_one_shot_side_effect_runs_at_most_once_across_bundles(tmp_path):
     effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
 
     def register(ctx):
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(effect)
 
     add_task(base, register, name="Base install")
@@ -459,7 +496,7 @@ def test_skipped_one_shot_side_effect_can_run_again_later(tmp_path):
     effect = side_effect("Refresh")(refresh)
 
     def register(ctx):
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(effect)
 
     add_task(base, register, name="Base install")
@@ -477,7 +514,7 @@ def test_immediate_side_effect_runs_for_every_registration(tmp_path):
     effect = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
 
     def configure(ctx):
-        ctx.changed({}, "+conf")
+        ctx.changed(summary="+conf")
         ctx.register_side_effect(effect)
         ctx.register_side_effect(effect)
 
@@ -499,7 +536,7 @@ def test_immediate_side_effect_failure_aborts_immediately(tmp_path):
     effect = side_effect("Reload", one_shot=False)(fail)
 
     def configure(ctx):
-        ctx.changed({}, "+conf")
+        ctx.changed(summary="+conf")
         ctx.register_side_effect(effect)
 
     add_task(bundle, configure, name="Configure")
@@ -524,7 +561,7 @@ def test_deferred_side_effect_failure_aborts_at_end_of_bundle(tmp_path):
     effect = side_effect("Refresh")(fail)
 
     def register(ctx):
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(effect)
 
     add_task(base, register, name="Install")
@@ -545,7 +582,7 @@ def test_later_task_failure_keeps_immediate_side_effect(tmp_path):
     effect = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
 
     def configure(ctx):
-        ctx.changed({}, "+conf")
+        ctx.changed(summary="+conf")
         ctx.register_side_effect(effect)
 
     add_task(bundle, configure, name="Configure")
@@ -563,7 +600,7 @@ def test_deferred_side_effects_are_discarded_when_bundle_fails(tmp_path):
     effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
 
     def configure(ctx):
-        ctx.changed({}, "+conf")
+        ctx.changed(summary="+conf")
         ctx.register_side_effect(effect)
 
     add_task(bundle, configure, name="Configure")
@@ -579,16 +616,16 @@ def test_side_effects_run_in_dry_run_and_record_would_be_changes(tmp_path):
     bundle = Bundle("base")
 
     def reload(ctx):
-        ctx.run(["systemctl", "reload", "nginx"])
+        command.run(ctx, ["systemctl", "reload", "nginx"])
 
     def refresh(ctx):
-        ctx.run(["dnf5", "makecache"])
+        command.run(ctx, ["dnf5", "makecache"])
 
     immediate = side_effect("Reload", one_shot=False)(reload)
     deferred = side_effect("Refresh")(refresh)
 
     def configure(ctx):
-        ctx.changed({}, "+conf")
+        ctx.changed(summary="+conf")
         ctx.register_side_effect(immediate)
         ctx.register_side_effect(deferred)
 
@@ -608,11 +645,11 @@ def test_tag_filtering_selects_the_registering_task_and_its_side_effect(tmp_path
     config_effect = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("config"))
 
     def packages(ctx):
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(packages_effect)
 
     def configure(ctx):
-        ctx.changed({}, "+conf")
+        ctx.changed(summary="+conf")
         ctx.register_side_effect(config_effect)
 
     add_task(bundle, packages, name="Packages", tags={"packages"})
@@ -632,7 +669,7 @@ def test_side_effects_use_the_registering_bundle_context(tmp_path):
     )
 
     def install(ctx):
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(effect)
 
     add_task(bundle, install, name="Install")
@@ -652,7 +689,7 @@ def test_side_effects_can_inspect_earlier_task_results(tmp_path):
         return "release-1"
 
     def install(ctx):
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(effect)
 
     add_task(bundle, check, name="Check")
@@ -673,7 +710,7 @@ def test_side_effect_results_are_stored_like_task_results(tmp_path):
     effect = side_effect("Refresh")(refresh)
 
     def install(ctx):
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(effect)
 
     add_task(bundle, install, name="Install")
@@ -694,7 +731,7 @@ def test_nested_side_effect_registration_fails(tmp_path):
     outer_effect = side_effect("Outer", one_shot=False)(outer)
 
     def install(ctx):
-        ctx.changed({}, "+pkg")
+        ctx.changed(summary="+pkg")
         ctx.register_side_effect(outer_effect)
 
     add_task(bundle, install, name="Install")
@@ -707,10 +744,10 @@ def test_nested_side_effect_registration_fails(tmp_path):
 
 def test_apply_output_prefixes_side_effect_lines(tmp_path):
     bundle = Bundle("base")
-    effect = side_effect("Reload", one_shot=False)(lambda ctx: ctx.changed({}, "+reloaded"))
+    effect = side_effect("Reload", one_shot=False)(lambda ctx: ctx.changed(summary="+reloaded"))
 
     def configure(ctx):
-        ctx.changed({}, "+conf")
+        ctx.changed(summary="+conf")
         ctx.register_side_effect(effect)
 
     add_task(bundle, configure, name="Configure")

@@ -222,9 +222,10 @@ def enable_services(ctx):
 ```
 
 `ctx.result()` accepts the task function. `TaskResult` exposes `status`,
-`changed`, `ok`, `skipped`, `failed`, `changes`, `notes`, `detail`, `duration`,
-`error`, and `value`. `ctx.results` returns a snapshot of all results keyed by
-task function.
+`changed`, `ok`, `skipped`, `failed`, `calls`, `changes`, `notes`, `detail`,
+`duration`, `error`, and `value`. `calls` contains every call from a method that
+can record a change; `changes` filters that list to changed calls.
+`ctx.results` returns a snapshot of all results keyed by task function.
 
 Task functions may return a value; it is stored in `TaskResult.value`. Results
 are stored for tasks that ran, including skipped tasks. Dry-run tasks store
@@ -240,17 +241,18 @@ something. Declare them with `@side_effect` and register them from a task with
 `ctx.register_side_effect()`:
 
 ```python
+from kitup.modules import command
 from kitup.registry import side_effect, task
 
 
 @side_effect("Refresh package metadata", one_shot=True)
 def refresh_metadata(ctx):
-    ctx.run(["dnf5", "makecache"], sudo=True)
+    command.run(ctx, ["dnf5", "makecache"], sudo=True)
 
 
 @side_effect("Reload nginx", one_shot=False)
 def reload_nginx(ctx):
-    ctx.run(["systemctl", "reload", "nginx"], sudo=True)
+    command.run(ctx, ["systemctl", "reload", "nginx"], sudo=True)
 
 
 @task("Install packages", tags={"packages"})

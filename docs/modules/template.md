@@ -1,8 +1,7 @@
 # `template`
 
 Render [Jinja2](https://jinja.palletsprojects.com/) templates into managed
-files. Templates are ordinary bundle resources, and rendering is idempotent:
-the destination is compared with the result and only written when it differs.
+files. Templates are ordinary bundle resources, and rendering is idempotent.
 
 ```python
 from kitup.modules import template
@@ -13,6 +12,8 @@ from kitup.registry import task
 
 Render the template `src` and write the result to `dest`.
 
+### Parameters
+
 - `src` resolves like [`files.copy()`](files.md): a bare filename comes from
   the bundle's `files/` directory, other relative paths from the bundle
   directory, and absolute paths are used as-is.
@@ -22,6 +23,11 @@ Render the template `src` and write the result to `dest`.
 - `mode=None` preserves an existing mode; new files default to `0o644`.
 - `owner` and `group` accept a name or numeric ID.
 - `sudo=True` performs the write as root.
+
+### Result fields
+
+- `dest` — destination file path.
+- `src` — resolved template path.
 
 ```python
 @task("Harden SSH", tags={"security"})
@@ -83,15 +89,13 @@ LOG_LEVEL={{ config.LOG_LEVEL | default("info") }}
 
 ## Rendering behavior
 
-- Templates are rendered as UTF-8 strings with Jinja2's default delimiters and
-  whitespace handling. Autoescaping is disabled.
+- Templates use Jinja2's default syntax. Autoescaping is disabled.
 - A trailing newline in the template is preserved.
 - `include`, `extends`, and custom loaders are not supported.
 - Templates are trusted content, like profiles. No sandbox is used.
 
 ## Idempotency
 
-- The rendered text is compared byte-for-byte with the destination.
 - Identical content and metadata are a no-op.
 - `--dry-run` renders the template and reports the change without writing.
   Template syntax and variable errors still fail in dry-run mode.
@@ -101,10 +105,6 @@ LOG_LEVEL={{ config.LOG_LEVEL | default("info") }}
 
 ## Notes
 
-- Any change to configuration values, facts, or variables can change the
-  rendered result, so a later run may rewrite the file.
 - Template sources must be regular UTF-8 text files.
-- Very large privileged reads and writes are rejected; use [`command`](command.md)
-  for very large files.
-- Jinja2 is a runtime dependency. The standalone zipapp bundles it; a source
-  installation gets it through `pip`.
+- Very large files are not supported; use [`command`](command.md) for those.
+- Requires the Jinja2 Python library.

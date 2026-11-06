@@ -8,6 +8,7 @@ from typing import Any, Final
 from .._utils import file_ops
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..results import CallResult
 from ..validation import require_metadata, require_mode, require_path
 
 _RESERVED_VARIABLES: Final = frozenset({"config", "facts"})
@@ -23,7 +24,7 @@ def file(
     owner: str | int | None = None,
     group: str | int | None = None,
     sudo: bool = False,
-) -> None:
+) -> CallResult:
     """Render a Jinja2 template into a managed file.
 
     ``src`` resolves like :func:`kitup.modules.files.copy`: a bare filename is
@@ -45,16 +46,20 @@ def file(
     text = _read_template(ctx, source)
     rendered = _render(ctx, source, text, extra)
 
-    file_ops.apply_bytes(
-        ctx,
-        Path(dest),
-        rendered.encode("utf-8"),
-        mode=mode,
-        owner=owner,
-        group=group,
-        summary=f"render {source} -> {dest}",
-        data={"path": str(dest), "source": str(source), "action": "template"},
-        sudo=sudo,
+    return ctx.changed(
+        file_ops.apply_bytes(
+            ctx,
+            Path(dest),
+            rendered.encode("utf-8"),
+            action="template.file",
+            mode=mode,
+            owner=owner,
+            group=group,
+            summary=f"render {source} -> {dest}",
+            unchanged_summary=f"ensure {dest} from {source}",
+            data={"dest": str(dest), "src": str(source)},
+            sudo=sudo,
+        )
     )
 
 

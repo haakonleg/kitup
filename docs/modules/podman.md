@@ -12,18 +12,27 @@ from kitup.registry import task
 
 Ensure an image is present locally or absent.
 
+### Parameters
+
 - `name` — local image name.
 - `source` — optional transport-qualified pull source such as
   `oci-archive:...`. The pull is verified against `name`.
+- `state` — `"present"` or `"absent"`.
 - `pull` — `"missing"` pulls only when the image is absent, `"always"`
   re-pulls even when it is present, and `"never"` fails when it is absent.
 - `platform` — optional platform such as `linux/arm64`.
 - `force` — pass `--force` when removing an image.
 - `timeout` — command timeout in seconds.
+- `sudo=True` — run as root.
 
 Pulls without `source` are not verified afterwards because short-name
 resolution may store the image under a different local name. Pulls with
 `source` are verified against `name`. Removals are verified.
+
+### Result fields
+
+- `image` — local image name.
+- `source` — pull source, when supplied (pull results only).
 
 ```python
 podman.image(ctx, "docker.io/library/fedora:latest")
@@ -39,6 +48,8 @@ podman.image(ctx, "localhost/example:old", state="absent", force=True)
 
 Build an image from a context directory.
 
+### Parameters
+
 - `context` — build context. A bare name resolves under the bundle's `files/`
   directory; other relative paths resolve against the bundle directory.
   Absolute paths are used as-is.
@@ -49,12 +60,19 @@ Build an image from a context directory.
 - `pull` — always pull the base image.
 - `force` — rebuild even when the tag already exists.
 - `no_cache` — disable the build cache.
+- `timeout` — command timeout in seconds.
+- `sudo=True` — run as root.
 
 `containerfile` is not resolved relative to `context`; pass
 `"container/Containerfile"` or an absolute path when the file lives inside the
 build context.
 
 Content changes in the context are not detected. Use `force=True` to rebuild.
+
+### Result fields
+
+- `image` — resulting image tag.
+- `context` — resolved build context.
 
 ```python
 podman.build(
@@ -70,6 +88,17 @@ podman.build(
 Add one or more target names to a local image. Targets that already point at
 the source image are skipped.
 
+### Parameters
+
+- `image` — source image name.
+- `targets` — one or more target names.
+- `sudo=True` — run as root.
+
+### Result fields
+
+- `source` — source image name.
+- `targets` — tags added; empty when nothing changed.
+
 ```python
 podman.tag(ctx, "localhost/example:latest", ["localhost/example:stable"])
 ```
@@ -78,6 +107,9 @@ podman.tag(ctx, "localhost/example:latest", ["localhost/example:stable"])
 
 Ensure a container is created, started, stopped, or absent.
 
+### Parameters
+
+- `name` — container name.
 - `state` — `"present"` creates without starting, `"started"` creates and
   starts, `"stopped"` stops a running container, and `"absent"` removes it.
   `"started"` verifies that the container is running immediately after the
@@ -89,6 +121,8 @@ Ensure a container is created, started, stopped, or absent.
 - `recreate` — remove and recreate an existing container. Only valid with
   `"present"` or `"started"`.
 - `stop_timeout` — seconds passed to `podman create` and `podman stop`.
+- `timeout` — command timeout in seconds.
+- `sudo=True` — run as root.
 
 Existing containers are never modified. Changing `image`, `command`, or
 `options` requires `recreate=True`. Paused containers are rejected.
@@ -97,6 +131,13 @@ Existing containers are never modified. Changing `image`, `command`, or
 exits immediately is rejected with a clear error; use `"present"` to create
 one-shot containers without starting them, or run one-shot workloads
 separately with `podman run --rm`.
+
+### Result fields
+
+- `container` — container name.
+- `image` — requested image, or `None` when none was supplied.
+- `actions` — list of `"create"`, `"start"`, `"stop"`, or `"remove"` actions
+  performed; empty when nothing changed.
 
 ```python
 podman.container(
@@ -113,7 +154,10 @@ podman.container(ctx, "web", state="absent")
 
 Ensure a `registries.conf.d` drop-in exists or is absent.
 
+### Parameters
+
 - `name` — drop-in name; the default file is `<name>.conf`.
+- `state` — `"present"` or `"absent"`.
 - `location` — registry location. Required for `"present"`.
 - `prefix` — optional registry prefix.
 - `insecure` and `blocked` — registry policy flags.
@@ -124,6 +168,11 @@ Ensure a `registries.conf.d` drop-in exists or is absent.
 
 Parent directories must already exist; create them with
 [`files.directory`](files.md) first.
+
+### Result fields
+
+- `path` — registry drop-in file.
+- `registry` — registry name.
 
 ```python
 podman.registry(
@@ -141,6 +190,21 @@ Log in to a container registry. The password is passed with
 `--password-stdin`, not in argv. An existing login for the same user is a
 no-op unless `force=True`.
 
+### Parameters
+
+- `registry` — registry host.
+- `username` — account name.
+- `password` — password, passed to Podman on stdin.
+- `authfile` — optional authentication file.
+- `tls_verify` — optional TLS verification override.
+- `force` — log in even when the same user is already logged in.
+- `sudo=True` — run as root.
+
+### Result fields
+
+- `registry` — registry host.
+- `username` — account name.
+
 ```python
 podman.login(ctx, "registry.example.com", username="kitup", password=secret)
 ```
@@ -149,17 +213,32 @@ podman.login(ctx, "registry.example.com", username="kitup", password=secret)
 
 Log out of a container registry. A missing login is a no-op.
 
+### Parameters
+
+- `registry` — registry host.
+- `authfile` — optional authentication file.
+- `sudo=True` — run as root.
+
+### Result fields
+
+- `registry` — registry host.
+
 ## `generate_systemd(ctx, name, *, dest=None, scope="system", new=False, restart_policy=None, restart_sec=None, start_timeout=None, stop_timeout=None, container_prefix=None, separator=None, env=None, wants=(), requires=(), after=(), mode=0o644)`
 
 Generate a systemd unit for a container.
 
+### Parameters
+
+- `name` — container name.
 - `dest` — destination directory. Defaults to `/etc/systemd/system` for
   system scope and `~/.config/systemd/user` for user scope.
+- `scope` — `"system"` or `"user"`.
 - `new`, `restart_policy`, `restart_sec`, `start_timeout`, `stop_timeout`,
   `container_prefix`, and `separator` map to the corresponding
   `podman generate systemd` options.
 - `env` — environment variables added to the unit.
 - `wants`, `requires`, and `after` — systemd dependency unit names.
+- `mode` — file mode.
 
 Podman's generated header, which contains a timestamp, is omitted so repeated
 runs produce identical content.
@@ -171,6 +250,11 @@ The filename follows Podman's naming rules, for example
 module writes the unit but does not run `systemctl daemon-reload`; use
 [`systemd.daemon_reload`](systemd.md) afterwards.
 
+### Result fields
+
+- `path` — generated unit file.
+- `container` — container name.
+
 ```python
 podman.generate_systemd(ctx, "web", restart_policy="always")
 systemd.daemon_reload(ctx)
@@ -180,9 +264,13 @@ systemd.daemon_reload(ctx)
 
 Write a Quadlet `.container` file.
 
+### Parameters
+
+- `name` — container name.
 - `image` — container image.
 - `dest` — destination directory. Defaults to `/etc/containers/systemd` for
   system scope and `~/.config/containers/systemd` for user scope.
+- `scope` — `"system"` or `"user"`.
 - `command` — a string written verbatim after `Exec=`, or an argv sequence.
 - `options` — Podman options encoded as `PodmanArgs=` lines.
 - `extra_options` — raw `[Container]` keys such as `PublishPort` or `Volume`.
@@ -191,6 +279,7 @@ Write a Quadlet `.container` file.
   system scope and `default.target` for user scope. An empty string omits the
   `[Install]` section.
 - `stop_timeout` — container stop timeout in seconds.
+- `mode` — file mode.
 
 Keys managed by the module (`ContainerName`, `Image`, `Exec`, `StopTimeout`,
 and `PodmanArgs`) cannot be used in `extra_options`. The generated file always
@@ -198,6 +287,11 @@ includes `[Service] Restart=always`; this is not configurable. Parent
 directories must already exist. The module writes the Quadlet but does not run
 `systemctl daemon-reload`; use [`systemd.daemon_reload`](systemd.md)
 afterwards.
+
+### Result fields
+
+- `path` — generated Quadlet file.
+- `container` — container name.
 
 ```python
 podman.quadlet(

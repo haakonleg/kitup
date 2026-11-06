@@ -51,7 +51,7 @@ def make_task_bundle(root, folder, task_name):
         tasks=f"""
         @task("{task_name}")
         def {folder}_task(ctx):
-            ctx.changed({{}}, "{folder}")
+            ctx.changed( summary="{folder}")
         """,
     )
 
@@ -128,7 +128,7 @@ def test_apply_uses_profile_config_sources(tmp_path, capsys):
         tasks="""
         @task("Show config")
         def show(ctx):
-            ctx.changed({"value": ctx.config.VALUE}, f"value={ctx.config.VALUE}")
+            ctx.changed( summary=f"value={ctx.config.VALUE}", value=ctx.config.VALUE)
         """,
     )
     make_profile(
@@ -385,15 +385,15 @@ def test_profile_tags_are_split_and_stripped(tmp_path, capsys):
         tasks="""
         @task("Packages", tags={"packages"})
         def packages(ctx):
-            ctx.changed({}, "packages")
+            ctx.changed( summary="packages")
 
         @task("Config", tags={"config"})
         def config(ctx):
-            ctx.changed({}, "config")
+            ctx.changed( summary="config")
 
         @task("Docs", tags={"docs"})
         def docs(ctx):
-            ctx.changed({}, "docs")
+            ctx.changed( summary="docs")
         """,
     )
     make_profile(tmp_path, ["base"], tags=[" packages, config "])
@@ -454,15 +454,15 @@ def test_apply_shows_and_prefixes_side_effect_lines(tmp_path, capsys):
 
         @side_effect("Reload nginx", one_shot=False)
         def reload(ctx):
-            ctx.changed({}, "+reloaded")
+            ctx.changed( summary="+reloaded")
 
         @side_effect("Refresh package metadata")
         def refresh(ctx):
-            ctx.changed({}, "+refreshed")
+            ctx.changed( summary="+refreshed")
 
         @task("Configure nginx")
         def configure(ctx):
-            ctx.changed({}, "+conf")
+            ctx.changed( summary="+conf")
             ctx.register_side_effect(reload)
             ctx.register_side_effect(refresh)
         """,
@@ -487,15 +487,15 @@ def test_cli_tag_filters_merge_with_profile_defaults(tmp_path, capsys):
         tasks="""
         @task("Packages", tags={"packages"})
         def packages(ctx):
-            ctx.changed({}, "packages")
+            ctx.changed( summary="packages")
 
         @task("Config", tags={"config"})
         def config(ctx):
-            ctx.changed({}, "config")
+            ctx.changed( summary="config")
 
         @task("Docs", tags={"docs"})
         def docs(ctx):
-            ctx.changed({}, "docs")
+            ctx.changed( summary="docs")
         """,
     )
     make_profile(tmp_path, ["base"], tags=["packages", "config"])
