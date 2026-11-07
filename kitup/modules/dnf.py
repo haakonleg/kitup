@@ -501,7 +501,7 @@ def _normalize_config_value(value: object) -> str:
     if isinstance(value, str):
         return ini_ops.require_ini_value(value)
     if isinstance(value, Iterable):
-        items = list(value)
+        items = ini_ops.require_ini_value_list(value)
         if not all(isinstance(item, str) for item in items):
             raise TaskFailed("config value list items must be strings")
         require_collection(items, "config value")

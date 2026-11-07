@@ -11,6 +11,7 @@ from .helpers import (
     FakeSudo,
     argvs,
     call_data,
+    config_context,
     make_context,
     privileged_context,
     response,
@@ -31,11 +32,6 @@ def bundle_context(tmp_path, bundle_dir, command):
     ctx = make_context(tmp_path, command=command)
     ctx.begin_task(bundle.tasks[0])
     return ctx
-
-
-def config_context(tmp_path, **kwargs):
-    # is_root=True makes sudo=True file operations run locally in tests.
-    return make_context(tmp_path, sudo=FakeSudo(is_root=True), **kwargs)
 
 
 def test_read_only_probes_do_not_request_sudo(tmp_path):
@@ -670,6 +666,8 @@ def test_config_validates_arguments_before_touching_the_file(tmp_path):
         dnf.config(ctx, "best", ["a", 1], path=missing)
     with pytest.raises(TaskFailed, match="config value must not be empty"):
         dnf.config(ctx, "best", [], path=missing)
+    with pytest.raises(TaskFailed, match="must be a sequence"):
+        dnf.config(ctx, "best", {"a", "b"}, path=missing)
 
     assert not missing.exists()
     assert ctx.changes == []

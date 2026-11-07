@@ -3,7 +3,8 @@
 import base64
 import difflib
 import os
-from collections.abc import Mapping
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -15,6 +16,7 @@ from ..results import CallResult
 from . import ini as ini_ops
 from .file_helper import (
     apply_metadata,
+    mkdir_path,
     read_path,
     remove_path,
     resolve_group,
@@ -113,6 +115,46 @@ def require_parent_local(path: Path) -> None:
     """Raise when the parent directory of ``path`` does not exist locally."""
     if not path.parent.is_dir():
         raise TaskFailed(f"parent directory does not exist: {path.parent}")
+
+
+def make_directory(
+    ctx: TaskContext,
+    path: Path,
+    *,
+    mode: int,
+    owner: str | int | None = None,
+    group: str | int | None = None,
+    sudo: bool = False,
+) -> None:
+    """Create one directory with the given metadata, using the worker when privileged."""
+    if privileged(ctx, sudo=sudo):
+        worker_request(ctx, "mkdir", path=str(path), mode=mode, owner=owner, group=group)
+        return
+    try:
+        mkdir_path(path, mode=mode, owner=owner, group=group)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
+    except OSError as exc:
+        raise TaskFailed(f"could not create directory {path}: {exc}") from exc
+
+
+def ensure_parent(ctx: TaskContext, path: Path, *, sudo: bool, mode: int = 0o755) -> None:
+    """Create missing parent directories of ``path``, outermost first.
+
+    Does nothing when the parent already exists and never mutates anything
+    during a dry run.
+    """
+    chain: list[Path] = []
+    current = path.parent
+    while stat(ctx, current, sudo=sudo) is None:
+        chain.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    if ctx.dry_run:
+        return
+    for directory in reversed(chain):
+        make_directory(ctx, directory, mode=mode, sudo=sudo)
 
 
 def resolve_metadata(owner: str | int | None, group: str | int | None) -> None:
@@ -235,13 +277,13 @@ def apply_bytes(
             **data,
         )
 
-    require_parent(ctx, path, sudo=sudo)
     if content_differs:
         _emit_diff(ctx, path, old, content)
     if ctx.dry_run:
         resolve_metadata(owner, group)
         return CallResult(action=action, changed=True, summary=summary, **data)
 
+    require_parent(ctx, path, sudo=sudo)
     if content_differs:
         _write_bytes(ctx, path, content, resolved, owner, group, sudo=sudo)
     else:
@@ -294,20 +336,22 @@ def apply_ini(
     *,
     section: str | None,
     option: str | None,
-    value: str | None,
+    value: str | Sequence[str] | None,
     match: Mapping[str, str] | None,
     create: bool,
     action: str,
     sudo: bool,
+    option_pattern: re.Pattern[str] | None = None,
 ) -> CallResult:
     """Apply one INI edit to ``target`` and return the resulting call.
 
     Shared by modules that edit INI-style files (``files.ini``,
-    ``dnf.config``). Callers validate the arguments first: ``value`` is the
-    canonical value to write, and when it is ``None`` the ``option`` line —
-    or the whole ``section`` when ``option`` is also ``None`` — is removed
-    instead. The returned call is not recorded; the caller records it with
-    ``ctx.changed``.
+    ``dnf.config``, ``pip.config``). Callers validate the arguments first:
+    ``value`` is the canonical value to write — a single line or, for
+    appendable options, a sequence of lines rendered as continuation lines —
+    and when it is ``None`` the ``option`` line — or the whole ``section``
+    when ``option`` is also ``None`` — is removed instead. The returned call
+    is not recorded; the caller records it with ``ctx.changed``.
     """
     if not create and stat(ctx, target, sudo=sudo) is None:
         raise TaskFailed(f"file does not exist and create=False: {target}")
@@ -316,17 +360,18 @@ def apply_ini(
 
     where = f"[{section}] of {target}" if section is not None else str(target)
     data: dict[str, object] = {"path": str(target), "section": section, "option": option, "value": value}
+    display = value if value is None or isinstance(value, str) else ", ".join(value)
 
     new_lines: list[str]
     summary: str
     unchanged_summary: str
     ini_action: str
     if value is not None and option is not None:
-        new_lines, ini_action = ini_ops.set_option(lines, section, option, value, match)
+        new_lines, ini_action = ini_ops.set_option(lines, section, option, value, match, option_pattern)
         summary = f"set {option} in {where}"
-        unchanged_summary = f"ensure {option} is {value} in {where}"
+        unchanged_summary = f"ensure {option} is {display} in {where}"
     elif option is not None:
-        new_lines = ini_ops.remove_option(lines, section, option, match)
+        new_lines = ini_ops.remove_option(lines, section, option, match, option_pattern)
         ini_action = "removed"
         summary = f"remove {option} from {where}"
         unchanged_summary = f"ensure {option} is absent from {where}"

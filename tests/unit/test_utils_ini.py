@@ -16,6 +16,9 @@ def test_parse_option():
     assert ini.parse_option("  fav  =  lemonade  \n") == ("fav", "lemonade")
     assert ini.parse_option("fav = a = b\n") == ("fav", "a = b")
     assert ini.parse_option("fav = lemonade\r\n") == ("fav", "lemonade")
+    # ':' is a delimiter too; the first delimiter wins
+    assert ini.parse_option("fav: lemonade\n") == ("fav", "lemonade")
+    assert ini.parse_option("fav = https://x\n") == ("fav", "https://x")
 
     assert ini.parse_option("\n") is None
     assert ini.parse_option("   \n") is None
@@ -39,12 +42,34 @@ def test_regex_helpers():
     option = ini.option_re("fav")
     assert option.match("fav = 1\n") is not None
     assert option.match("fav=1\n") is not None
+    assert option.match("fav: 1\n") is not None
     assert option.match("  fav\t= 1\n") is not None
     assert option.match("favicon = 1\n") is None
     assert option.match("# fav = 1\n") is None
     assert option.match(";fav = 1\n") is None
     assert ini.option_re("a.b").match("a.b = 1\n") is not None
     assert ini.option_re("a.b").match("aXb = 1\n") is None
+
+
+def test_canonical_option_re_matches_pip_normalized_forms():
+    pattern = ini.canonical_option_re("find-links")
+    for line in ("find-links = x\n", "find-links: x\n", "Find-Links = x\n", "find_links = x\n", "FIND.LINKS: x\n"):
+        assert pattern.match(line) is not None, line
+    assert pattern.match("find-linkx = 1\n") is None
+    assert pattern.match("# find-links = 1\n") is None
+
+
+def test_set_and_remove_option_with_custom_pattern_normalize_existing_lines():
+    pattern = ini.canonical_option_re("find-links")
+    original = lines("[global]\nFind-Links = old\nkeep = 1\n")
+    new_lines, action = ini.set_option(original, "global", "find-links", "new", None, option_pattern=pattern)
+    assert new_lines == lines("[global]\nfind-links = new\nkeep = 1\n")
+    assert action == "replaced"
+
+    original = lines("[global]\nfind_links: /a\nkeep = 1\n")
+    assert ini.remove_option(original, "global", "find-links", None, option_pattern=pattern) == lines(
+        "[global]\nkeep = 1\n"
+    )
 
 
 def test_render_option_uses_canonical_spacing():
@@ -250,3 +275,139 @@ def test_malformed_header_lines_are_not_section_boundaries():
     assert ini.section_spans(body, None) == [(0, 3)]
     assert ini.section_spans(body, "broken") == []
     assert ini.section_spans(lines("a = 1\n[s]\nb = 2\n"), None) == [(0, 1)]
+
+
+def test_render_option_multi_line_value():
+    assert ini.render_option("find-links", ["https://a", "https://b"]) == (
+        "find-links =\n    https://a\n    https://b\n"
+    )
+    # a single item stays on the option line
+    assert ini.render_option("find-links", ["https://a"]) == "find-links = https://a\n"
+    assert ini.render_option("fav", "lemonade") == "fav = lemonade\n"
+
+
+def test_option_entries_includes_continuation_lines():
+    body = lines("[s]\na = 1\n    continued\n# comment\nb = 2\n")
+    assert ini.option_entries(body, 1, 5) == [
+        (1, "a", ["1", "continued"], 3),
+        (4, "b", ["2"], 5),
+    ]
+    # a continuation line with '=' belongs to the preceding option
+    body = lines("[s]\nurl = https://x/?a=b\n    https://y\n")
+    assert ini.option_entries(body, 1, 3) == [(1, "url", ["https://x/?a=b", "https://y"], 3)]
+
+
+def test_span_matches_matches_multi_line_values():
+    body = lines("find-links =\n    a\n    b\n")
+    assert ini.span_matches(body, 0, 3, {"find-links": "a\nb"})
+    assert not ini.span_matches(body, 0, 3, {"find-links": "a\nc"})
+
+
+def test_set_option_multi_line_round_trip():
+    original = lines("[global]\ntimeout = 30\n")
+    new_lines, action = ini.set_option(original, "global", "find-links", ["https://a", "https://b"], None)
+    assert new_lines == lines("[global]\ntimeout = 30\nfind-links =\n    https://a\n    https://b\n")
+    assert action == "added"
+
+    again, action = ini.set_option(new_lines, "global", "find-links", ["https://a", "https://b"], None)
+    assert again is new_lines
+    assert action == "unchanged"
+
+    # different indentation in the file still reads back as the same value
+    spaced = lines("[global]\nfind-links =\n  https://a\n  https://b\n")
+    again, action = ini.set_option(spaced, "global", "find-links", ["https://a", "https://b"], None)
+    assert again is spaced
+    assert action == "unchanged"
+
+
+def test_set_option_replaces_multi_line_with_single_line_and_back():
+    original = lines("[global]\nfind-links =\n    https://a\n    https://b\n")
+    new_lines, action = ini.set_option(original, "global", "find-links", "https://c", None)
+    assert new_lines == lines("[global]\nfind-links = https://c\n")
+    assert action == "replaced"
+
+    new_lines, action = ini.set_option(new_lines, "global", "find-links", ["https://a", "https://b"], None)
+    assert new_lines == lines("[global]\nfind-links =\n    https://a\n    https://b\n")
+    assert action == "replaced"
+
+
+def test_set_option_drops_duplicate_multi_line_entries():
+    original = lines("[s]\nfind-links =\n    a\nfind-links =\n    b\nkeep = 1\n")
+    new_lines, action = ini.set_option(original, "s", "find-links", ["a"], None)
+    assert new_lines == lines("[s]\nfind-links = a\nkeep = 1\n")
+    assert action == "replaced"
+
+
+def test_set_option_appends_section_with_multi_line_value():
+    new_lines, action = ini.set_option(lines("[s]\na = 1\n"), "global", "find-links", ["x", "y"], None)
+    assert new_lines == lines("[s]\na = 1\n[global]\nfind-links =\n    x\n    y\n")
+    assert action == "added"
+
+
+def test_set_option_match_checks_all_lines_of_a_multi_line_block():
+    # the match is satisfied only by a continuation line of the new block
+    new_lines, action = ini.set_option(lines("a = 1\n"), "global", "find-links", ["x", "y"], {"find-links": "y"})
+    assert new_lines == lines("a = 1\n[global]\nfind-links =\n    x\n    y\n")
+    assert action == "added"
+    # a match no line of the block satisfies still raises
+    with pytest.raises(TaskFailed, match="would not satisfy the match"):
+        ini.set_option(lines("a = 1\n"), "global", "find-links", ["x", "y"], {"find-links": "z"})
+
+
+def test_remove_option_removes_continuation_lines():
+    original = lines("[s]\nkeep = 1\nfind-links =\n    a\n    b\nother = 2\n")
+    assert ini.remove_option(original, "s", "find-links", None) == lines("[s]\nkeep = 1\nother = 2\n")
+
+
+def test_require_ini_values_validates_and_strips():
+    assert ini.require_ini_values([" a ", "b"]) == ["a", "b"]
+    assert ini.require_ini_values(("a", "b")) == ["a", "b"]  # tuples are sequences too
+    for bad in ("a", [], ["a", 1], [""], ["a\nb"], ["a\0b"], ["\ud800"], ["#foo"], [";foo"]):
+        with pytest.raises(TaskFailed, match="ini value list"):
+            ini.require_ini_values(bad)
+
+
+def test_require_ini_values_rejects_unordered_iterables():
+    # sets/dicts/generators iterate in an order that can change between runs,
+    # which would make writes non-idempotent
+    for bad in ({"a", "b"}, {"a": 1}, (x for x in ["a"])):
+        with pytest.raises(TaskFailed, match="must be a sequence"):
+            ini.require_ini_values(bad)
+        with pytest.raises(TaskFailed, match="must be a sequence"):
+            ini.require_ini_value_list(bad)
+
+
+def test_same_indent_option_lines_are_separate_entries():
+    # indented keys are allowed; a same-indent line is a new option,
+    # not a continuation of the previous one
+    body = lines("[global]\n  timeout = 30\n  index-url = https://x\n")
+    assert ini.option_entries(body, 1, 3) == [
+        (1, "timeout", ["30"], 2),
+        (2, "index-url", ["https://x"], 3),
+    ]
+    new_lines, action = ini.set_option(body, "global", "timeout", "60", None)
+    # the replaced line is rendered canonically (unindented), but the
+    # neighboring option is preserved instead of being swallowed
+    assert new_lines == lines("[global]\ntimeout = 60\n  index-url = https://x\n")
+    assert action == "replaced"
+    assert ini.remove_option(body, "global", "timeout", None) == lines("[global]\n  index-url = https://x\n")
+
+
+def test_deeper_indented_bracket_item_is_a_continuation_not_a_header():
+    body = lines("[global]\ntrusted-host =\n    [::1]\n    example.com\n")
+    assert ini.section_spans(body, "global") == [(1, 4)]
+    assert ini.option_entries(body, 1, 4) == [(1, "trusted-host", ["[::1]", "example.com"], 4)]
+    # setting the same value again is unchanged (no growth on every run)
+    again, action = ini.set_option(body, "global", "trusted-host", ["[::1]", "example.com"], None)
+    assert again is body
+    assert action == "unchanged"
+
+
+def test_blank_line_inside_multiline_value_keeps_the_entry_together():
+    body = lines("[global]\nfind-links =\n    /a\n\n    /b\nother = 1\n")
+    assert ini.option_entries(body, 1, 5) == [(1, "find-links", ["/a", "/b"], 5)]
+    assert ini.remove_option(body, "global", "find-links", None) == lines("[global]\nother = 1\n")
+    # and re-setting the value is unchanged, not a growing duplicate
+    again, action = ini.set_option(body, "global", "find-links", ["/a", "/b"], None)
+    assert again is body
+    assert action == "unchanged"

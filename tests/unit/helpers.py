@@ -146,6 +146,11 @@ def privileged_context(tmp_path) -> TaskContext:
     return make_context(tmp_path, command=CommandRunner(sudo), sudo=sudo, output=plain_output())
 
 
+def config_context(tmp_path, **kwargs) -> TaskContext:
+    """Return a context where ``sudo=True`` file operations run locally in tests."""
+    return make_context(tmp_path, sudo=FakeSudo(is_root=True), **kwargs)
+
+
 def add_task(
     bundle: Bundle,
     func: Callable[[TaskContext], Any],

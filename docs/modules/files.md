@@ -18,7 +18,8 @@ Ensure a text file exists with optional content, or is absent.
 
 ### Parameters
 
-- `path` — file to create, update, or remove.
+- `path` — file to create, update, or remove. The parent directory must
+  already exist.
 - `content=None` leaves an existing file unchanged and creates a missing file
   empty. Symlinks are refused.
 - `state="absent"` removes the file or symlink, but not a directory.
@@ -46,7 +47,7 @@ refused.
   bundle's `files/example.conf`; other relative paths resolve against the bundle
   directory; absolute paths are used as-is.
 - `dest` — destination path. If it ends with `/`, it is treated as a directory
-  and the source filename is appended.
+  and the source filename is appended. The parent directory must already exist.
 - `mode`, `owner`, and `group` override the destination metadata. `owner` and
   `group` accept a name or numeric ID.
 - `sudo=True` performs the operation as root.

@@ -151,6 +151,27 @@ def test_file_requires_parent_directory(tmp_path):
         files.file(ctx, tmp_path / "missing" / "file", content="content")
 
 
+def test_file_requires_parent_directory_also_in_dry_run(tmp_path):
+    ctx = context(tmp_path, dry_run=True)
+
+    with pytest.raises(TaskFailed, match="parent directory"):
+        files.file(ctx, tmp_path / "missing" / "file", content="content")
+    assert not (tmp_path / "missing").exists()
+
+
+def test_copy_requires_parent_directory_also_in_dry_run(tmp_path):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    ctx = context(tmp_path, dry_run=True)
+
+    with pytest.raises(TaskFailed, match="parent directory"):
+        files.copy(ctx, source, tmp_path / "missing" / "dest")
+    with pytest.raises(TaskFailed, match="parent directory"):
+        files.copy(ctx, source, str(tmp_path / "missing-dir") + "/")
+    assert not (tmp_path / "missing").exists()
+    assert not (tmp_path / "missing-dir").exists()
+
+
 def test_file_refuses_directory_in_both_states(tmp_path):
     ctx = context(tmp_path)
 

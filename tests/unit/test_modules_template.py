@@ -222,6 +222,18 @@ def test_file_requires_parent_directory(tmp_path):
         template.file(ctx, source, tmp_path / "missing" / "rendered.conf")
 
 
+def test_file_requires_parent_directory_also_in_dry_run(tmp_path):
+    # unlike ini edits (which create parents on real runs), a template
+    # destination's parent must exist, and dry-run validates that too
+    source = tmp_path / "template.j2"
+    write_source(source, "value\n")
+    ctx = context(tmp_path, dry_run=True)
+
+    with pytest.raises(TaskFailed, match="parent directory does not exist"):
+        template.file(ctx, source, tmp_path / "missing" / "rendered.conf")
+    assert not (tmp_path / "missing").exists()
+
+
 def test_file_refuses_directory_destination(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "value\n")

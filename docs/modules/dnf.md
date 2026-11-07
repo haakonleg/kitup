@@ -168,8 +168,8 @@ Set or remove one option in a `dnf.conf`-style INI file.
 
 - `option` — option name, written canonically as `option = value`.
 - `value` — required for `state="present"`. A string is written as-is, a
-  boolean as `True`/`False`, an integer in decimal form, and an iterable of
-  strings as a comma-separated list.
+  boolean as `True`/`False`, an integer in decimal form, and a list or tuple
+  of strings as a comma-separated list.
 - `section` — INI section to edit, default `"main"`.
 - `state="present"` sets the option; `state="absent"` removes it.
 - `path` — config file to edit, default `/etc/dnf/dnf.conf`. A missing file

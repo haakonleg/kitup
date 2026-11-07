@@ -41,6 +41,7 @@ def file(
     require_metadata(owner, group)
     require_mode(mode)
     extra = _require_variables(variables)
+    file_ops.require_parent(ctx, Path(dest), sudo=sudo)
 
     source = ctx.resolve_source(src)
     text = _read_template(ctx, source)

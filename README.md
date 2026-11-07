@@ -221,6 +221,7 @@ All built-in modules are idempotent:
 - `host` — hostname, time zone, NTP, RTC, and locale.
 - `users` — local users, groups, and group membership.
 - `podman` — images, containers, registries, and systemd/Quadlet units.
+- `pip` — Python packages via pip (optionally in a virtualenv) and pip.conf options.
 
 See [docs/modules/index.md](docs/modules/index.md) for the full API.
 

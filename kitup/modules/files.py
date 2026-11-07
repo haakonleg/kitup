@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .._utils import file_ops
 from .._utils import ini as ini_ops
-from .._utils.file_helper import mkdir_path, move_path, symlink_path
+from .._utils.file_helper import move_path, symlink_path
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
@@ -73,6 +73,7 @@ def file(
         data = content.encode()
         summary = f"write {target}"
 
+    file_ops.require_parent(ctx, target, sudo=sudo)
     return ctx.changed(
         file_ops.apply_bytes(
             ctx,
@@ -122,6 +123,7 @@ def copy(
     if target_info is not None and target_info.is_dir:
         raise TaskFailed(f"destination is a directory: {target}")
 
+    file_ops.require_parent(ctx, target, sudo=sudo)
     return ctx.changed(
         file_ops.apply_bytes(
             ctx,
@@ -478,12 +480,12 @@ def directory(
                 summary=f"mkdir {target}",
                 path=str(target),
             )
-        _mkdir(
+        file_ops.make_directory(
             ctx,
             target,
-            0o755 if mode is None else mode,
-            owner,
-            group,
+            mode=0o755 if mode is None else mode,
+            owner=owner,
+            group=group,
             sudo=sudo,
         )
         return ctx.changed(
@@ -605,33 +607,6 @@ def _reconcile_metadata(
         return CallResult(action=action, changed=True, summary=f"update metadata for {target}", **data)
     file_ops.apply_metadata_ctx(ctx, target, resolved_mode, owner, group, sudo=sudo)
     return CallResult(action=action, changed=True, summary=f"update metadata for {target}", **data)
-
-
-def _mkdir(
-    ctx: TaskContext,
-    path: Path,
-    mode: int,
-    owner: str | int | None,
-    group: str | int | None,
-    *,
-    sudo: bool,
-) -> None:
-    if file_ops.privileged(ctx, sudo=sudo):
-        file_ops.worker_request(
-            ctx,
-            "mkdir",
-            path=str(path),
-            mode=mode,
-            owner=owner,
-            group=group,
-        )
-        return
-    try:
-        mkdir_path(path, mode=mode, owner=owner, group=group)
-    except ValueError as exc:
-        raise TaskFailed(str(exc)) from exc
-    except OSError as exc:
-        raise TaskFailed(f"could not create directory {path}: {exc}") from exc
 
 
 def _matching_line(lines: list[str], desired: str, match: str | None) -> int | None:

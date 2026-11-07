@@ -7,6 +7,8 @@ RUN dnf5 install -y \
         dnf5 \
         flatpak \
         glib2 \
+        python3 \
+        python3-pip \
         rpm-build \
     && dnf5 clean all
 
@@ -30,6 +32,16 @@ RUN mkdir -p /srv/flatpak-repo \
     && flatpak build-update-repo /srv/flatpak-repo \
     && rm -rf /tmp/flatpak-fixture
 
+# Build a local wheel repository with two versions of a fixture package.
+# Tests run with no network, so pip installs must come from /srv/pip-repo.
+COPY tests/integration/fixtures/pip /tmp/pip-fixture
+RUN mkdir -p /srv/pip-repo \
+    && python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-fixture \
+    && sed -i 's/^version = "1.0"$/version = "1.1"/' /tmp/pip-fixture/pyproject.toml \
+    && sed -i 's/__version__ = "1.0"/__version__ = "1.1"/' /tmp/pip-fixture/kitup_pip_test/__init__.py \
+    && python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-fixture \
+    && rm -rf /tmp/pip-fixture /root/.cache/pip
+
 FROM registry.fedoraproject.org/fedora-minimal:44
 
 # Weak dependencies are disabled to keep the image small: Flatpak and systemd
@@ -51,6 +63,7 @@ RUN dnf5 install -y \
         podman \
         procps-ng \
         python3 \
+        python3-pip \
         python3-pytest \
         shadow-utils \
         sudo \
@@ -62,6 +75,7 @@ RUN dnf5 install -y \
 
 COPY --from=builder /srv/kitup-repo /srv/kitup-repo
 COPY --from=builder /srv/flatpak-repo /srv/flatpak-repo
+COPY --from=builder /srv/pip-repo /srv/pip-repo
 
 RUN rm -f /etc/yum.repos.d/*.repo \
     && mkdir -p /etc/sysctl.d \
