@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from .helpers import run, run_kitup, write_bundle
+from .helpers import run, run_kitup, sudo, write_bundle
 
 pytestmark = pytest.mark.integration
 
@@ -66,19 +66,19 @@ def output(capsys) -> str:
 
 def read_root_file(path: Path) -> str | None:
     """Read a root-owned file, returning ``None`` when it does not exist."""
-    if run(["sudo", "-n", "test", "-e", str(path)], check=False).returncode != 0:
+    if run(sudo("test", "-e", str(path)), check=False).returncode != 0:
         return None
-    return run(["sudo", "-n", "cat", str(path)]).stdout
+    return run(sudo("cat", str(path))).stdout
 
 
 def restore_root_file(path: Path, content: str | None, tmp_path: Path) -> None:
     """Restore a root-owned file, or remove it when it did not exist."""
     if content is None:
-        run(["sudo", "-n", "rm", "-f", str(path)], check=False)
+        run(sudo("rm", "-f", str(path)), check=False)
         return
     staged = tmp_path / f"restore-{path.name}"
     staged.write_text(content, encoding="utf-8")
-    run(["sudo", "-n", "install", "-m", "0644", str(staged), str(path)])
+    run(sudo("install", "-m", "0644", str(staged), str(path)))
 
 
 @pytest.fixture(autouse=True)
@@ -91,7 +91,7 @@ def restore_host_settings(tmp_path: Path) -> Iterator[None]:
 
     yield
 
-    run(["sudo", "-n", "timedatectl", "set-timezone", timezone], check=False)
+    run(sudo("timedatectl", "set-timezone", timezone), check=False)
     run(
         [
             "sudo",
@@ -106,13 +106,13 @@ def restore_host_settings(tmp_path: Path) -> Iterator[None]:
     restore_root_file(LOCALE_CONF, locale_conf, tmp_path)
     # localed caches the file it loaded, so restart it after restoring it.
     # Reset the start limit first: the suite restarts it once per test.
-    run(["sudo", "-n", "systemctl", "reset-failed", "systemd-localed.service"], check=False)
-    run(["sudo", "-n", "systemctl", "restart", "systemd-localed.service"], check=False)
-    run(["sudo", "-n", "hostnamectl", "hostname", "--pretty", pretty], check=False)
+    run(sudo("systemctl", "reset-failed", "systemd-localed.service"), check=False)
+    run(sudo("systemctl", "restart", "systemd-localed.service"), check=False)
+    run(sudo("hostnamectl", "hostname", "--pretty", pretty), check=False)
 
 
 def test_timezone_set_and_idempotent(tmp_path: Path, capsys) -> None:
-    run(["sudo", "-n", "timedatectl", "set-timezone", "UTC"])
+    run(sudo("timedatectl", "set-timezone", "UTC"))
     root = write_bundle(
         tmp_path / "timezone",
         "host_timezone",
@@ -134,7 +134,7 @@ def test_timezone_set_and_idempotent(tmp_path: Path, capsys) -> None:
 
 
 def test_invalid_timezone_fails_without_changing(tmp_path: Path, capsys) -> None:
-    run(["sudo", "-n", "timedatectl", "set-timezone", "UTC"])
+    run(sudo("timedatectl", "set-timezone", "UTC"))
     root = write_bundle(
         tmp_path / "timezone-invalid",
         "host_timezone_invalid",
@@ -153,7 +153,7 @@ def test_invalid_timezone_fails_without_changing(tmp_path: Path, capsys) -> None
 
 
 def test_timezone_dry_run_does_not_change(tmp_path: Path, capsys) -> None:
-    run(["sudo", "-n", "timedatectl", "set-timezone", "UTC"])
+    run(sudo("timedatectl", "set-timezone", "UTC"))
     root = write_bundle(
         tmp_path / "timezone-dry-run",
         "host_timezone_dry_run",
@@ -172,7 +172,7 @@ def test_timezone_dry_run_does_not_change(tmp_path: Path, capsys) -> None:
 
 
 def test_locale_set_and_idempotent(tmp_path: Path, capsys) -> None:
-    run(["sudo", "-n", "localectl", "set-locale", "LANG=en_US.UTF-8", "LC_TIME=en_US.UTF-8"])
+    run(sudo("localectl", "set-locale", "LANG=en_US.UTF-8", "LC_TIME=en_US.UTF-8"))
     root = write_bundle(
         tmp_path / "locale",
         "host_locale",
@@ -297,7 +297,7 @@ def test_locale_uninstalled_fails_without_changing(tmp_path: Path, capsys) -> No
 
 
 def test_locale_dry_run_does_not_change(tmp_path: Path, capsys) -> None:
-    run(["sudo", "-n", "localectl", "set-locale", "LANG=en_US.UTF-8"])
+    run(sudo("localectl", "set-locale", "LANG=en_US.UTF-8"))
     before = read_root_file(LOCALE_CONF)
     root = write_bundle(
         tmp_path / "locale-dry-run",
@@ -318,7 +318,7 @@ def test_locale_dry_run_does_not_change(tmp_path: Path, capsys) -> None:
 
 def test_rtc_local_utc_is_idempotent(tmp_path: Path, capsys) -> None:
     run(
-        ["sudo", "-n", "timedatectl", "set-local-rtc", "0", "--adjust-system-clock"],
+        sudo("timedatectl", "set-local-rtc", "0", "--adjust-system-clock"),
         check=False,
     )
     root = write_bundle(
@@ -339,7 +339,7 @@ def test_rtc_local_utc_is_idempotent(tmp_path: Path, capsys) -> None:
 
 def test_rtc_local_switches_modes(tmp_path: Path, capsys) -> None:
     run(
-        ["sudo", "-n", "timedatectl", "set-local-rtc", "0", "--adjust-system-clock"],
+        sudo("timedatectl", "set-local-rtc", "0", "--adjust-system-clock"),
         check=False,
     )
     local_root = write_bundle(
@@ -374,7 +374,7 @@ def test_rtc_local_switches_modes(tmp_path: Path, capsys) -> None:
 
 
 def test_ntp_disabled_is_idempotent(tmp_path: Path, capsys) -> None:
-    run(["sudo", "-n", "timedatectl", "set-ntp", "false"], check=False)
+    run(sudo("timedatectl", "set-ntp", "false"), check=False)
     if timedatectl_show("NTP")["NTP"] != "no":
         pytest.skip("could not disable network time synchronization")
     root = write_bundle(
@@ -396,7 +396,7 @@ def test_ntp_disabled_is_idempotent(tmp_path: Path, capsys) -> None:
 def test_ntp_enable_fails_when_unavailable(tmp_path: Path, capsys) -> None:
     if timedatectl_show("CanNTP")["CanNTP"] != "no":
         pytest.skip("network time synchronization is available in this image")
-    run(["sudo", "-n", "timedatectl", "set-ntp", "false"], check=False)
+    run(sudo("timedatectl", "set-ntp", "false"), check=False)
     if timedatectl_show("NTP")["NTP"] != "no":
         pytest.skip("could not disable network time synchronization")
 
@@ -417,7 +417,7 @@ def test_ntp_enable_fails_when_unavailable(tmp_path: Path, capsys) -> None:
 
 
 def test_pretty_hostname_set_and_clear(tmp_path: Path, capsys) -> None:
-    run(["sudo", "-n", "hostnamectl", "hostname", "--pretty", ""], check=False)
+    run(sudo("hostnamectl", "hostname", "--pretty", ""), check=False)
     static = run(["hostnamectl", "hostname", "--static"]).stdout.strip()
     set_root = write_bundle(
         tmp_path / "pretty-hostname",

@@ -1,17 +1,14 @@
 import os
 import stat
-from io import StringIO
 from types import SimpleNamespace
 
 import pytest
 
-from kitup.commands import CommandRunner
 from kitup.errors import TaskFailed
 from kitup.modules import template
-from kitup.output import Output
 from kitup.registry import Bundle
 
-from .helpers import PassthroughSudo, call_data, make_context
+from .helpers import call_data, make_context, plain_output, privileged_context
 
 
 def context(tmp_path, *, config=None, facts=None, dry_run=False, diff=False):
@@ -21,17 +18,7 @@ def context(tmp_path, *, config=None, facts=None, dry_run=False, diff=False):
         diff=diff,
         config=config,
         facts=facts,
-        output=Output(StringIO(), no_color=True),
-    )
-
-
-def privileged_context(tmp_path):
-    sudo = PassthroughSudo()
-    return make_context(
-        tmp_path,
-        command=CommandRunner(sudo),
-        sudo=sudo,
-        output=Output(StringIO(), no_color=True),
+        output=plain_output(),
     )
 
 

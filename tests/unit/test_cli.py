@@ -1,4 +1,3 @@
-import sys
 import textwrap
 from pathlib import Path
 
@@ -7,10 +6,9 @@ import pytest
 from kitup import cli
 from kitup.errors import PrivilegeError, TaskFailed
 
+from ..helpers import write
 
-def write(path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(text), encoding="utf-8")
+pytestmark = pytest.mark.usefixtures("clean_imports")
 
 
 def make_bundle(
@@ -81,23 +79,6 @@ def _format_option(value):
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(_format_option(item) for item in value) + "]"
     return repr(value)
-
-
-def purge_project_modules() -> None:
-    for name in tuple(sys.modules):
-        if name == "bundles" or name.startswith("bundles."):
-            sys.modules.pop(name, None)
-        if name in {"base_profile", "laptop_profile", "config"}:
-            sys.modules.pop(name, None)
-        if name.startswith(("_kitup_profile_", "_kitup_config_")):
-            sys.modules.pop(name, None)
-
-
-@pytest.fixture(autouse=True)
-def clean_imports():
-    purge_project_modules()
-    yield
-    purge_project_modules()
 
 
 @pytest.fixture(autouse=True)

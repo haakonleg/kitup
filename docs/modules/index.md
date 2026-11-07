@@ -38,7 +38,7 @@ Each module page documents its parameters, result fields, and usage examples.
 
 - [dnf](dnf.md) — RPM packages, groups, repositories, and COPR
 - [flatpak](flatpak.md) — Flatpak remotes, applications, and runtimes
-- [files](files.md) — files, directories, symlinks, lines, blocks, and moves
+- [files](files.md) — files, directories, symlinks, lines, blocks, INI files, and moves
 - [command](command.md) — guarded one-off commands
 - [github_release](github_release.md) — public GitHub release metadata and assets
 - [download](download.md) — remote file download over HTTP(S)

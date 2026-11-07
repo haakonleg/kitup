@@ -15,6 +15,7 @@ from .helpers import (
     flatpak_remotes,
     run,
     run_kitup,
+    sudo,
     write_bundle,
 )
 
@@ -24,7 +25,7 @@ REPO_URL = f"file://{FLATPAK_REPO}"
 
 
 def cleanup() -> None:
-    for scope, prefix in (("system", ["sudo", "-n"]), ("user", [])):
+    for scope, prefix in (("system", sudo()), ("user", [])):
         for ref in (FLATPAK_APP, FLATPAK_RUNTIME):
             run(
                 [

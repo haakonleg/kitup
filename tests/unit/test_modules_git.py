@@ -3,7 +3,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import git
 
-from .helpers import FakeCommandRunner, call_data, completed, make_context
+from .helpers import FakeCommandRunner, argvs, call_data, make_context, response
 
 URL = "https://example.test/repo.git"
 OLD_URL = "https://example.test/old.git"
@@ -20,10 +20,6 @@ def git_available(monkeypatch):
         "kitup.modules.git.shutil.which",
         lambda name: "git" if name == "git" else None,
     )
-
-
-def response(returncode: int = 0, stdout: str = "", stderr: str = ""):
-    return lambda argv: completed(argv, returncode, stdout, stderr)
 
 
 def is_repo(dest):
@@ -43,7 +39,7 @@ def test_clone_when_destination_is_missing(tmp_path):
 
     git.repo(ctx, URL, dest)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         is_repo(str(dest)),
         ["git", "clone", URL, str(dest)],
     ]
@@ -85,7 +81,7 @@ def test_clone_with_sha_checks_out_after_cloning(tmp_path):
 
     git.repo(ctx, URL, dest, version=SHA)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         is_repo(str(dest)),
         ["git", "clone", URL, str(dest)],
         ["git", "-C", str(dest), "checkout", "--force", SHA],
@@ -116,7 +112,7 @@ def test_empty_directory_inside_another_repo_is_cloned(tmp_path):
 
     git.repo(ctx, URL, dest)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         is_repo(str(dest)),
         ["git", "clone", URL, str(dest)],
     ]
@@ -138,7 +134,7 @@ def test_existing_repo_up_to_date_is_a_noop(tmp_path):
 
     git.repo(ctx, URL, dest)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         is_repo(str(dest)),
         ["git", "-C", str(dest), "remote", "get-url", "origin"],
         ["git", "-C", str(dest), "fetch", "origin"],
@@ -168,7 +164,7 @@ def test_existing_repo_behind_remote_is_updated(tmp_path):
 
     git.repo(ctx, URL, dest)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         is_repo(str(dest)),
         ["git", "-C", str(dest), "remote", "get-url", "origin"],
         ["git", "-C", str(dest), "fetch", "origin"],
@@ -326,7 +322,7 @@ def test_dirty_worktree_with_force_is_updated(tmp_path):
 
     git.repo(ctx, URL, dest, force=True)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         is_repo(str(dest)),
         ["git", "-C", str(dest), "remote", "get-url", "origin"],
         ["git", "-C", str(dest), "fetch", "origin"],
@@ -348,7 +344,7 @@ def test_update_false_with_same_url_does_not_contact_remote(tmp_path):
 
     git.repo(ctx, URL, dest, update=False)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         is_repo(str(dest)),
         ["git", "-C", str(dest), "remote", "get-url", "origin"],
     ]
@@ -375,7 +371,7 @@ def test_url_change_triggers_fetch_and_update_even_when_update_is_false(tmp_path
 
     git.repo(ctx, URL, dest, update=False)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         is_repo(str(dest)),
         ["git", "-C", str(dest), "remote", "get-url", "origin"],
         ["git", "-C", str(dest), "remote", "set-url", "origin", URL],
@@ -456,7 +452,7 @@ def test_dry_run_clone_records_without_running(tmp_path):
 
     git.repo(ctx, URL, dest)
 
-    assert [call[0] for call in command.calls] == [is_repo(str(dest))]
+    assert argvs(command) == [is_repo(str(dest))]
     assert [change.summary for change in ctx.changes] == [f"clone {URL} into {dest}"]
 
 
@@ -476,7 +472,7 @@ def test_dry_run_update_records_without_mutating(tmp_path):
 
     git.repo(ctx, URL, dest)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         is_repo(str(dest)),
         ["git", "-C", str(dest), "remote", "get-url", "origin"],
         ["git", "-C", str(dest), "fetch", "origin"],

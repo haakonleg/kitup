@@ -4,7 +4,7 @@ from kitup.errors import TaskFailed
 from kitup.modules import dnf
 from kitup.registry import Bundle
 
-from .helpers import FakeCommandRunner, FakeSudo, call_data, completed, make_context
+from .helpers import FakeCommandRunner, FakeSudo, argvs, call_data, make_context, response
 
 
 @pytest.fixture(autouse=True)
@@ -15,30 +15,12 @@ def dnf5(monkeypatch):
     )
 
 
-def response(returncode: int = 0, stdout: str = "", stderr: str = ""):
-    return lambda argv: completed(argv, returncode, stdout, stderr)
-
-
 def bundle_context(tmp_path, bundle_dir, command):
     bundle = Bundle("base", path=bundle_dir)
     bundle.task("Task")(lambda ctx: None)
     ctx = make_context(tmp_path, command=command)
     ctx.begin_task(bundle.tasks[0])
     return ctx
-
-
-def test_ensure_present_is_a_noop_when_installed(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0), response(0)]
-    ctx = make_context(tmp_path, command=command)
-
-    dnf.packages(ctx, ["git", "vim"])
-
-    assert [call[0] for call in command.calls] == [
-        ["rpm", "-q", "git"],
-        ["rpm", "-q", "vim"],
-    ]
-    assert ctx.changes == []
 
 
 def test_read_only_probes_do_not_request_sudo(tmp_path):
@@ -54,12 +36,20 @@ def test_read_only_probes_do_not_request_sudo(tmp_path):
 
 def test_ensure_present_installs_only_missing_packages(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [response(1), response(0), response(0), response(0)]
+    command.responses = [response(0), response(0)]
     ctx = make_context(tmp_path, command=command)
 
     dnf.packages(ctx, ["git", "vim"])
+    assert argvs(command) == [
+        ["rpm", "-q", "git"],
+        ["rpm", "-q", "vim"],
+    ]
+    assert ctx.changes == []
 
-    assert command.calls[2][0] == [
+    command.responses = [response(1), response(0), response(0), response(0)]
+    ctx = make_context(tmp_path, command=command)
+    dnf.packages(ctx, ["git", "vim"])
+    assert command.calls[4][0] == [
         "dnf5",
         "install",
         "-y",
@@ -78,7 +68,7 @@ def test_ensure_present_dry_run_does_not_install(tmp_path):
 
     dnf.packages(ctx, ["git"])
 
-    assert [call[0] for call in command.calls] == [["rpm", "-q", "git"]]
+    assert argvs(command) == [["rpm", "-q", "git"]]
     assert ctx.changes[0].summary == "+git"
 
 
@@ -180,7 +170,7 @@ def test_package_install_passes_excludes(tmp_path):
     ]
 
 
-def test_at_prefixed_group_removal_uses_remove(tmp_path):
+def test_group_removal_scenarios(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, "Installed groups:\n multimedia\n"),
@@ -190,23 +180,17 @@ def test_at_prefixed_group_removal_uses_remove(tmp_path):
     ctx = make_context(tmp_path, command=command)
 
     dnf.packages(ctx, ["@multimedia"], state="absent")
-
     assert command.calls[1][0] == ["dnf5", "remove", "-y", "@multimedia"]
     assert call_data(ctx.changes[0]) == {"removed": ["multimedia"]}
 
-
-def test_group_true_removal_uses_group_remove(tmp_path):
-    command = FakeCommandRunner()
     command.responses = [
         response(0, "Installed groups:\n multimedia\n"),
         response(0),
         response(0, "Installed groups:\n"),
     ]
     ctx = make_context(tmp_path, command=command)
-
     dnf.packages(ctx, ["multimedia"], group=True, state="absent")
-
-    assert command.calls[1][0] == ["dnf5", "group", "remove", "-y", "multimedia"]
+    assert command.calls[4][0] == ["dnf5", "group", "remove", "-y", "multimedia"]
     assert call_data(ctx.changes[0]) == {"removed": ["multimedia"]}
 
 
@@ -224,7 +208,7 @@ def test_hidden_group_is_detected_as_installed(tmp_path):
 
     dnf.packages(ctx, ["@multimedia"])
 
-    assert [call[0] for call in command.calls] == [["dnf5", "group", "list", "--installed", "--hidden"]]
+    assert argvs(command) == [["dnf5", "group", "list", "--installed", "--hidden"]]
     assert ctx.changes == []
 
 
@@ -248,25 +232,19 @@ def test_install_failure_is_reported(tmp_path):
         dnf.packages(ctx, ["git"])
 
 
-def test_swap_is_a_noop_when_replacement_is_installed(tmp_path):
+def test_swap_replaces_package_and_is_idempotent(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0)]
     ctx = make_context(tmp_path, command=command)
 
     dnf.swap(ctx, "ffmpeg-free", "ffmpeg")
-
-    assert [call[0] for call in command.calls] == [["rpm", "-q", "ffmpeg"]]
+    assert argvs(command) == [["rpm", "-q", "ffmpeg"]]
     assert ctx.changes == []
 
-
-def test_swap_replaces_package_and_verifies_result(tmp_path):
-    command = FakeCommandRunner()
     command.responses = [response(1), response(0), response(0)]
     ctx = make_context(tmp_path, command=command)
-
     dnf.swap(ctx, "ffmpeg-free", "ffmpeg", allowerasing=True)
-
-    assert command.calls[1][0] == [
+    assert command.calls[2][0] == [
         "dnf5",
         "swap",
         "-y",
@@ -274,8 +252,8 @@ def test_swap_replaces_package_and_verifies_result(tmp_path):
         "ffmpeg",
         "--allowerasing",
     ]
-    assert command.calls[1][1]["sudo"] is True
-    assert command.calls[2][0] == ["rpm", "-q", "ffmpeg"]
+    assert command.calls[2][1]["sudo"] is True
+    assert command.calls[3][0] == ["rpm", "-q", "ffmpeg"]
     assert call_data(ctx.changes[0]) == {"removed": "ffmpeg-free", "installed": "ffmpeg"}
     assert ctx.changes[0].summary == "swap ffmpeg-free -> ffmpeg"
 
@@ -300,14 +278,13 @@ def test_invalid_states_are_errors(tmp_path):
         dnf.repository(ctx, "https://example.test/tool.repo", state="invalid")
 
 
-def test_autoremove_is_a_noop_when_nothing_is_unneeded(tmp_path):
+def test_autoremove_scenarios(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "")]
     ctx = make_context(tmp_path, command=command)
 
     dnf.autoremove(ctx)
-
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         [
             "dnf5",
             "repoquery",
@@ -320,39 +297,28 @@ def test_autoremove_is_a_noop_when_nothing_is_unneeded(tmp_path):
     assert ctx.changes == []
     assert ctx.calls[0].summary == "ensure no unneeded packages"
 
-
-def test_autoremove_removes_unneeded_packages(tmp_path):
-    command = FakeCommandRunner()
     command.responses = [response(0, "libfoo\n libbar \n"), response(0)]
     ctx = make_context(tmp_path, command=command)
-
     dnf.autoremove(ctx)
-
-    assert command.calls[1][0] == ["dnf5", "autoremove", "-y"]
-    assert command.calls[1][1]["sudo"] is True
+    assert command.calls[2][0] == ["dnf5", "autoremove", "-y"]
+    assert command.calls[2][1]["sudo"] is True
     assert call_data(ctx.changes[0]) == {"removed": ["libfoo", "libbar"]}
     assert ctx.changes[0].summary == "-libfoo -libbar"
 
 
-def test_copr_is_a_noop_when_listed(tmp_path):
+def test_copr_enable_scenarios(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "owner/project\n")]
     ctx = make_context(tmp_path, command=command)
 
     dnf.copr(ctx, "owner/project")
-
-    assert [call[0] for call in command.calls] == [["dnf5", "copr", "list"]]
+    assert argvs(command) == [["dnf5", "copr", "list"]]
     assert ctx.changes == []
 
-
-def test_copr_enables_missing_project(tmp_path):
-    command = FakeCommandRunner()
     command.responses = [response(0, ""), response(0)]
     ctx = make_context(tmp_path, command=command)
-
     dnf.copr(ctx, "owner/project")
-
-    assert command.calls[1][0] == [
+    assert command.calls[2][0] == [
         "dnf5",
         "copr",
         "enable",
@@ -362,37 +328,30 @@ def test_copr_enables_missing_project(tmp_path):
     assert call_data(ctx.changes[0]) == {"repository": "owner/project"}
 
 
-def test_copr_absent_removes_listed_project(tmp_path):
+def test_copr_absent_scenarios(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "owner/project\n"), response(0)]
     ctx = make_context(tmp_path, command=command)
 
     dnf.copr(ctx, "owner/project", state="absent")
-
     assert command.calls[1][0] == ["dnf5", "copr", "remove", "owner/project"]
     assert command.calls[1][1]["sudo"] is True
     assert ctx.changes[0].summary == "remove COPR owner/project"
 
-
-def test_copr_absent_is_a_noop_when_missing(tmp_path):
-    command = FakeCommandRunner()
     command.responses = [response(0, "")]
     ctx = make_context(tmp_path, command=command)
-
     dnf.copr(ctx, "owner/project", state="absent")
-
-    assert [call[0] for call in command.calls] == [["dnf5", "copr", "list"]]
+    assert command.calls[2][0] == ["dnf5", "copr", "list"]
     assert ctx.changes == []
 
 
-def test_rpm_release_installs_source(tmp_path):
+def test_rpm_release_scenarios(tmp_path):
     source = "https://example.test/tool-release-2-1.noarch.rpm"
     command = FakeCommandRunner()
     command.responses = [response(0, "tool-release\n"), response(1)]
     ctx = make_context(tmp_path, command=command)
 
     result = dnf.rpm(ctx, source)
-
     assert command.calls[0][0] == [
         "dnf5",
         "repoquery",
@@ -405,36 +364,24 @@ def test_rpm_release_installs_source(tmp_path):
     assert command.calls[2][1]["sudo"] is True
     assert call_data(result) == {"installed": ["tool-release"]}
 
-
-def test_rpm_release_is_a_noop_when_already_installed(tmp_path):
-    source = "https://example.test/tool-release-2-1.noarch.rpm"
-    command = FakeCommandRunner()
     command.responses = [response(0, "tool-release\n"), response(0)]
     ctx = make_context(tmp_path, command=command)
-
     result = dnf.rpm(ctx, source)
-
-    assert [call[0] for call in command.calls] == [
-        ["dnf5", "repoquery", "--queryformat", "%{name}\n", source],
-        ["rpm", "-q", "tool-release"],
+    assert command.calls[3][0] == [
+        "dnf5",
+        "repoquery",
+        "--queryformat",
+        "%{name}\n",
+        source,
     ]
     assert result.changed is False
     assert call_data(result) == {"installed": []}
     assert ctx.changes == []
 
-
-def test_rpm_release_dry_run_reports_packages_without_installing(tmp_path):
-    source = "https://example.test/tool-release-2-1.noarch.rpm"
-    command = FakeCommandRunner()
     command.responses = [response(0, "tool-release\n"), response(1)]
     ctx = make_context(tmp_path, dry_run=True, command=command)
-
     result = dnf.rpm(ctx, source)
-
-    assert [call[0] for call in command.calls] == [
-        ["dnf5", "repoquery", "--queryformat", "%{name}\n", source],
-        ["rpm", "-q", "tool-release"],
-    ]
+    assert command.calls[6][0] == ["rpm", "-q", "tool-release"]
     assert result.changed is True
     assert call_data(result) == {"installed": ["tool-release"]}
 
@@ -496,7 +443,7 @@ def test_repository_requires_arguments(tmp_path):
         dnf.repository(ctx, "https://example.test/tool.repo", state="absent")
 
 
-def test_repository_present_adds_repo_file(tmp_path):
+def test_repository_present_scenarios(tmp_path):
     reposdir = tmp_path / "repos.d"
     reposdir.mkdir()
     command = FakeCommandRunner()
@@ -504,7 +451,6 @@ def test_repository_present_adds_repo_file(tmp_path):
     ctx = make_context(tmp_path, command=command)
 
     dnf.repository(ctx, "https://example.test/tool.repo")
-
     assert command.calls[0][0] == ["dnf5", "--dump-main-config"]
     assert command.calls[1][0] == [
         "dnf5",
@@ -518,6 +464,13 @@ def test_repository_present_adds_repo_file(tmp_path):
         "repository": "https://example.test/tool.repo",
         "path": str(reposdir / "tool.repo"),
     }
+
+    (reposdir / "tool.repo").write_text("[tool]\n", encoding="utf-8")
+    command.responses = [response(0, f"reposdir = {reposdir}\n")]
+    ctx = make_context(tmp_path, command=command)
+    dnf.repository(ctx, "https://example.test/tool.repo")
+    assert command.calls[2][0] == ["dnf5", "--dump-main-config"]
+    assert ctx.changes == []
 
 
 def test_repository_resolves_bundle_relative_source(tmp_path):
@@ -542,43 +495,23 @@ def test_repository_resolves_bundle_relative_source(tmp_path):
     ]
 
 
-def test_repository_present_is_a_noop_when_file_exists(tmp_path):
+def test_repository_absent_scenarios(tmp_path):
     reposdir = tmp_path / "repos.d"
     reposdir.mkdir()
-    (reposdir / "tool.repo").write_text("[tool]\n", encoding="utf-8")
-    command = FakeCommandRunner()
-    command.responses = [response(0, f"reposdir = {reposdir}\n")]
-    ctx = make_context(tmp_path, command=command)
-
-    dnf.repository(ctx, "https://example.test/tool.repo")
-
-    assert [call[0] for call in command.calls] == [["dnf5", "--dump-main-config"]]
-    assert ctx.changes == []
-
-
-def test_repository_absent_removes_repo_file(tmp_path):
-    reposdir = tmp_path / "repos.d"
-    reposdir.mkdir()
-    (reposdir / "tool.repo").write_text("[tool]\n", encoding="utf-8")
+    repo_file = reposdir / "tool.repo"
+    repo_file.write_text("[tool]\n", encoding="utf-8")
     command = FakeCommandRunner()
     command.responses = [response(0, f"reposdir = {reposdir}\n"), response(0)]
     ctx = make_context(tmp_path, command=command)
 
     dnf.repository(ctx, state="absent", name="tool.repo")
-
-    assert command.calls[1][0] == ["rm", "-f", str(reposdir / "tool.repo")]
+    assert command.calls[1][0] == ["rm", "-f", str(repo_file)]
     assert command.calls[1][1]["sudo"] is True
     assert ctx.changes[0].summary == "remove repository tool.repo"
 
-
-def test_repository_absent_is_a_noop_when_file_is_missing(tmp_path):
-    reposdir = tmp_path / "repos.d"
-    reposdir.mkdir()
-    command = FakeCommandRunner()
+    repo_file.unlink()
     command.responses = [response(0, f"reposdir = {reposdir}\n")]
     ctx = make_context(tmp_path, command=command)
-
     dnf.repository(ctx, state="absent", name="tool.repo")
-
-    assert [call[0] for call in command.calls] == [["dnf5", "--dump-main-config"]]
+    assert command.calls[2][0] == ["dnf5", "--dump-main-config"]
     assert ctx.changes == []

@@ -1,11 +1,8 @@
 """Gate the container integration suite behind an explicit opt-in."""
 
 import os
-from pathlib import Path
 
 import pytest
-
-INTEGRATION_DIR = Path(__file__).resolve().parent
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -13,7 +10,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         return
     skip = pytest.mark.skip(reason="set KITUP_INTEGRATION=1 to run integration tests")
     for item in items:
-        if Path(item.path).resolve().is_relative_to(INTEGRATION_DIR):
+        if "integration" in item.keywords:
             item.add_marker(skip)
 
 

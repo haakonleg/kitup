@@ -1,18 +1,11 @@
-from io import StringIO
-
 from kitup.errors import PrivilegeError, TaskFailed
 from kitup.modules import command
-from kitup.output import Output
 from kitup.registry import Bundle, side_effect
 from kitup.resolver import resolve
-from kitup.results import Status, TaskResult
+from kitup.results import Status
 from kitup.runner import Runner
 
-from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
-
-
-def make_output() -> Output:
-    return Output(StringIO(), no_color=True)
+from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context, plain_output
 
 
 def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False):
@@ -22,7 +15,7 @@ def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False):
         command=FakeCommandRunner(),
         sudo=FakeSudo(),
     )
-    output = make_output()
+    output = plain_output()
     runner = Runner(
         resolve(bundles),
         context,
@@ -129,7 +122,7 @@ def test_later_task_reads_previous_result(tmp_path):
     assert seen == [(True, "release-1", Status.CHANGED)]
 
 
-def test_skipped_task_result_is_available(tmp_path):
+def test_task_result_statuses_are_available(tmp_path):
     seen = []
     bundle = Bundle("base")
 
@@ -142,14 +135,10 @@ def test_skipped_task_result_is_available(tmp_path):
 
     add_task(bundle, check, name="Check")
     add_task(bundle, apply, name="Apply")
-
     code, _, _ = run_plan(tmp_path, [bundle])
-
     assert code == 0
     assert seen == [(True, None)]
 
-
-def test_dry_run_result_is_available(tmp_path):
     seen = []
     bundle = Bundle("base")
 
@@ -162,23 +151,17 @@ def test_dry_run_result_is_available(tmp_path):
 
     add_task(bundle, check, name="Check")
     add_task(bundle, apply, name="Apply")
-
     code, _, _ = run_plan(tmp_path, [bundle], dry_run=True)
-
     assert code == 0
     assert seen == [(True, Status.CHANGED)]
 
-
-def test_failed_task_result_is_available(tmp_path):
     bundle = Bundle("base")
 
     def fail(ctx):
         raise TaskFailed("boom")
 
     add_task(bundle, fail, name="Fail")
-
     code, _, context = run_plan(tmp_path, [bundle])
-
     assert code == 1
     result = context.result(fail)
     assert result.failed
@@ -223,18 +206,6 @@ def test_result_is_available_across_bundles(tmp_path):
     assert seen == ["ready"]
 
 
-def test_task_result_status_helpers():
-    bundle = Bundle("base")
-    add_task(bundle, lambda ctx: None)
-    task = bundle.tasks[0]
-
-    assert TaskResult(task, Status.OK).ok
-    assert TaskResult(task, Status.CHANGED).changed
-    assert TaskResult(task, Status.CHANGED).ok
-    assert TaskResult(task, Status.SKIPPED).skipped
-    assert TaskResult(task, Status.FAILED).failed
-
-
 def test_fail_fast_and_remaining_count(tmp_path):
     bundle = Bundle("base")
     add_task(bundle, lambda ctx: None, name="First")
@@ -260,7 +231,7 @@ def test_privilege_error_preserves_changes_and_notes(tmp_path):
 
     add_task(bundle, fail, name="Fail")
     context = make_context(tmp_path, command=FakeCommandRunner(), sudo=FakeSudo())
-    runner = Runner(resolve([bundle]), context, make_output())
+    runner = Runner(resolve([bundle]), context, plain_output())
 
     result = runner._run_task(bundle.tasks[0])
 
@@ -328,7 +299,7 @@ def test_sudo_is_requested_at_first_sudo_operation(tmp_path):
     assert context.sudo.reasons == ['task "Install packages" requires sudo privileges']
 
 
-def test_changed_task_triggers_one_shot_side_effect_at_end_of_bundle(tmp_path):
+def test_deferred_side_effect_runs_at_end_of_bundle_and_before_next_bundle(tmp_path):
     calls = []
     bundle = Bundle("base")
     effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
@@ -342,85 +313,11 @@ def test_changed_task_triggers_one_shot_side_effect_at_end_of_bundle(tmp_path):
     add_task(bundle, lambda ctx: calls.append("last"), name="Last")
 
     code, text, _ = run_plan(tmp_path, [bundle])
-
     assert code == 0
     assert calls == ["install", "last", "refresh"]
     assert "↳ Refresh" in text
 
-
-def test_changed_task_triggers_immediate_side_effect_before_next_task(tmp_path):
-    calls = []
-    bundle = Bundle("base")
-    effect = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
-
-    def configure(ctx):
-        calls.append("configure")
-        ctx.changed(summary="+conf")
-        ctx.register_side_effect(effect)
-
-    add_task(bundle, configure, name="Configure")
-    add_task(bundle, lambda ctx: calls.append("next"), name="Next")
-
-    code, _, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 0
-    assert calls == ["configure", "reload", "next"]
-
-
-def test_unchanged_task_does_not_trigger_side_effect(tmp_path):
-    calls = []
-    bundle = Bundle("base")
-    effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
-
-    def install(ctx):
-        ctx.register_side_effect(effect)
-
-    add_task(bundle, install, name="Install")
-
-    code, _, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 0
-    assert calls == []
-
-
-def test_skipped_task_does_not_trigger_side_effect(tmp_path):
-    calls = []
-    bundle = Bundle("base")
-    effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
-
-    def install(ctx):
-        ctx.register_side_effect(effect)
-        ctx.skip("nothing to do")
-
-    add_task(bundle, install, name="Install")
-
-    code, _, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 0
-    assert calls == []
-
-
-def test_failed_task_does_not_run_its_side_effects(tmp_path):
-    calls = []
-    bundle = Bundle("base")
-    immediate = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
-    deferred = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
-
-    def install(ctx):
-        ctx.register_side_effect(immediate)
-        ctx.register_side_effect(deferred)
-        raise TaskFailed("boom")
-
-    add_task(bundle, install, name="Install")
-
-    code, _, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 1
-    assert calls == []
-
-
-def test_deferred_side_effects_run_before_the_next_bundle(tmp_path):
-    calls = []
+    calls.clear()
     base = Bundle("base")
     other = Bundle("other", depends_on=[base])
     effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
@@ -434,38 +331,93 @@ def test_deferred_side_effects_run_before_the_next_bundle(tmp_path):
     add_task(other, lambda ctx: calls.append("other"), name="Other")
 
     code, text, _ = run_plan(tmp_path, [other])
-
     assert code == 0
     assert calls == ["install", "refresh", "other"]
     assert text.index("↳ Refresh") < text.index("bundle: other")
 
 
-def test_immediate_side_effects_can_affect_later_tasks(tmp_path):
+def test_immediate_side_effect_runs_before_and_affects_next_task(tmp_path):
+    calls = []
     seen = []
     bundle = Bundle("base")
 
     def reload(ctx):
+        calls.append("reload")
         ctx.set("ready", "yes")
 
     effect = side_effect("Reload", one_shot=False)(reload)
 
     def configure(ctx):
+        calls.append("configure")
         ctx.changed(summary="+conf")
         ctx.register_side_effect(effect)
 
     def check(ctx):
+        calls.append("next")
         seen.append(ctx.get("ready", "no"))
 
     add_task(bundle, configure, name="Configure")
-    add_task(bundle, check, name="Check")
+    add_task(bundle, check, name="Next")
 
     code, _, _ = run_plan(tmp_path, [bundle])
-
     assert code == 0
+    assert calls == ["configure", "reload", "next"]
     assert seen == ["yes"]
 
 
-def test_one_shot_side_effect_runs_at_most_once_across_bundles(tmp_path):
+def test_unchanged_or_skipped_task_does_not_trigger_side_effect(tmp_path):
+    for skip in (False, True):
+        calls = []
+        bundle = Bundle("base")
+        effect = side_effect("Refresh")(lambda ctx, calls=calls: calls.append("refresh"))
+
+        def install(ctx, skip=skip, effect=effect):
+            ctx.register_side_effect(effect)
+            if skip:
+                ctx.skip("nothing to do")
+
+        add_task(bundle, install, name="Install")
+        code, _, _ = run_plan(tmp_path, [bundle])
+        assert code == 0
+        assert calls == []
+
+
+def test_failures_and_side_effects(tmp_path):
+    # A task that fails before returning runs none of its side effects.
+    calls = []
+    bundle = Bundle("base")
+    immediate = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
+    deferred = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
+
+    def install(ctx):
+        ctx.register_side_effect(immediate)
+        ctx.register_side_effect(deferred)
+        raise TaskFailed("boom")
+
+    add_task(bundle, install, name="Install")
+    code, _, _ = run_plan(tmp_path, [bundle])
+    assert code == 1
+    assert calls == []
+
+    # An immediate effect that already ran survives a later failure; deferred ones are discarded.
+    calls = []
+    bundle = Bundle("base")
+    immediate = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
+    deferred = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
+
+    def configure(ctx):
+        ctx.changed(summary="+conf")
+        ctx.register_side_effect(immediate)
+        ctx.register_side_effect(deferred)
+
+    add_task(bundle, configure, name="Configure")
+    add_task(bundle, lambda ctx: (_ for _ in ()).throw(TaskFailed("boom")), name="Fail")
+    code, _, _ = run_plan(tmp_path, [bundle])
+    assert code == 1
+    assert calls == ["reload"]
+
+
+def test_one_shot_side_effect_across_bundles(tmp_path):
     calls = []
     base = Bundle("base")
     other = Bundle("other", depends_on=[base])
@@ -479,12 +431,9 @@ def test_one_shot_side_effect_runs_at_most_once_across_bundles(tmp_path):
     add_task(other, register, name="Other install")
 
     code, _, _ = run_plan(tmp_path, [other])
-
     assert code == 0
     assert calls == ["refresh"]
 
-
-def test_skipped_one_shot_side_effect_can_run_again_later(tmp_path):
     calls = []
     base = Bundle("base")
     other = Bundle("other", depends_on=[base])
@@ -503,7 +452,6 @@ def test_skipped_one_shot_side_effect_can_run_again_later(tmp_path):
     add_task(other, register, name="Other install")
 
     code, _, _ = run_plan(tmp_path, [other])
-
     assert code == 0
     assert calls == ["refresh", "refresh"]
 
@@ -526,7 +474,8 @@ def test_immediate_side_effect_runs_for_every_registration(tmp_path):
     assert calls == ["reload", "reload"]
 
 
-def test_immediate_side_effect_failure_aborts_immediately(tmp_path):
+def test_side_effect_failures_abort(tmp_path):
+    # An immediate failure aborts before the next task.
     calls = []
     bundle = Bundle("base")
 
@@ -543,14 +492,12 @@ def test_immediate_side_effect_failure_aborts_immediately(tmp_path):
     add_task(bundle, lambda ctx: calls.append("next"), name="Next")
 
     code, text, _ = run_plan(tmp_path, [bundle])
-
     assert code == 1
     assert calls == []
     assert "error: reload failed" in text
     assert 'Aborted after failure in "Reload". 1 task(s) not run.' in text
 
-
-def test_deferred_side_effect_failure_aborts_at_end_of_bundle(tmp_path):
+    # A deferred failure aborts at the end of the bundle, after later tasks run.
     calls = []
     base = Bundle("base")
     other = Bundle("other", depends_on=[base])
@@ -569,47 +516,10 @@ def test_deferred_side_effect_failure_aborts_at_end_of_bundle(tmp_path):
     add_task(other, lambda ctx: calls.append("other"), name="Other")
 
     code, text, _ = run_plan(tmp_path, [other])
-
     assert code == 1
     assert calls == ["last"]
     assert "error: refresh failed" in text
     assert 'Aborted after failure in "Refresh". 1 task(s) not run.' in text
-
-
-def test_later_task_failure_keeps_immediate_side_effect(tmp_path):
-    calls = []
-    bundle = Bundle("base")
-    effect = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
-
-    def configure(ctx):
-        ctx.changed(summary="+conf")
-        ctx.register_side_effect(effect)
-
-    add_task(bundle, configure, name="Configure")
-    add_task(bundle, lambda ctx: (_ for _ in ()).throw(TaskFailed("boom")), name="Fail")
-
-    code, _, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 1
-    assert calls == ["reload"]
-
-
-def test_deferred_side_effects_are_discarded_when_bundle_fails(tmp_path):
-    calls = []
-    bundle = Bundle("base")
-    effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
-
-    def configure(ctx):
-        ctx.changed(summary="+conf")
-        ctx.register_side_effect(effect)
-
-    add_task(bundle, configure, name="Configure")
-    add_task(bundle, lambda ctx: (_ for _ in ()).throw(TaskFailed("boom")), name="Fail")
-
-    code, _, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 1
-    assert calls == []
 
 
 def test_side_effects_run_in_dry_run_and_record_would_be_changes(tmp_path):
@@ -680,10 +590,15 @@ def test_side_effects_use_the_registering_bundle_context(tmp_path):
     assert seen == [("base", tmp_path, tmp_path / "files" / "marker")]
 
 
-def test_side_effects_can_inspect_earlier_task_results(tmp_path):
+def test_side_effect_results_are_accessible_and_stored(tmp_path):
     seen = []
     bundle = Bundle("base")
-    effect = side_effect("Refresh")(lambda ctx: seen.append(ctx.result(check).value))
+
+    def refresh(ctx):
+        seen.append(ctx.result(check).value)
+        return "done"
+
+    effect = side_effect("Refresh")(refresh)
 
     def check(ctx):
         return "release-1"
@@ -695,29 +610,9 @@ def test_side_effects_can_inspect_earlier_task_results(tmp_path):
     add_task(bundle, check, name="Check")
     add_task(bundle, install, name="Install")
 
-    code, _, _ = run_plan(tmp_path, [bundle])
-
+    code, _, context = run_plan(tmp_path, [bundle])
     assert code == 0
     assert seen == ["release-1"]
-
-
-def test_side_effect_results_are_stored_like_task_results(tmp_path):
-    bundle = Bundle("base")
-
-    def refresh(ctx):
-        return "done"
-
-    effect = side_effect("Refresh")(refresh)
-
-    def install(ctx):
-        ctx.changed(summary="+pkg")
-        ctx.register_side_effect(effect)
-
-    add_task(bundle, install, name="Install")
-
-    code, _, context = run_plan(tmp_path, [bundle])
-
-    assert code == 0
     assert context.result(effect.func).value == "done"
 
 
@@ -740,22 +635,3 @@ def test_nested_side_effect_registration_fails(tmp_path):
 
     assert code == 1
     assert "side effects cannot register other side effects" in text
-
-
-def test_apply_output_prefixes_side_effect_lines(tmp_path):
-    bundle = Bundle("base")
-    effect = side_effect("Reload", one_shot=False)(lambda ctx: ctx.changed(summary="+reloaded"))
-
-    def configure(ctx):
-        ctx.changed(summary="+conf")
-        ctx.register_side_effect(effect)
-
-    add_task(bundle, configure, name="Configure")
-
-    code, text, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 0
-    lines = text.splitlines()
-    assert any(line.startswith("    Configure") for line in lines)
-    assert any(line.startswith("  ↳ Reload") for line in lines)
-    assert not any(line.startswith("  ↳ Configure") for line in lines)

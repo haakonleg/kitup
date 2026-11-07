@@ -8,10 +8,9 @@ import pytest
 from kitup.errors import ProfileError
 from kitup.profiles import RunDefinition, load_profile, profile
 
+from ..helpers import write
 
-def write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(text), encoding="utf-8")
+pytestmark = pytest.mark.usefixtures("clean_imports")
 
 
 def write_bundle(
@@ -43,31 +42,6 @@ def load(root: Path, text: str, *, filename: str = "kitup.py") -> RunDefinition:
         return load_profile(root / filename)
     finally:
         sys.path.remove(str(root))
-
-
-def purge_project_modules() -> None:
-    for name in tuple(sys.modules):
-        if name == "bundles" or name.startswith("bundles."):
-            sys.modules.pop(name, None)
-        if name in {
-            "base_profile",
-            "middle_profile",
-            "child_profile",
-            "empty_profile",
-            "helper_profile",
-            "left_profile",
-            "right_profile",
-        }:
-            sys.modules.pop(name, None)
-        if name.startswith(("_kitup_profile_", "_kitup_config_")):
-            sys.modules.pop(name, None)
-
-
-@pytest.fixture(autouse=True)
-def clean_imports():
-    purge_project_modules()
-    yield
-    purge_project_modules()
 
 
 def test_basic_profile_registers_without_a_variable(tmp_path):

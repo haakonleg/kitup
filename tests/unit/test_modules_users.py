@@ -7,7 +7,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import users
 
-from .helpers import FakeCommandRunner, call_data, completed, make_context
+from .helpers import FakeCommandRunner, argvs, call_data, completed, make_context, response
 
 PASSWORD = "$6$kitup-test$LOewqL.rBYltdCYVJzzJvj2GJPwRIYtIRATKZWYBHuVQqgpiBQ4EmSwr926LJv.g5VmhlqkdCa6.DgSfJ8I420"
 
@@ -192,10 +192,6 @@ def make_users_context(
     return make_context(tmp_path, dry_run=dry_run, command=store), store
 
 
-def commands(store: FakeAccounts) -> list[list[str]]:
-    return [command for command, _ in store.calls]
-
-
 def test_create_user_with_attributes(tmp_path):
     store = FakeAccounts()
     store.add_group("devs", gid=1500)
@@ -223,7 +219,7 @@ def test_create_user_with_attributes(tmp_path):
     }
     assert ctx.changes[0].action == "users.user"
     assert ctx.changes[0].summary == "create user alice; set password for alice"
-    assert commands(store) == [
+    assert argvs(store) == [
         ["getent", "passwd", "alice"],
         ["getent", "group", "devs"],
         ["useradd", "-m", "-u", "1001", "-g", "devs", "-d", "/home/alice", "-s", "/bin/zsh", "alice"],
@@ -233,33 +229,8 @@ def test_create_user_with_attributes(tmp_path):
     ]
     assert store.calls[2][1]["sudo"] is True
     assert store.calls[4][1]["stdin"] == f"alice:{PASSWORD}\n"
-    assert all(PASSWORD not in command for command in commands(store))
+    assert all(PASSWORD not in command for command in argvs(store))
 
-
-def test_create_user_without_home(tmp_path):
-    ctx, store = make_users_context(tmp_path)
-
-    users.user(ctx, "alice", create_home=False)
-
-    assert ["useradd", "-M", "alice"] in commands(store)
-    assert store.users["alice"]["home"] == "/home/alice"
-
-
-def test_create_user_with_numeric_primary_group(tmp_path):
-    store = FakeAccounts()
-    store.add_group("devs", gid=1500)
-    ctx, store = make_users_context(tmp_path, accounts=store)
-
-    users.user(ctx, "alice", group=1500, create_home=False)
-
-    assert store.users["alice"]["gid"] == 1500
-    assert ["getent", "group", "1500"] in commands(store)
-
-
-def test_create_user_is_idempotent(tmp_path):
-    store = FakeAccounts()
-    store.add_group("devs", gid=1500)
-    ctx, store = make_users_context(tmp_path, accounts=store)
     arguments = {
         "uid": 1001,
         "group": "devs",
@@ -267,18 +238,29 @@ def test_create_user_is_idempotent(tmp_path):
         "shell": "/bin/zsh",
         "password": PASSWORD,
     }
-
-    users.user(ctx, "alice", **arguments)
     before = len(store.calls)
     second, _ = make_users_context(tmp_path, accounts=store)
     users.user(second, "alice", **arguments)
-
     assert second.changes == []
-    assert commands(store)[before:] == [
+    assert argvs(store)[before:] == [
         ["getent", "passwd", "alice"],
         ["getent", "group", "devs"],
         ["getent", "shadow", "alice"],
     ]
+
+
+def test_create_user_options(tmp_path):
+    ctx, store = make_users_context(tmp_path)
+    users.user(ctx, "alice", create_home=False)
+    assert ["useradd", "-M", "alice"] in argvs(store)
+    assert store.users["alice"]["home"] == "/home/alice"
+
+    store = FakeAccounts()
+    store.add_group("devs", gid=1500)
+    ctx, store = make_users_context(tmp_path, accounts=store)
+    users.user(ctx, "alice", group=1500, create_home=False)
+    assert store.users["alice"]["gid"] == 1500
+    assert ["getent", "group", "1500"] in argvs(store)
 
 
 def test_modify_user_attributes(tmp_path):
@@ -299,27 +281,20 @@ def test_modify_user_attributes(tmp_path):
         "user": "alice",
         "changed_attributes": ["group", "home", "shell"],
     }
-    assert ["usermod", "-g", "devs", "-d", "/srv/alice", "-s", "/bin/zsh", "alice"] in commands(store)
+    assert ["usermod", "-g", "devs", "-d", "/srv/alice", "-s", "/bin/zsh", "alice"] in argvs(store)
 
 
-def test_existing_user_uid_mismatch_fails(tmp_path):
+def test_user_uid_scenarios(tmp_path):
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
     ctx, store = make_users_context(tmp_path, accounts=store)
 
     with pytest.raises(TaskFailed, match="changing an existing UID is not supported"):
         users.user(ctx, "alice", uid=1002)
+    assert not any(command[0] == "usermod" for command in argvs(store))
 
-    assert not any(command[0] == "usermod" for command in commands(store))
-
-
-def test_matching_uid_is_noop(tmp_path):
-    store = FakeAccounts()
-    store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
     ctx, _ = make_users_context(tmp_path, accounts=store)
-
     users.user(ctx, "alice", uid=1001)
-
     assert ctx.changes == []
 
 
@@ -343,75 +318,59 @@ def test_password_is_set_only_when_different(tmp_path):
         "changed_attributes": ["password"],
     }
     assert PASSWORD not in str(ctx.changes)
-    assert all(PASSWORD not in command for command in commands(store))
-    assert ["chpasswd", "-e"] in commands(store)
+    assert all(PASSWORD not in command for command in argvs(store))
+    assert ["chpasswd", "-e"] in argvs(store)
 
     before = len(store.calls)
     second, _ = make_users_context(tmp_path, accounts=store)
     users.user(second, "alice", password=PASSWORD)
 
     assert second.changes == []
-    assert commands(store)[before:] == [
+    assert argvs(store)[before:] == [
         ["getent", "passwd", "alice"],
         ["getent", "shadow", "alice"],
     ]
 
 
-def test_remove_user_leaves_home(tmp_path):
+def test_remove_user_scenarios(tmp_path):
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
     ctx, store = make_users_context(tmp_path, accounts=store)
 
     users.user(ctx, "alice", state="absent")
-
     assert "alice" not in store.users
     assert call_data(ctx.changes[0]) == {"user": "alice"}
     assert ctx.changes[0].action == "users.user"
     assert ctx.changes[0].summary == "remove user alice"
-    assert ["userdel", "alice"] in commands(store)
+    assert ["userdel", "alice"] in argvs(store)
 
-
-def test_remove_missing_user_is_noop(tmp_path):
     ctx, store = make_users_context(tmp_path)
-
     users.user(ctx, "alice", state="absent")
-
     assert ctx.changes == []
-    assert not any(command[0] == "userdel" for command in commands(store))
+    assert not any(command[0] == "userdel" for command in argvs(store))
 
 
-def test_create_group(tmp_path):
+def test_create_group_scenarios(tmp_path):
     ctx, store = make_users_context(tmp_path)
 
     users.group(ctx, "devs", gid=1500)
-
     assert store.groups["devs"] == {"gid": 1500, "members": []}
     assert call_data(ctx.changes[0]) == {"group": "devs"}
     assert ctx.changes[0].action == "users.group"
-    assert ["groupadd", "-g", "1500", "devs"] in commands(store)
+    assert ["groupadd", "-g", "1500", "devs"] in argvs(store)
 
-
-def test_create_group_without_gid(tmp_path):
-    ctx, store = make_users_context(tmp_path)
-
-    users.group(ctx, "devs")
-
-    assert ["groupadd", "devs"] in commands(store)
-
-
-def test_create_group_is_idempotent(tmp_path):
-    ctx, store = make_users_context(tmp_path)
-
-    users.group(ctx, "devs", gid=1500)
     before = len(store.calls)
     second, _ = make_users_context(tmp_path, accounts=store)
     users.group(second, "devs", gid=1500)
-
     assert second.changes == []
-    assert commands(store)[before:] == [["getent", "group", "devs"]]
+    assert argvs(store)[before:] == [["getent", "group", "devs"]]
+
+    ctx, store = make_users_context(tmp_path)
+    users.group(ctx, "devs")
+    assert ["groupadd", "devs"] in argvs(store)
 
 
-def test_existing_group_gid_mismatch_fails(tmp_path):
+def test_group_gid_scenarios(tmp_path):
     store = FakeAccounts()
     store.add_group("devs", gid=1500)
     ctx, _ = make_users_context(tmp_path, accounts=store)
@@ -419,59 +378,43 @@ def test_existing_group_gid_mismatch_fails(tmp_path):
     with pytest.raises(TaskFailed, match="changing an existing GID is not supported"):
         users.group(ctx, "devs", gid=1600)
 
-
-def test_matching_gid_is_noop(tmp_path):
-    store = FakeAccounts()
-    store.add_group("devs", gid=1500)
     ctx, _ = make_users_context(tmp_path, accounts=store)
-
     users.group(ctx, "devs", gid=1500)
-
     assert ctx.changes == []
 
 
-def test_remove_group(tmp_path):
+def test_remove_group_scenarios(tmp_path):
     store = FakeAccounts()
     store.add_group("devs", gid=1500)
     ctx, store = make_users_context(tmp_path, accounts=store)
 
     users.group(ctx, "devs", state="absent")
-
     assert "devs" not in store.groups
     assert call_data(ctx.changes[0]) == {"group": "devs"}
     assert ctx.changes[0].action == "users.group"
-    assert ["groupdel", "devs"] in commands(store)
+    assert ["groupdel", "devs"] in argvs(store)
 
-
-def test_remove_missing_group_is_noop(tmp_path):
     ctx, store = make_users_context(tmp_path)
-
     users.group(ctx, "devs", state="absent")
-
     assert ctx.changes == []
-    assert not any(command[0] == "groupdel" for command in commands(store))
+    assert not any(command[0] == "groupdel" for command in argvs(store))
 
-
-def test_remove_primary_group_fails(tmp_path):
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1500, home="/home/alice", shell="/bin/bash")
     store.add_group("devs", gid=1500)
     ctx, store = make_users_context(tmp_path, accounts=store)
-
     with pytest.raises(TaskFailed, match="command failed"):
         users.group(ctx, "devs", state="absent")
-
     assert "devs" in store.groups
 
 
-def test_membership_add_and_remove(tmp_path):
+def test_membership_add_remove_and_primary_group_noop(tmp_path):
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
     store.add_group("devs", gid=1500)
     ctx, store = make_users_context(tmp_path, accounts=store)
 
     users.membership(ctx, "alice", "devs")
-
     assert store.groups["devs"]["members"] == ["alice"]
     assert call_data(ctx.changes[0]) == {"user": "alice", "group": "devs"}
     assert ctx.changes[0].action == "users.membership"
@@ -479,56 +422,43 @@ def test_membership_add_and_remove(tmp_path):
     before = len(store.calls)
     second, _ = make_users_context(tmp_path, accounts=store)
     users.membership(second, "alice", "devs")
-
     assert second.changes == []
-    assert commands(store)[before:] == [
+    assert argvs(store)[before:] == [
         ["getent", "passwd", "alice"],
         ["getent", "group", "devs"],
     ]
 
     third, _ = make_users_context(tmp_path, accounts=store)
     users.membership(third, "alice", "devs", state="absent")
-
     assert store.groups["devs"]["members"] == []
     assert call_data(third.changes[0]) == {"user": "alice", "group": "devs"}
     assert third.changes[0].action == "users.membership"
 
+    primary_store = FakeAccounts()
+    primary_store.add_user("alice", uid=1001, gid=1500, home="/home/alice", shell="/bin/bash")
+    primary_store.add_group("devs", gid=1500)
+    primary_ctx, _ = make_users_context(tmp_path, accounts=primary_store)
+    users.membership(primary_ctx, "alice", "devs")
+    assert primary_ctx.changes == []
 
-def test_membership_primary_group_present_is_noop(tmp_path):
+
+def test_membership_failure_scenarios(tmp_path):
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1500, home="/home/alice", shell="/bin/bash")
     store.add_group("devs", gid=1500)
     ctx, _ = make_users_context(tmp_path, accounts=store)
-
-    users.membership(ctx, "alice", "devs")
-
-    assert ctx.changes == []
-
-
-def test_membership_primary_group_absent_fails(tmp_path):
-    store = FakeAccounts()
-    store.add_user("alice", uid=1001, gid=1500, home="/home/alice", shell="/bin/bash")
-    store.add_group("devs", gid=1500)
-    ctx, _ = make_users_context(tmp_path, accounts=store)
-
     with pytest.raises(TaskFailed, match="primary group"):
         users.membership(ctx, "alice", "devs", state="absent")
 
-
-def test_membership_missing_user_fails(tmp_path):
     store = FakeAccounts()
     store.add_group("devs", gid=1500)
     ctx, _ = make_users_context(tmp_path, accounts=store)
-
     with pytest.raises(TaskFailed, match="user does not exist"):
         users.membership(ctx, "alice", "devs")
 
-
-def test_membership_missing_group_fails(tmp_path):
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
     ctx, _ = make_users_context(tmp_path, accounts=store)
-
     with pytest.raises(TaskFailed, match="group does not exist"):
         users.membership(ctx, "alice", "devs")
 
@@ -556,7 +486,7 @@ def test_dry_run_reports_without_mutating(tmp_path):
     assert ctx.changes[1].action == "users.group"
     assert "alice" not in store.users
     assert "newgroup" not in store.groups
-    assert not any(command[0] in {"useradd", "groupadd", "chpasswd"} for command in commands(store))
+    assert not any(command[0] in {"useradd", "groupadd", "chpasswd"} for command in argvs(store))
 
 
 @pytest.mark.parametrize(
@@ -618,28 +548,19 @@ def test_password_failure_does_not_leak_hash(tmp_path):
     assert PASSWORD not in str(error.value.stderr)
 
 
-def test_malformed_passwd_output_raises(tmp_path):
+def test_lookup_failures(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [lambda argv: completed(argv, 0, "bad\n")]
+    command.responses = [response(0, "bad\n")]
     ctx = make_context(tmp_path, command=command)
-
     with pytest.raises(TaskFailed, match="could not parse passwd entry"):
         users.user(ctx, "alice")
 
-
-def test_malformed_group_output_raises(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [lambda argv: completed(argv, 0, "bad\n")]
+    command.responses = [response(0, "bad\n")]
     ctx = make_context(tmp_path, command=command)
-
     with pytest.raises(TaskFailed, match="could not parse group entry"):
         users.group(ctx, "devs")
 
-
-def test_getent_failure_raises(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [lambda argv: completed(argv, 1, "", "boom")]
+    command.responses = [response(1, stderr="boom")]
     ctx = make_context(tmp_path, command=command)
-
     with pytest.raises(TaskFailed, match="could not look up user alice"):
         users.user(ctx, "alice")

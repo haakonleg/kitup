@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from .helpers import run, run_kitup, write_bundle
+from .helpers import run, run_kitup, sudo, write_bundle
 
 pytestmark = pytest.mark.integration
 
@@ -25,10 +25,10 @@ def accounts_absent() -> Iterator[None]:
 
 
 def _cleanup() -> None:
-    run(["sudo", "-n", "userdel", "-r", USER], check=False)
-    run(["sudo", "-n", "groupdel", OTHER_GROUP], check=False)
-    run(["sudo", "-n", "groupdel", GROUP], check=False)
-    run(["sudo", "-n", "rm", "-rf", str(HOME), str(ALT_HOME)], check=False)
+    run(sudo("userdel", "-r", USER), check=False)
+    run(sudo("groupdel", OTHER_GROUP), check=False)
+    run(sudo("groupdel", GROUP), check=False)
+    run(sudo("rm", "-rf", str(HOME), str(ALT_HOME)), check=False)
 
 
 def getent(database: str, key: str) -> str | None:
@@ -47,7 +47,7 @@ def group_exists(name: str = GROUP) -> bool:
 
 
 def shadow_hash(name: str = USER) -> str | None:
-    result = run(["sudo", "-n", "getent", "shadow", name], check=False)
+    result = run(sudo("getent", "shadow", name), check=False)
     if result.returncode != 0:
         return None
     fields = result.stdout.strip().split(":")
@@ -70,7 +70,7 @@ def user_groups(name: str = USER) -> set[str]:
 
 
 def path_exists(path: Path) -> bool:
-    return run(["sudo", "-n", "test", "-e", str(path)], check=False).returncode == 0
+    return run(sudo("test", "-e", str(path)), check=False).returncode == 0
 
 
 def free_id(database: str) -> int:

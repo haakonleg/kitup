@@ -208,7 +208,7 @@ All built-in modules are idempotent:
 
 - `dnf` — packages, groups, release RPMs, repositories, and COPR.
 - `flatpak` — remotes, applications, and runtimes.
-- `files` — files, directories, symlinks, lines, blocks, and moves.
+- `files` — files, directories, symlinks, lines, blocks, INI files, and moves.
 - `command` — guarded one-off commands.
 - `github_release` — public GitHub release metadata and assets.
 - `download` — remote file download over HTTP(S).

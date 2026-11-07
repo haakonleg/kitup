@@ -153,3 +153,11 @@ def require_regex(value: str, label: str) -> None:
     """Reject an empty regular expression."""
     if value == "":
         raise TaskFailed(f"{label} must not be empty")
+
+
+def require_encodable(value: str, label: str) -> None:
+    """Reject strings that cannot be encoded as UTF-8."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise TaskFailed(f"{label} is not UTF-8 encodable") from exc

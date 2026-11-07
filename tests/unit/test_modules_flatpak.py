@@ -3,7 +3,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import flatpak
 
-from .helpers import FakeCommandRunner, FakeSudo, call_data, completed, make_context
+from .helpers import FakeCommandRunner, FakeSudo, argvs, call_data, make_context, response
 
 REMOTE = "flathub"
 REMOTE_URL = "https://dl.flathub.org/repo/flathub.flatpakrepo"
@@ -24,10 +24,6 @@ def flatpak_available(monkeypatch):
     )
 
 
-def response(returncode: int = 0, stdout: str = "", stderr: str = ""):
-    return lambda argv: completed(argv, returncode, stdout, stderr)
-
-
 def installed(*entries: tuple[str, str]) -> str:
     return "".join(f"{application}\t{ref}\n" for application, ref in entries)
 
@@ -39,7 +35,7 @@ def test_remote_present_adds_missing_remote(tmp_path):
 
     flatpak.remote(ctx, REMOTE, REMOTE_URL)
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         REMOTES,
         [
             "flatpak",
@@ -68,7 +64,7 @@ def test_remote_present_is_a_noop_when_it_exists(tmp_path):
 
     flatpak.remote(ctx, REMOTE, "https://example.test/other.flatpakrepo")
 
-    assert [call[0] for call in command.calls] == [REMOTES]
+    assert argvs(command) == [REMOTES]
     assert ctx.changes == []
 
 
@@ -97,7 +93,7 @@ def test_remote_present_dry_run_does_not_add(tmp_path):
 
     flatpak.remote(ctx, REMOTE, REMOTE_URL)
 
-    assert [call[0] for call in command.calls] == [REMOTES]
+    assert argvs(command) == [REMOTES]
     assert len(ctx.changes) == 1
 
 
@@ -126,7 +122,7 @@ def test_remote_absent_is_a_noop_when_missing(tmp_path):
 
     flatpak.remote(ctx, REMOTE, state="absent")
 
-    assert [call[0] for call in command.calls] == [REMOTES]
+    assert argvs(command) == [REMOTES]
     assert ctx.changes == []
 
 
@@ -152,7 +148,7 @@ def test_packages_present_is_a_noop_when_installed(tmp_path):
 
     flatpak.packages(ctx, [APP])
 
-    assert [call[0] for call in command.calls] == [LIST]
+    assert argvs(command) == [LIST]
     assert ctx.changes == []
 
 
@@ -213,7 +209,7 @@ def test_packages_full_refs_and_kind_prefixes_match_exactly(tmp_path):
 
     flatpak.packages(ctx, [f"app/{APP_REF}", f"runtime/{RUNTIME_REF}"])
 
-    assert [call[0] for call in command.calls] == [LIST]
+    assert argvs(command) == [LIST]
     assert ctx.changes == []
 
 
@@ -280,7 +276,7 @@ def test_packages_absent_is_a_noop_when_missing(tmp_path):
 
     flatpak.packages(ctx, [APP], state="absent")
 
-    assert [call[0] for call in command.calls] == [LIST]
+    assert argvs(command) == [LIST]
     assert ctx.changes == []
 
 

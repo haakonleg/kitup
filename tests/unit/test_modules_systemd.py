@@ -3,11 +3,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import systemd
 
-from .helpers import FakeCommandRunner, FakeSudo, call_data, completed, make_context
-
-
-def response(returncode: int = 0, stdout: str = ""):
-    return lambda argv: completed(argv, returncode, stdout)
+from .helpers import FakeCommandRunner, FakeSudo, argvs, call_data, make_context, response
 
 
 def test_enabled_active_unit_is_a_noop(tmp_path):
@@ -17,7 +13,7 @@ def test_enabled_active_unit_is_a_noop(tmp_path):
 
     systemd.unit(ctx, "sshd.service", enabled=True, state="started")
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         ["systemctl", "is-enabled", "sshd.service"],
         ["systemctl", "is-active", "sshd.service"],
     ]
@@ -41,7 +37,7 @@ def test_enable_and_start(tmp_path):
         state="started",
     )
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         ["systemctl", "is-enabled", "sshd.service"],
         ["systemctl", "enable", "sshd.service"],
         ["systemctl", "is-active", "sshd.service"],

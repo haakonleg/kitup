@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from .helpers import run, run_kitup, write_bundle
+from .helpers import run, run_kitup, sudo, write_bundle
 
 pytestmark = pytest.mark.integration
 
@@ -27,11 +27,11 @@ def sysctl_value(key: str = KEY) -> str:
 
 @pytest.fixture(autouse=True)
 def restore_sysctl() -> Iterator[None]:
-    run(["sudo", "-n", "sysctl", "-w", f"{KEY}=0"], check=False)
-    run(["sudo", "-n", "rm", "-f", CONF], check=False)
+    run(sudo("sysctl", "-w", f"{KEY}=0"), check=False)
+    run(sudo("rm", "-f", CONF), check=False)
     yield
-    run(["sudo", "-n", "sysctl", "-w", f"{KEY}=0"], check=False)
-    run(["sudo", "-n", "rm", "-f", CONF], check=False)
+    run(sudo("sysctl", "-w", f"{KEY}=0"), check=False)
+    run(sudo("rm", "-f", CONF), check=False)
 
 
 def test_runtime_only_set(tmp_path: Path, capsys) -> None:
@@ -95,10 +95,10 @@ def test_preexisting_no_space_entry_is_idempotent(tmp_path: Path, capsys) -> Non
             sysctl.key(ctx, {KEY!r}, 1, file={CONF!r})
         """,
     )
-    run(["sudo", "-n", "sysctl", "-w", f"{KEY}=1"])
+    run(sudo("sysctl", "-w", f"{KEY}=1"))
     seed = tmp_path / "seed.conf"
     seed.write_text(f"{KEY}=1\n", encoding="utf-8")
-    run(["sudo", "-n", "install", "-m", "0644", str(seed), CONF])
+    run(sudo("install", "-m", "0644", str(seed), CONF))
 
     assert run_kitup("apply", root) == 0
     assert "0 changed" in capsys.readouterr().out

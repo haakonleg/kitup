@@ -3,11 +3,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import gsettings
 
-from .helpers import FakeCommandRunner, FakeSudo, call_data, completed, make_context
-
-
-def response(returncode: int = 0, stdout: str = "", stderr: str = ""):
-    return lambda argv: completed(argv, returncode, stdout, stderr)
+from .helpers import FakeCommandRunner, FakeSudo, argvs, call_data, make_context, response
 
 
 def test_matching_value_is_a_noop(tmp_path):
@@ -17,7 +13,7 @@ def test_matching_value_is_a_noop(tmp_path):
 
     gsettings.key(ctx, "org.example", "theme", "dark")
 
-    assert [call[0] for call in command.calls] == [["gsettings", "get", "org.example", "theme"]]
+    assert argvs(command) == [["gsettings", "get", "org.example", "theme"]]
     assert ctx.changes == []
 
 
@@ -99,7 +95,7 @@ def test_absent_resets_the_key(tmp_path):
 
     gsettings.key(ctx, "org.example", "theme", state="absent")
 
-    assert [call[0] for call in command.calls] == [
+    assert argvs(command) == [
         ["gsettings", "get", "org.example", "theme"],
         ["gsettings", "get", "org.example", "theme"],
         ["gsettings", "reset", "org.example", "theme"],

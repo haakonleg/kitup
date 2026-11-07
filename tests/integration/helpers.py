@@ -20,6 +20,11 @@ SCHEMA_KEY = "example-string"
 SCHEMA_DEFAULT = "'default-value'"
 
 
+def sudo(*args: str) -> list[str]:
+    """Return a non-interactive sudo command."""
+    return ["sudo", "-n", *args]
+
+
 def run(
     argv: list[str],
     *,
@@ -91,7 +96,7 @@ def rpm_installed(name: str = TEST_PACKAGE) -> bool:
 
 def remove_package(name: str = TEST_PACKAGE) -> None:
     if rpm_installed(name):
-        run(["sudo", "-n", "dnf5", "remove", "-y", name])
+        run(sudo("dnf5", "remove", "-y", name))
 
 
 def dnf_reposdir() -> Path:

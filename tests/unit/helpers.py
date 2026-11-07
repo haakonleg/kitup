@@ -1,11 +1,17 @@
 """Shared test doubles and builders."""
 
+import http.server
 import subprocess
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from io import StringIO
 from types import SimpleNamespace
 from typing import Any
 
+from kitup.commands import CommandRunner
 from kitup.context import TaskContext
+from kitup.output import Output
 from kitup.registry import Bundle
 from kitup.results import CallResult
 
@@ -42,6 +48,39 @@ def completed(
 ) -> subprocess.CompletedProcess[str]:
     """Build a scripted command result for FakeCommandRunner."""
     return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
+
+def response(
+    returncode: int = 0,
+    stdout: str = "",
+    stderr: str = "",
+) -> Callable[[list[str]], subprocess.CompletedProcess[str]]:
+    """Build a scripted response for ``FakeCommandRunner.responses``."""
+    return lambda argv: completed(argv, returncode, stdout, stderr)
+
+
+def argvs(command: FakeCommandRunner) -> list[list[str]]:
+    """Return the argv of every command recorded by a fake runner."""
+    return [argv for argv, _ in command.calls]
+
+
+def plain_output() -> Output:
+    """Return a non-interactive output sink for rendering assertions."""
+    return Output(StringIO(), no_color=True)
+
+
+@contextmanager
+def serve_http(handler: type[http.server.BaseHTTPRequestHandler]) -> Iterator[str]:
+    """Run a local HTTP server on a random port and yield its base URL."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 class FakeSudo:
@@ -99,6 +138,12 @@ def make_context(
         command=command or FakeCommandRunner(),  # type: ignore[arg-type]
         output=output,
     )
+
+
+def privileged_context(tmp_path) -> TaskContext:
+    """Return a context whose privileged commands run locally."""
+    sudo = PassthroughSudo()
+    return make_context(tmp_path, command=CommandRunner(sudo), sudo=sudo, output=plain_output())
 
 
 def add_task(

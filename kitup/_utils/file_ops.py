@@ -162,6 +162,27 @@ def read_bytes(
         raise TaskFailed(f"could not read {path}: {exc}") from exc
 
 
+def read_text(ctx: TaskContext, path: Path, *, sudo: bool) -> str:
+    """Read a regular UTF-8 text file, returning ``""`` when it is missing.
+
+    Directories, symlinks, other non-regular files, and non-UTF-8 content
+    raise ``TaskFailed``.
+    """
+    info = stat(ctx, path, sudo=sudo)
+    if info is None:
+        return ""
+    if info.is_dir:
+        raise TaskFailed(f"path is a directory: {path}")
+    if info.is_symlink:
+        raise TaskFailed(f"refusing to edit symlink: {path}")
+    if not info.is_file:
+        raise TaskFailed(f"path is not a regular file: {path}")
+    try:
+        return read_bytes(ctx, path, info, sudo=sudo).decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise TaskFailed(f"not a UTF-8 text file: {path}") from exc
+
+
 def apply_bytes(
     ctx: TaskContext,
     path: Path,
@@ -224,6 +245,45 @@ def apply_bytes(
     else:
         apply_metadata_ctx(ctx, path, resolved, owner, group, sudo=sudo)
     return CallResult(action=action, changed=True, summary=summary, **data)
+
+
+def apply_text(
+    ctx: TaskContext,
+    path: Path,
+    old_text: str,
+    new_text: str,
+    *,
+    action: str,
+    summary: str,
+    data: dict[str, object],
+    sudo: bool,
+    unchanged_summary: str | None = None,
+) -> CallResult:
+    """Write text idempotently, preserving the metadata of an existing file.
+
+    Identical text returns a ``changed=False`` call without touching the file;
+    otherwise the write goes through :func:`apply_bytes`, which handles
+    ``--dry-run``, diffs, and privileged writes. New files get mode ``0o644``.
+    """
+    if new_text == old_text:
+        return CallResult(action=action, changed=False, summary=unchanged_summary or summary, **data)
+    try:
+        payload = new_text.encode()
+    except UnicodeEncodeError as exc:
+        raise TaskFailed(f"not UTF-8 encodable: {path}") from exc
+    return apply_bytes(
+        ctx,
+        path,
+        payload,
+        action=action,
+        mode=None,
+        owner=None,
+        group=None,
+        summary=summary,
+        data=data,
+        sudo=sudo,
+        unchanged_summary=unchanged_summary,
+    )
 
 
 def apply_metadata_ctx(

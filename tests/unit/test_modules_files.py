@@ -1,17 +1,15 @@
 import os
+import re
 import stat
-from io import StringIO
 
 import pytest
 
 from kitup._utils.file_helper import stat_path
-from kitup.commands import CommandRunner
 from kitup.errors import TaskFailed
 from kitup.modules import files
-from kitup.output import Output
 from kitup.registry import Bundle
 
-from .helpers import FakeSudo, PassthroughSudo, call_data, make_context
+from .helpers import FakeSudo, call_data, make_context, plain_output, privileged_context
 
 
 def context(tmp_path, *, dry_run=False, diff=False):
@@ -19,17 +17,7 @@ def context(tmp_path, *, dry_run=False, diff=False):
         tmp_path,
         dry_run=dry_run,
         diff=diff,
-        output=Output(StringIO(), no_color=True),
-    )
-
-
-def privileged_context(tmp_path):
-    sudo = PassthroughSudo()
-    return make_context(
-        tmp_path,
-        command=CommandRunner(sudo),
-        sudo=sudo,
-        output=Output(StringIO(), no_color=True),
+        output=plain_output(),
     )
 
 
@@ -751,3 +739,538 @@ def test_move_uses_privileged_worker(tmp_path):
 
     assert not source.exists()
     assert dest.read_text() == "value\n"
+
+
+def test_ini_sets_option_and_is_idempotent(tmp_path):
+    path = tmp_path / "app.conf"
+    path.write_text("[drinks]\nfav = tea\n")
+    ctx = context(tmp_path)
+
+    result = files.ini(ctx, path, section="drinks", option="fav", value="lemonade")
+
+    assert path.read_text() == "[drinks]\nfav = lemonade\n"
+    assert result.action == "files.ini"
+    assert result.changed is True
+    assert result.summary == f"set fav in [drinks] of {path}"
+    assert call_data(result) == {
+        "path": str(path),
+        "section": "drinks",
+        "option": "fav",
+        "value": "lemonade",
+        "ini_action": "replaced",
+    }
+
+    result = files.ini(ctx, path, section="drinks", option="fav", value="lemonade")
+    assert result.changed is False
+    assert result.summary == f"ensure fav is lemonade in [drinks] of {path}"
+    assert call_data(result)["ini_action"] == "unchanged"
+    assert len(ctx.changes) == 1
+
+
+def test_ini_result_fields_report_ini_action_and_arguments(tmp_path):
+    path = tmp_path / "app.conf"
+    path.write_text("[s]\na = 1\n")
+    ctx = context(tmp_path)
+
+    result = files.ini(ctx, path, section="s", option="b", value="2")
+    assert call_data(result) == {
+        "path": str(path),
+        "section": "s",
+        "option": "b",
+        "value": "2",
+        "ini_action": "added",
+    }
+
+    result = files.ini(ctx, path, section="s", option="a", value="9")
+    assert call_data(result)["ini_action"] == "replaced"
+
+    result = files.ini(ctx, path, section="s", option="a", state="absent")
+    assert call_data(result) == {
+        "path": str(path),
+        "section": "s",
+        "option": "a",
+        "value": None,
+        "ini_action": "removed",
+    }
+
+    result = files.ini(ctx, path, section="s", state="absent")
+    assert call_data(result)["ini_action"] == "removed"
+
+    result = files.ini(ctx, path, section="s", state="absent")
+    assert call_data(result) == {
+        "path": str(path),
+        "section": "s",
+        "option": None,
+        "value": None,
+        "ini_action": "unchanged",
+    }
+
+    result = files.ini(ctx, path, option="pre", value="1")
+    assert call_data(result) == {
+        "path": str(path),
+        "section": None,
+        "option": "pre",
+        "value": "1",
+        "ini_action": "added",
+    }
+
+
+def test_ini_edit_scenarios(tmp_path):
+    # Spacing variants that already match are no-ops.
+    path = tmp_path / "spacing.conf"
+    path.write_text("[drinks]\nfav=lemonade\n")
+    ctx = context(tmp_path)
+    result = files.ini(ctx, path, section="drinks", option="fav", value="lemonade")
+    assert path.read_text() == "[drinks]\nfav=lemonade\n"
+    assert result.changed is False
+
+    # Insertion at the end of a section body preserves the rest of the file.
+    path = tmp_path / "insert.conf"
+    path.write_text("# top\n[s]\na = 1\n\n# trailing\n[t]\nb = 2\n")
+    files.ini(ctx, path, section="s", option="c", value="3")
+    assert path.read_text() == "# top\n[s]\na = 1\nc = 3\n\n# trailing\n[t]\nb = 2\n"
+
+    # Missing sections are appended; missing files are created with the default mode.
+    path = tmp_path / "append.conf"
+    path.write_text("[s]\na = 1\n")
+    files.ini(ctx, path, section="t", option="b", value="2")
+    assert path.read_text() == "[s]\na = 1\n[t]\nb = 2\n"
+
+    fresh = tmp_path / "new.conf"
+    files.ini(ctx, fresh, section="s", option="a", value="1")
+    assert fresh.read_text() == "[s]\na = 1\n"
+    assert stat.S_IMODE(fresh.stat().st_mode) == 0o644
+
+    # The preamble is edited when section is None.
+    path = tmp_path / "preamble.conf"
+    path.write_text("a = 1\n[s]\nb = 2\n")
+    files.ini(ctx, path, option="c", value="3")
+    assert path.read_text() == "a = 1\nc = 3\n[s]\nb = 2\n"
+    result = files.ini(ctx, path, option="c", value="3")
+    assert result.changed is False
+    assert result.summary == f"ensure c is 3 in {path}"
+
+    # Duplicate option lines are collapsed.
+    path = tmp_path / "duplicates.conf"
+    path.write_text("[s]\na = 1\nb = 2\na = 9\n")
+    files.ini(ctx, path, section="s", option="a", value="3")
+    assert path.read_text() == "[s]\na = 3\nb = 2\n"
+
+    # Only the first of duplicate sections is edited.
+    path = tmp_path / "sections.conf"
+    path.write_text("[Peer]\nPublicKey = aaa\n[Peer]\nPublicKey = bbb\n")
+    files.ini(ctx, path, section="Peer", option="Endpoint", value="1.2.3.4:51820")
+    assert path.read_text() == "[Peer]\nPublicKey = aaa\nEndpoint = 1.2.3.4:51820\n[Peer]\nPublicKey = bbb\n"
+    files.ini(ctx, path, section="Peer", state="absent")
+    assert path.read_text() == "[Peer]\nPublicKey = bbb\n"
+
+    # Values may contain equals signs.
+    path = tmp_path / "equals.conf"
+    files.ini(ctx, path, section="s", option="filter", value="a=b=c")
+    assert path.read_text() == "[s]\nfilter = a=b=c\n"
+    result = files.ini(ctx, path, section="s", option="filter", value="a=b=c")
+    assert result.changed is False
+
+    # A no-op does not repair a missing final newline.
+    path = tmp_path / "newline.conf"
+    path.write_text("[s]\na = 1")
+    result = files.ini(ctx, path, section="s", option="a", value="1")
+    assert path.read_text() == "[s]\na = 1"
+    assert result.changed is False
+
+
+def test_ini_create_false_rejects_a_missing_file(tmp_path):
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="does not exist"):
+        files.ini(ctx, tmp_path / "missing.conf", section="s", option="a", value="1", create=False)
+
+    assert not (tmp_path / "missing.conf").exists()
+
+
+def test_ini_absent_scenarios(tmp_path):
+    path = tmp_path / "absent.conf"
+    path.write_text("a = 0\n[s]\na = 1\nb = 2\n[t]\na = 3\n")
+    ctx = context(tmp_path)
+    result = files.ini(ctx, path, section="s", option="a", state="absent")
+    assert path.read_text() == "a = 0\n[s]\nb = 2\n[t]\na = 3\n"
+    assert result.changed is True
+    assert result.summary == f"remove a from [s] of {path}"
+
+    result = files.ini(ctx, path, section="s", option="a", state="absent")
+    assert result.changed is False
+    assert result.summary == f"ensure a is absent from [s] of {path}"
+
+    path = tmp_path / "section.conf"
+    path.write_text("pre\n[s]\na = 1\n\n[t]\nb = 2\n")
+    ctx = context(tmp_path)
+    result = files.ini(ctx, path, section="s", state="absent")
+    assert path.read_text() == "pre\n[t]\nb = 2\n"
+    assert result.summary == f"remove section [s] from {path}"
+
+    result = files.ini(ctx, path, section="s", state="absent")
+    assert result.changed is False
+    assert result.summary == f"ensure section [s] is absent from {path}"
+
+    # No matching section is a no-op.
+    path = tmp_path / "nomatch.conf"
+    path.write_text("[Peer]\nPublicKey = aaa\n")
+    ctx = context(tmp_path)
+    result = files.ini(ctx, path, section="Peer", match={"PublicKey": "zzz"}, option="Endpoint", state="absent")
+    assert result.changed is False
+    assert path.read_text() == "[Peer]\nPublicKey = aaa\n"
+    result = files.ini(ctx, path, section="Peer", match={"PublicKey": "zzz"}, state="absent")
+    assert result.changed is False
+    assert path.read_text() == "[Peer]\nPublicKey = aaa\n"
+
+
+def test_ini_match_scenarios(tmp_path):
+    path = tmp_path / "wg0.conf"
+    path.write_text(
+        "[Peer]\nPublicKey = aaa\nAllowedIPs = 10.128.0.11/32\n[Peer]\nPublicKey = bbb\nAllowedIPs = 10.128.0.12/32\n"
+    )
+    ctx = context(tmp_path)
+    result = files.ini(
+        ctx,
+        path,
+        section="Peer",
+        match={"AllowedIPs": r"10\.128\.0\.12/32"},
+        option="Endpoint",
+        value="10.0.0.2:51820",
+    )
+    assert path.read_text() == (
+        "[Peer]\nPublicKey = aaa\nAllowedIPs = 10.128.0.11/32\n"
+        "[Peer]\nPublicKey = bbb\nAllowedIPs = 10.128.0.12/32\nEndpoint = 10.0.0.2:51820\n"
+    )
+    assert call_data(result)["ini_action"] == "added"
+
+    # second run is a no-op
+    result = files.ini(
+        ctx,
+        path,
+        section="Peer",
+        match={r"Allowed.*": r"10\.128\.0\.12/32"},
+        option="Endpoint",
+        value="10.0.0.2:51820",
+    )
+    assert result.changed is False
+    assert len(ctx.changes) == 1
+
+    # regex key selects the right peer
+    path = tmp_path / "regex.conf"
+    path.write_text("[Peer]\nPublicKey = aaa\n[Peer]\nPublicKey = bbb\n")
+    files.ini(ctx, path, section="Peer", match={r"Public.*": "bbb"}, option="Endpoint", value="1.2.3.4:51820")
+    assert path.read_text() == "[Peer]\nPublicKey = aaa\n[Peer]\nPublicKey = bbb\nEndpoint = 1.2.3.4:51820\n"
+
+    # first matching section wins
+    path = tmp_path / "first.conf"
+    path.write_text("[Peer]\nPublicKey = aaa\n[Peer]\nPublicKey = aaa\n")
+    files.ini(ctx, path, section="Peer", match={"PublicKey": "aaa"}, option="Endpoint", value="1.2.3.4:51820")
+    assert path.read_text() == "[Peer]\nPublicKey = aaa\nEndpoint = 1.2.3.4:51820\n[Peer]\nPublicKey = aaa\n"
+
+    # creating via the matched option is idempotent
+    path = tmp_path / "create.conf"
+    path.write_text("[Interface]\nPrivateKey = xxxx\n")
+    for _ in range(2):
+        files.ini(ctx, path, section="Peer", match={"PublicKey": "bbbb"}, option="PublicKey", value="bbbb")
+    assert path.read_text() == "[Interface]\nPrivateKey = xxxx\n[Peer]\nPublicKey = bbbb\n"
+
+
+def test_ini_match_failure_scenarios(tmp_path):
+    path = tmp_path / "wg0.conf"
+    path.write_text("[Peer]\nPublicKey = aaa\n")
+    ctx = context(tmp_path)
+
+    # the appended section would hold only PublicKey = bbbb, which cannot satisfy
+    # a match on AllowedIPs, so the call fails instead of duplicating every run
+    with pytest.raises(TaskFailed, match="would not satisfy the match"):
+        files.ini(ctx, path, section="Peer", match={"AllowedIPs": "10\\."}, option="PublicKey", value="bbbb")
+    assert path.read_text() == "[Peer]\nPublicKey = aaa\n"
+    assert ctx.changes == []
+
+    path = tmp_path / "escape.conf"
+    ctx = context(tmp_path)
+    with pytest.raises(TaskFailed, match="would not satisfy the match"):
+        files.ini(ctx, path, section="Peer", match={"PublicKey": "abc+def"}, option="PublicKey", value="abc+def")
+    assert not path.exists()
+
+    for _ in range(2):
+        files.ini(
+            ctx,
+            path,
+            section="Peer",
+            match={"PublicKey": re.escape("abc+def")},
+            option="PublicKey",
+            value="abc+def",
+        )
+    assert path.read_text() == "[Peer]\nPublicKey = abc+def\n"
+    assert len(ctx.changes) == 1
+
+    path = tmp_path / "rotate.conf"
+    path.write_text("[Peer]\nPublicKey = old\n")
+    ctx = context(tmp_path)
+    files.ini(ctx, path, section="Peer", match={"PublicKey": "old"}, option="PublicKey", value="new")
+    assert path.read_text() == "[Peer]\nPublicKey = new\n"
+    with pytest.raises(TaskFailed, match="would not satisfy the match"):
+        files.ini(ctx, path, section="Peer", match={"PublicKey": "old"}, option="PublicKey", value="new")
+    assert path.read_text() == "[Peer]\nPublicKey = new\n"
+    assert len(ctx.changes) == 1
+
+
+def test_ini_invalid_arguments_are_rejected(tmp_path):
+    path = tmp_path / "app.conf"
+    path.write_text("[s]\na = 1\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="invalid ini state"):
+        files.ini(ctx, path, section="s", option="a", value="1", state="unknown")
+    with pytest.raises(TaskFailed, match="ini path must not be empty"):
+        files.ini(ctx, "", section="s", option="a", value="1")
+    with pytest.raises(TaskFailed, match="ini section must not contain"):
+        files.ini(ctx, path, section="[s]", option="a", value="1")
+    with pytest.raises(TaskFailed, match="ini option must not contain"):
+        files.ini(ctx, path, section="s", option="a=b", value="1")
+    with pytest.raises(TaskFailed, match="ini value must not contain"):
+        files.ini(ctx, path, section="s", option="a", value="1\n2")
+    with pytest.raises(TaskFailed, match="requires an option"):
+        files.ini(ctx, path, section="s", value="1")
+    with pytest.raises(TaskFailed, match="requires a value"):
+        files.ini(ctx, path, section="s", option="a")
+    with pytest.raises(TaskFailed, match="requires a section or an option"):
+        files.ini(ctx, path, state="absent")
+    with pytest.raises(TaskFailed, match="ini match requires a section"):
+        files.ini(ctx, path, option="a", value="1", match={"b": "2"})
+    with pytest.raises(TaskFailed, match="ini match must not be empty"):
+        files.ini(ctx, path, section="s", option="a", value="1", match={})
+    with pytest.raises(TaskFailed, match="invalid ini match regex"):
+        files.ini(ctx, path, section="s", option="a", value="1", match={"a": "["})
+    with pytest.raises(TaskFailed, match="invalid ini match regex"):
+        files.ini(ctx, path, section="s", option="a", value="1", match={"[": "1"})
+    with pytest.raises(TaskFailed, match="must be a boolean"):
+        files.ini(ctx, path, section="s", option="a", value="1", create="yes")
+
+    assert ctx.changes == []
+    assert path.read_text() == "[s]\na = 1\n"
+
+
+def test_ini_rejects_directories_symlinks_and_non_utf8_files(tmp_path):
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="directory"):
+        files.ini(ctx, tmp_path, section="s", option="a", value="1")
+
+    target = tmp_path / "target"
+    target.write_text("[s]\na = 1\n")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    with pytest.raises(TaskFailed, match="symlink"):
+        files.ini(ctx, link, section="s", option="a", value="2")
+
+    binary = tmp_path / "binary"
+    binary.write_bytes(b"[s]\n\xff\xfe\n")
+    with pytest.raises(TaskFailed, match="UTF-8"):
+        files.ini(ctx, binary, section="s", option="a", value="2")
+
+    assert target.read_text() == "[s]\na = 1\n"
+
+
+def test_ini_dry_run_reports_without_writing_and_repairs_final_newline(tmp_path):
+    path = tmp_path / "app.conf"
+    path.write_text("[s]\na = 1")
+    ctx = context(tmp_path, dry_run=True)
+
+    result = files.ini(ctx, path, section="s", option="b", value="2")
+
+    assert path.read_text() == "[s]\na = 1"
+    assert result.changed is True
+    assert len(ctx.changes) == 1
+
+    ctx = context(tmp_path)
+    files.ini(ctx, path, section="s", option="b", value="2")
+    assert path.read_text() == "[s]\na = 1\nb = 2\n"
+
+
+def test_ini_noop_does_not_repair_a_missing_final_newline(tmp_path):
+    path = tmp_path / "app.conf"
+    path.write_text("[s]\na = 1")
+    ctx = context(tmp_path)
+
+    result = files.ini(ctx, path, section="s", option="a", value="1")
+
+    assert path.read_text() == "[s]\na = 1"
+    assert result.changed is False
+
+
+def test_ini_preserves_existing_file_mode(tmp_path):
+    path = tmp_path / "app.conf"
+    path.write_text("[s]\na = 1\n")
+    path.chmod(0o600)
+    ctx = context(tmp_path)
+
+    files.ini(ctx, path, section="s", option="a", value="2")
+
+    assert path.read_text() == "[s]\na = 2\n"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_ini_value_may_contain_equals_signs(tmp_path):
+    path = tmp_path / "app.conf"
+    ctx = context(tmp_path)
+
+    files.ini(ctx, path, section="s", option="filter", value="a=b=c")
+
+    assert path.read_text() == "[s]\nfilter = a=b=c\n"
+    result = files.ini(ctx, path, section="s", option="filter", value="a=b=c")
+    assert result.changed is False
+
+
+def test_ini_uses_privileged_worker(tmp_path):
+    path = tmp_path / "root-owned.conf"
+    ctx = privileged_context(tmp_path)
+
+    try:
+        result = files.ini(ctx, path, section="s", option="a", value="1", sudo=True)
+        assert result.changed is True
+        assert path.read_text() == "[s]\na = 1\n"
+
+        result = files.ini(ctx, path, section="s", option="a", value="1", sudo=True)
+        assert result.changed is False
+        assert ctx.sudo.refresh_count > 0
+    finally:
+        ctx.close()
+
+
+def test_ini_validates_arguments_before_touching_the_file(tmp_path):
+    ctx = context(tmp_path)
+
+    # argument errors win over filesystem errors (the path is a directory)
+    with pytest.raises(TaskFailed, match="requires an option"):
+        files.ini(ctx, tmp_path, state="present", value="1")
+    with pytest.raises(TaskFailed, match="requires a section or an option"):
+        files.ini(ctx, tmp_path, state="absent")
+    # argument errors win over the create=False missing-file check
+    with pytest.raises(TaskFailed, match="requires a value"):
+        files.ini(ctx, tmp_path / "missing.conf", option="a", create=False)
+
+    assert ctx.changes == []
+
+
+@pytest.mark.parametrize("char", ["\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029", "\0"])
+def test_ini_rejects_line_breaks_and_null_bytes_in_arguments(tmp_path, char):
+    path = tmp_path / "app.conf"
+    path.write_text("[s]\na = 1\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="must not contain"):
+        files.ini(ctx, path, section=f"s{char}t", option="a", value="1")
+    with pytest.raises(TaskFailed, match="must not contain"):
+        files.ini(ctx, path, section="s", option=f"a{char}b", value="1")
+    with pytest.raises(TaskFailed, match="must not contain"):
+        files.ini(ctx, path, section="s", option="a", value=f"1{char}2")
+
+    assert path.read_text() == "[s]\na = 1\n"
+    assert ctx.changes == []
+
+
+def test_ini_rejects_non_utf8_encodable_arguments(tmp_path):
+    path = tmp_path / "app.conf"
+    path.write_text("[s]\na = 1\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="UTF-8 encodable"):
+        files.ini(ctx, path, section="s", option="a", value="\ud800")
+    with pytest.raises(TaskFailed, match="UTF-8 encodable"):
+        files.ini(ctx, path, section="\ud800", option="a", value="1")
+
+    assert path.read_text() == "[s]\na = 1\n"
+    assert ctx.changes == []
+
+
+def test_line_rejects_non_utf8_encodable_text(tmp_path):
+    path = tmp_path / "lines"
+    path.write_text("one\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="UTF-8 encodable"):
+        files.line(ctx, path, "bad\ud800")
+
+    assert path.read_text() == "one\n"
+
+
+def test_ini_rejects_comment_prefixed_option_names(tmp_path):
+    path = tmp_path / "app.conf"
+    path.write_text("[s]\n#foo = 1\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="comment character"):
+        files.ini(ctx, path, section="s", option="#foo", value="2")
+    with pytest.raises(TaskFailed, match="comment character"):
+        files.ini(ctx, path, section="s", option=";foo", state="absent")
+
+    assert path.read_text() == "[s]\n#foo = 1\n"
+    assert ctx.changes == []
+
+
+def test_ini_absent_on_a_missing_file_is_a_noop_and_creates_nothing(tmp_path):
+    missing = tmp_path / "missing.conf"
+    ctx = context(tmp_path)
+
+    result = files.ini(ctx, missing, section="s", option="a", state="absent")
+    assert result.changed is False
+    result = files.ini(ctx, missing, section="s", state="absent")
+    assert result.changed is False
+
+    assert not missing.exists()
+    assert ctx.changes == []
+
+
+def test_ini_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
+    path = tmp_path / "bom.conf"
+    path.write_bytes(b"\xef\xbb\xbf[s]\na = 1\nb = 2\n")
+    ctx = context(tmp_path)
+
+    # a no-op run only reads, so the BOM is kept
+    result = files.ini(ctx, path, section="s", option="a", value="1")
+    assert result.changed is False
+    assert path.read_bytes() == b"\xef\xbb\xbf[s]\na = 1\nb = 2\n"
+
+    # the first real write parses the bom-prefixed header normally and drops the BOM
+    result = files.ini(ctx, path, section="s", option="a", value="9")
+    assert result.changed is True
+    assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
+
+    # idempotent afterwards
+    result = files.ini(ctx, path, section="s", option="a", value="9")
+    assert result.changed is False
+    assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
+
+    # a missing section is appended after the existing one
+    files.ini(ctx, path, section="t", option="c", value="3")
+    assert path.read_bytes() == b"[s]\na = 9\nb = 2\n[t]\nc = 3\n"
+
+
+def test_ini_absent_removes_a_bom_prefixed_section_and_strips_the_bom(tmp_path):
+    path = tmp_path / "bom.conf"
+    path.write_bytes(b"\xef\xbb\xbf[s]\na = 1\n[t]\nb = 2\n")
+    ctx = context(tmp_path)
+
+    result = files.ini(ctx, path, section="s", state="absent")
+
+    assert result.changed is True
+    assert path.read_bytes() == b"[t]\nb = 2\n"
+
+    result = files.ini(ctx, path, section="s", state="absent")
+    assert result.changed is False
+
+
+def test_line_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
+    path = tmp_path / "lines"
+    path.write_bytes(b"\xef\xbb\xbfone\ntwo\n")
+    ctx = context(tmp_path)
+
+    result = files.line(ctx, path, "one")
+    assert result.changed is False
+    assert path.read_bytes() == b"\xef\xbb\xbfone\ntwo\n"
+
+    files.line(ctx, path, "ONE", match=r"^one$")
+    assert path.read_bytes() == b"ONE\ntwo\n"

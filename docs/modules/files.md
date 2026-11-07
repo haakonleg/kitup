@@ -1,6 +1,6 @@
 # `files`
 
-Idempotent file, directory, symlink, and file-move management.
+Idempotent file, directory, symlink, file-move, and text-file management.
 
 ```python
 from kitup.modules import files
@@ -142,6 +142,49 @@ Malformed or duplicate markers raise a task failure.
 
 - `path` — edited file path.
 
+## `ini(ctx, path, *, section=None, option=None, value=None, match=None, state="present", create=True, sudo=False)`
+
+Set or remove one option in an INI-style file.
+
+### Parameters
+
+- `path` — file to edit.
+- `section=None` — target `[section]` header, matched case-sensitively.
+  `None` edits the preamble before the first header.
+- `option` — option name. Required with `state="present"`.
+- `value` — option value, required with `state="present"`. Written as
+  `option = value`; surrounding whitespace is ignored, so `key=value` and
+  `key = value` are equivalent. Values may contain `=`.
+- `match=None` — option names to required values, selecting one of several
+  same-named sections. Keys and values are regular expressions (`re.search`);
+  escape literals with `re.escape`. Requires `section` and is never written to
+  the file.
+- `state="present"` replaces the first matching option line with
+  `option = value` and drops duplicates; a missing option is inserted at the
+  end of the section; a missing section is appended at the end of the file.
+- `state="absent"` removes all matching option lines in the target section, or
+  the whole section when `option=None`.
+- `create=True` creates a missing file with mode `0o644`; `create=False` fails
+  when the file does not exist.
+- `sudo=True` edits the file through the privileged worker.
+
+With `match` and `state="present"`, a new section is appended only if the new
+`option = value` line itself satisfies `match`; otherwise the call fails. To
+add a new same-named section, set the option you match on, for example
+`match={"fav": re.escape(v)}, option="fav", value=v`.
+
+### Result fields
+
+- `path` — edited file path.
+- `ini_action` — `"added"`, `"replaced"`, `"removed"`, or `"unchanged"`.
+- `section`, `option`, `value` — the arguments as given; `None` when not given.
+
+```python
+files.ini(ctx, "/etc/example.conf", section="drinks", option="fav", value="lemonade", sudo=True)
+files.ini(ctx, "/etc/example.conf", section="server", match={"id": "db"}, option="host", value="db.internal", sudo=True)
+files.ini(ctx, "/etc/example.conf", section="drinks", option="fav", state="absent", sudo=True)
+```
+
 ## `directory(ctx, path, *, state="present", force=False, mode=None, owner=None, group=None, sudo=False)`
 
 Ensure a directory exists or is absent.
@@ -184,7 +227,7 @@ are never replaced.
   unified diffs for changed text files.
 - Writes never follow a destination symlink; the symlink itself is replaced.
 - Only regular files are read or written. Non-UTF-8 files are rejected when
-  editing lines or blocks.
+  editing lines, blocks, or INI options.
 - `sudo=True` runs the operation as root; otherwise it runs as the current user.
 - Very large privileged reads and writes are rejected. Use `command` for very large
   files.

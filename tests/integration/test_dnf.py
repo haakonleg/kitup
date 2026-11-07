@@ -15,6 +15,7 @@ from .helpers import (
     rpm_installed,
     run,
     run_kitup,
+    sudo,
     write_bundle,
 )
 
@@ -32,9 +33,9 @@ def package_absent() -> Iterator[None]:
 
 @pytest.fixture
 def group_absent() -> Iterator[None]:
-    run(["sudo", "-n", "dnf5", "group", "remove", "-y", TEST_GROUP], check=False)
+    run(sudo("dnf5", "group", "remove", "-y", TEST_GROUP), check=False)
     yield
-    run(["sudo", "-n", "dnf5", "group", "remove", "-y", TEST_GROUP], check=False)
+    run(sudo("dnf5", "group", "remove", "-y", TEST_GROUP), check=False)
 
 
 def test_install_and_remove_package(tmp_path: Path) -> None:
@@ -198,7 +199,7 @@ def test_repository_add_and_remove(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     installed_path = dnf_reposdir() / repository_name
-    run(["sudo", "-n", "rm", "-f", str(installed_path)], check=False)
+    run(sudo("rm", "-f", str(installed_path)), check=False)
 
     add_root = write_bundle(
         tmp_path / "add",

@@ -1,18 +1,13 @@
 """Integration test for composed profiles and imported dependencies."""
 
-import textwrap
 from pathlib import Path
 
 import pytest
 
+from ..helpers import write
 from .helpers import run_kitup
 
 pytestmark = pytest.mark.integration
-
-
-def write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(text), encoding="utf-8")
 
 
 def test_composed_profiles_merge_config_and_dependencies(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

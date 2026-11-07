@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from .helpers import run, run_kitup, systemctl, write_bundle
+from .helpers import run, run_kitup, sudo, systemctl, write_bundle
 
 pytestmark = pytest.mark.integration
 
@@ -27,13 +27,13 @@ def unit(tmp_path: Path) -> Iterator[str]:
         "WantedBy=multi-user.target\n",
         encoding="utf-8",
     )
-    run(["sudo", "-n", "install", "-m", "0644", str(staged), str(unit_path)])
+    run(sudo("install", "-m", "0644", str(staged), str(unit_path)))
 
     yield name
 
-    run(["sudo", "-n", "systemctl", "disable", "--now", name], check=False)
-    run(["sudo", "-n", "rm", "-f", str(unit_path)], check=False)
-    run(["sudo", "-n", "systemctl", "daemon-reload"], check=False)
+    run(sudo("systemctl", "disable", "--now", name), check=False)
+    run(sudo("rm", "-f", str(unit_path)), check=False)
+    run(sudo("systemctl", "daemon-reload"), check=False)
 
 
 def test_enable_start_and_disable_stop(tmp_path: Path, unit: str) -> None:

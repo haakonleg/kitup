@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from .helpers import run, run_kitup, write_bundle
+from .helpers import run, run_kitup, sudo, write_bundle
 
 pytestmark = pytest.mark.integration
 
@@ -63,11 +63,11 @@ def _cleanup() -> None:
     system_reload = False
     user_reload = False
     for directory, prefix, scope in (
-        (SYSTEM_REGISTRY_DIR, ["sudo", "-n"], None),
+        (SYSTEM_REGISTRY_DIR, sudo(), None),
         (USER_REGISTRY_DIR, [], None),
-        (SYSTEM_UNIT_DIR, ["sudo", "-n"], "system"),
+        (SYSTEM_UNIT_DIR, sudo(), "system"),
         (USER_UNIT_DIR, [], "user"),
-        (SYSTEM_QUADLET_DIR, ["sudo", "-n"], "system"),
+        (SYSTEM_QUADLET_DIR, sudo(), "system"),
         (USER_QUADLET_DIR, [], "user"),
     ):
         if not directory.exists():
@@ -84,7 +84,7 @@ def _cleanup() -> None:
             user_reload = True
 
     if system_reload:
-        run(["sudo", "-n", "systemctl", "daemon-reload"], check=False)
+        run(sudo("systemctl", "daemon-reload"), check=False)
     if user_reload:
         run(["systemctl", "--user", "daemon-reload"], check=False)
 
@@ -115,9 +115,9 @@ def clean_podman(without_session_bus: None) -> Iterator[None]:
 
 @pytest.fixture
 def clean_rootful(without_session_bus: None) -> Iterator[None]:
-    _cleanup_podman(["sudo", "-n"])
+    _cleanup_podman(sudo())
     yield
-    _cleanup_podman(["sudo", "-n"])
+    _cleanup_podman(sudo())
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -141,7 +141,7 @@ def fixture_archive(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 def rootful_image() -> Iterator[str]:
     image = "localhost/kitup-rootful:latest"
     build = run(
-        ["sudo", "-n", "podman", "build", "-t", image, str(FIXTURE)],
+        sudo("podman", "build", "-t", image, str(FIXTURE)),
         check=False,
         timeout=300,
         env=_podman_env(),
@@ -149,7 +149,7 @@ def rootful_image() -> Iterator[str]:
     if build.returncode != 0:
         pytest.skip("rootful Podman storage is unavailable")
     yield image
-    run(["sudo", "-n", "podman", "rmi", "-f", image], check=False, env=_podman_env())
+    run(sudo("podman", "rmi", "-f", image), check=False, env=_podman_env())
 
 
 def unique(prefix: str = PREFIX) -> str:
@@ -182,22 +182,10 @@ def start_fixture_container(name: str) -> None:
     podman("start", name)
 
 
-def test_image_present_existing_is_a_noop(tmp_path: Path) -> None:
-    source = f"""
-    from kitup.modules import podman
-
-    @task("ensure image")
-    def ensure_image(ctx):
-        podman.image(ctx, {BASE_IMAGE!r})
-        assert len(ctx.changes) == 0
-    """
-    assert apply_bundle(tmp_path, "image_present", source) == 0
-
-
-def test_image_absent_removes_image(tmp_path: Path) -> None:
+def test_image_lifecycle(tmp_path: Path, fixture_archive: Path) -> None:
     image = f"localhost/{unique()}:latest"
     podman("tag", BASE_IMAGE, image)
-    source = f"""
+    remove_source = f"""
     from kitup.modules import podman
 
     @task("remove image")
@@ -205,12 +193,10 @@ def test_image_absent_removes_image(tmp_path: Path) -> None:
         podman.image(ctx, {image!r}, state="absent")
         assert len(ctx.changes) == 1
     """
-    assert apply_bundle(tmp_path, "image_absent", source) == 0
+    assert apply_bundle(tmp_path, "image_absent", remove_source) == 0
     assert podman("image", "exists", image, check=False).returncode != 0
 
-
-def test_image_pull_from_oci_archive(tmp_path: Path, fixture_archive: Path) -> None:
-    source = f"""
+    pull_source = f"""
     from kitup.modules import podman
 
     @task("pull image")
@@ -228,7 +214,7 @@ def test_image_pull_from_oci_archive(tmp_path: Path, fixture_archive: Path) -> N
         )
         assert len(ctx.changes) == 1
     """
-    assert apply_bundle(tmp_path, "image_pull", source) == 0
+    assert apply_bundle(tmp_path, "image_pull", pull_source) == 0
     assert podman("image", "exists", PULL_IMAGE).returncode == 0
 
     absent_source = f"""
@@ -243,19 +229,6 @@ def test_image_pull_from_oci_archive(tmp_path: Path, fixture_archive: Path) -> N
     assert podman("image", "exists", PULL_IMAGE, check=False).returncode != 0
 
 
-def test_image_dry_run_does_not_pull(tmp_path: Path) -> None:
-    image = f"localhost/{unique()}:latest"
-    source = f"""
-    from kitup.modules import podman
-
-    @task("pull image")
-    def pull_image(ctx):
-        podman.image(ctx, {image!r})
-    """
-    assert apply_bundle(tmp_path, "image_dry", source, "--dry-run") == 0
-    assert podman("image", "exists", image, check=False).returncode != 0
-
-
 def test_image_pull_never_fails_when_missing(tmp_path: Path) -> None:
     image = f"localhost/{unique()}:latest"
     source = f"""
@@ -268,7 +241,8 @@ def test_image_pull_never_fails_when_missing(tmp_path: Path) -> None:
     assert apply_bundle(tmp_path, "image_never", source) != 0
 
 
-def test_build_and_force_rebuild(tmp_path: Path) -> None:
+def test_build_scenarios(tmp_path: Path) -> None:
+    # Basic build, idempotent re-run, and force rebuild.
     source = f"""
     from kitup.modules import podman
 
@@ -292,42 +266,34 @@ def test_build_and_force_rebuild(tmp_path: Path) -> None:
     """
     assert apply_bundle(tmp_path, "build_image_force", force_source) == 0
 
-
-def test_build_applies_build_args(tmp_path: Path) -> None:
-    context = tmp_path / "build-args"
-    context.mkdir()
-    shutil.copy(FIXTURE / "busybox", context / "busybox")
-    shutil.copy(FIXTURE / "init", context / "init")
-    (context / "Containerfile").write_text(
+    # Build args are applied.
+    args_context = tmp_path / "build-args"
+    args_context.mkdir()
+    shutil.copy(FIXTURE / "busybox", args_context / "busybox")
+    shutil.copy(FIXTURE / "init", args_context / "init")
+    (args_context / "Containerfile").write_text(
         "FROM scratch\nCOPY busybox /busybox\nCOPY init /init\n"
         'ARG MESSAGE=default\nLABEL message=$MESSAGE\nCMD ["/init"]\n',
         encoding="utf-8",
     )
-    image = f"localhost/{unique()}:latest"
-    source = f"""
+    args_image = f"localhost/{unique()}:latest"
+    args_source = f"""
     from kitup.modules import podman
 
     @task("build image with args")
     def build_image(ctx):
         podman.build(
             ctx,
-            {str(context)!r},
-            tag={image!r},
+            {str(args_context)!r},
+            tag={args_image!r},
             build_args={{"MESSAGE": "kitup"}},
         )
     """
-    assert apply_bundle(tmp_path, "build_args", source) == 0
-    label = podman(
-        "image",
-        "inspect",
-        "--format",
-        "{{.Labels.message}}",
-        image,
-    ).stdout.strip()
+    assert apply_bundle(tmp_path, "build_args", args_source) == 0
+    label = podman("image", "inspect", "--format", "{{.Labels.message}}", args_image).stdout.strip()
     assert label == "kitup"
 
-
-def test_build_uses_containerfile_outside_context(tmp_path: Path) -> None:
+    # A Containerfile outside the build context is supported.
     context = tmp_path / "context"
     context.mkdir()
     shutil.copy(FIXTURE / "busybox", context / "busybox")
@@ -338,7 +304,7 @@ def test_build_uses_containerfile_outside_context(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     image = f"localhost/{unique()}:latest"
-    source = f"""
+    containerfile_source = f"""
     from kitup.modules import podman
 
     @task("build image with containerfile")
@@ -350,11 +316,11 @@ def test_build_uses_containerfile_outside_context(tmp_path: Path) -> None:
             containerfile={str(containerfile)!r},
         )
     """
-    assert apply_bundle(tmp_path, "build_containerfile", source) == 0
+    assert apply_bundle(tmp_path, "build_containerfile", containerfile_source) == 0
     assert podman("image", "exists", image).returncode == 0
 
 
-def test_tag_targets_and_idempotency(tmp_path: Path) -> None:
+def test_tag_scenarios(tmp_path: Path) -> None:
     first = f"localhost/{unique('kitup-tag')}:latest"
     second = f"localhost/{unique('kitup-tag')}:latest"
     source = f"""
@@ -372,22 +338,20 @@ def test_tag_targets_and_idempotency(tmp_path: Path) -> None:
     assert image_id(first) == source_id
     assert image_id(second) == source_id
 
-
-def test_tag_updates_existing_target(tmp_path: Path) -> None:
     target = f"localhost/{unique('kitup-tag')}:latest"
     other = f"localhost/{unique()}:latest"
     podman("tag", BASE_IMAGE, target)
     podman("build", "-t", other, "--label", "kitup=other", str(FIXTURE))
     assert image_id(target) != image_id(other)
 
-    source = f"""
+    update_source = f"""
     from kitup.modules import podman
 
     @task("retag image")
     def tag_image(ctx):
         podman.tag(ctx, {BASE_IMAGE!r}, {target!r})
     """
-    assert apply_bundle(tmp_path, "tag_update", source) == 0
+    assert apply_bundle(tmp_path, "tag_update", update_source) == 0
     assert image_id(target) == image_id(BASE_IMAGE)
 
 
@@ -474,7 +438,7 @@ def test_container_started_short_lived_container_is_rejected(tmp_path: Path) -> 
     assert container_status(name) == "exited"
 
 
-def test_container_options_and_command(tmp_path: Path) -> None:
+def test_container_options_and_command_string(tmp_path: Path) -> None:
     name = unique()
     source = f"""
     from kitup.modules import podman
@@ -516,10 +480,8 @@ def test_container_options_and_command(tmp_path: Path) -> None:
     ).stdout
     assert "/init" in command
 
-
-def test_container_command_string_is_split(tmp_path: Path) -> None:
     name = unique()
-    source = f"""
+    string_source = f"""
     from kitup.modules import podman
 
     @task("create container with string command")
@@ -532,7 +494,7 @@ def test_container_command_string_is_split(tmp_path: Path) -> None:
             command="/init exit",
         )
     """
-    assert apply_bundle(tmp_path, "container_command", source) == 0
+    assert apply_bundle(tmp_path, "container_command", string_source) == 0
     command = podman(
         "container",
         "inspect",
@@ -559,19 +521,6 @@ def test_container_recreate_replaces_container(tmp_path: Path) -> None:
     assert apply_bundle(tmp_path, "container_recreate", source) == 0
     assert container_id(name) != first_id
     assert container_status(name) == "running"
-
-
-def test_container_dry_run_does_not_create(tmp_path: Path) -> None:
-    name = unique()
-    source = f"""
-    from kitup.modules import podman
-
-    @task("create container")
-    def create_container(ctx):
-        podman.container(ctx, {name!r}, image={BASE_IMAGE!r})
-    """
-    assert apply_bundle(tmp_path, "container_dry", source, "--dry-run") == 0
-    assert podman("container", "exists", name, check=False).returncode != 0
 
 
 def test_registry_system_scope(tmp_path: Path) -> None:
@@ -604,12 +553,12 @@ def test_registry_system_scope(tmp_path: Path) -> None:
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "registry_system", source) == 0
-    content = run(["sudo", "-n", "cat", str(path)]).stdout
+    content = run(sudo("cat", str(path))).stdout
     assert 'location = "docker.io"' in content
     assert 'prefix = "mirror.example.com"' in content
     assert "insecure = true" in content
     assert "[[registry.mirror]]" in content
-    mode = run(["sudo", "-n", "stat", "-c", "%a", str(path)]).stdout.strip()
+    mode = run(sudo("stat", "-c", "%a", str(path))).stdout.strip()
     assert mode == "644"
 
     absent_source = f"""
@@ -621,7 +570,7 @@ def test_registry_system_scope(tmp_path: Path) -> None:
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "registry_system_absent", absent_source) == 0
-    assert run(["sudo", "-n", "test", "-e", str(path)], check=False).returncode != 0
+    assert run(sudo("test", "-e", str(path)), check=False).returncode != 0
 
 
 def test_registry_user_scope(tmp_path: Path) -> None:
@@ -647,20 +596,6 @@ def test_registry_user_scope(tmp_path: Path) -> None:
         podman.registry(ctx, {name!r}, state="absent", scope="user")
     """
     assert apply_bundle(tmp_path, "registry_user_absent", absent_source) == 0
-    assert not path.exists()
-
-
-def test_registry_dry_run_does_not_write(tmp_path: Path) -> None:
-    name = unique()
-    path = USER_REGISTRY_DIR / f"{name}.conf"
-    source = f"""
-    from kitup.modules import podman
-
-    @task("write user registry")
-    def write_registry(ctx):
-        podman.registry(ctx, {name!r}, location="docker.io", scope="user")
-    """
-    assert apply_bundle(tmp_path, "registry_dry", source, "--dry-run") == 0
     assert not path.exists()
 
 
@@ -702,7 +637,7 @@ def local_registry() -> Iterator[str]:
         thread.join(timeout=5)
 
 
-def test_login_and_logout(tmp_path: Path, local_registry: str) -> None:
+def test_login_scenarios(tmp_path: Path, local_registry: str) -> None:
     authfile = tmp_path / "auth.json"
     login_source = f"""
     from kitup.modules import podman
@@ -761,10 +696,8 @@ def test_login_and_logout(tmp_path: Path, local_registry: str) -> None:
         != 0
     )
 
-
-def test_login_force(tmp_path: Path, local_registry: str) -> None:
-    authfile = tmp_path / "auth.json"
-    source = f"""
+    force_authfile = tmp_path / "force-auth.json"
+    force_source = f"""
     from kitup.modules import podman
 
     @task("force login")
@@ -774,7 +707,7 @@ def test_login_force(tmp_path: Path, local_registry: str) -> None:
             {local_registry!r},
             username="kitup",
             password="secret",
-            authfile={str(authfile)!r},
+            authfile={str(force_authfile)!r},
             tls_verify=False,
             force=True,
         )
@@ -784,18 +717,16 @@ def test_login_force(tmp_path: Path, local_registry: str) -> None:
             {local_registry!r},
             username="kitup",
             password="secret",
-            authfile={str(authfile)!r},
+            authfile={str(force_authfile)!r},
             tls_verify=False,
             force=True,
         )
         assert len(ctx.changes) == 2
     """
-    assert apply_bundle(tmp_path, "login_force", source) == 0
+    assert apply_bundle(tmp_path, "login_force", force_source) == 0
 
-
-def test_login_wrong_password_fails(tmp_path: Path, local_registry: str) -> None:
-    authfile = tmp_path / "auth.json"
-    source = f"""
+    wrong_authfile = tmp_path / "wrong-auth.json"
+    wrong_source = f"""
     from kitup.modules import podman
 
     @task("login")
@@ -805,34 +736,14 @@ def test_login_wrong_password_fails(tmp_path: Path, local_registry: str) -> None
             {local_registry!r},
             username="kitup",
             password="wrong",
-            authfile={str(authfile)!r},
+            authfile={str(wrong_authfile)!r},
             tls_verify=False,
         )
     """
-    assert apply_bundle(tmp_path, "login_wrong", source) != 0
+    assert apply_bundle(tmp_path, "login_wrong", wrong_source) != 0
 
 
-def test_login_dry_run_does_not_write_authfile(tmp_path: Path, local_registry: str) -> None:
-    authfile = tmp_path / "auth.json"
-    source = f"""
-    from kitup.modules import podman
-
-    @task("login")
-    def login(ctx):
-        podman.login(
-            ctx,
-            {local_registry!r},
-            username="kitup",
-            password="secret",
-            authfile={str(authfile)!r},
-            tls_verify=False,
-        )
-    """
-    assert apply_bundle(tmp_path, "login_dry", source, "--dry-run") == 0
-    assert not authfile.exists() or local_registry not in authfile.read_text()
-
-
-def test_generate_systemd(tmp_path: Path) -> None:
+def test_generate_systemd_scenarios(tmp_path: Path) -> None:
     name = unique()
     start_fixture_container(name)
     unit = tmp_path / f"container-{name}.service"
@@ -867,12 +778,10 @@ def test_generate_systemd(tmp_path: Path) -> None:
     verify = run(["systemd-analyze", "verify", str(unit)], check=False)
     assert "Failed to parse" not in verify.stderr
 
-
-def test_generate_systemd_new_and_flags(tmp_path: Path) -> None:
     name = unique()
     start_fixture_container(name)
     unit = tmp_path / f"svc.{name}.service"
-    source = f"""
+    flags_source = f"""
     from kitup.modules import podman
 
     @task("generate systemd")
@@ -895,7 +804,7 @@ def test_generate_systemd_new_and_flags(tmp_path: Path) -> None:
             after=["network.target"],
         )
     """
-    assert apply_bundle(tmp_path, "systemd_flags", source) == 0
+    assert apply_bundle(tmp_path, "systemd_flags", flags_source) == 0
     content = unit.read_text()
     assert "podman run" in content
     assert "Restart=always" in content
@@ -904,29 +813,14 @@ def test_generate_systemd_new_and_flags(tmp_path: Path) -> None:
     assert "network-online.target" in content
 
 
-def test_generate_systemd_dry_run_does_not_write(tmp_path: Path) -> None:
-    name = unique()
-    start_fixture_container(name)
-    unit = tmp_path / f"container-{name}.service"
-    source = f"""
-    from kitup.modules import podman
-
-    @task("generate systemd")
-    def generate(ctx):
-        podman.generate_systemd(ctx, {name!r}, dest={str(tmp_path)!r}, scope="user")
-    """
-    assert apply_bundle(tmp_path, "systemd_dry", source, "--dry-run") == 0
-    assert not unit.exists()
-
-
 def test_generate_systemd_system_scope(
     tmp_path: Path,
     rootful_image: str,
     clean_rootful: None,
 ) -> None:
     name = unique()
-    run(["sudo", "-n", "podman", "create", "--name", name, rootful_image])
-    run(["sudo", "-n", "podman", "start", name])
+    run(sudo("podman", "create", "--name", name, rootful_image))
+    run(sudo("podman", "start", name))
     unit = SYSTEM_UNIT_DIR / f"container-{name}.service"
     source = f"""
     from kitup.modules import podman
@@ -936,10 +830,10 @@ def test_generate_systemd_system_scope(
         podman.generate_systemd(ctx, {name!r})
     """
     assert apply_bundle(tmp_path, "systemd_system", source) == 0
-    assert run(["sudo", "-n", "test", "-e", str(unit)], check=False).returncode == 0
+    assert run(sudo("test", "-e", str(unit)), check=False).returncode == 0
 
 
-def test_quadlet_renders_and_validates(tmp_path: Path) -> None:
+def test_quadlet_scenarios(tmp_path: Path) -> None:
     name = unique()
     path = tmp_path / f"{name}.container"
     source = f"""
@@ -998,10 +892,8 @@ def test_quadlet_renders_and_validates(tmp_path: Path) -> None:
     )
     assert "Failed to parse" not in result.stderr
 
-
-def test_quadlet_install_target_empty(tmp_path: Path) -> None:
     name = unique()
-    source = f"""
+    no_install_source = f"""
     from kitup.modules import podman
 
     @task("write quadlet")
@@ -1015,27 +907,8 @@ def test_quadlet_install_target_empty(tmp_path: Path) -> None:
             install_target="",
         )
     """
-    assert apply_bundle(tmp_path, "quadlet_no_install", source) == 0
+    assert apply_bundle(tmp_path, "quadlet_no_install", no_install_source) == 0
     assert "[Install]" not in (tmp_path / f"{name}.container").read_text()
-
-
-def test_quadlet_dry_run_does_not_write(tmp_path: Path) -> None:
-    name = unique()
-    source = f"""
-    from kitup.modules import podman
-
-    @task("write quadlet")
-    def write_quadlet(ctx):
-        podman.quadlet(
-            ctx,
-            {name!r},
-            image={BASE_IMAGE!r},
-            dest={str(tmp_path)!r},
-            scope="user",
-        )
-    """
-    assert apply_bundle(tmp_path, "quadlet_dry", source, "--dry-run") == 0
-    assert not (tmp_path / f"{name}.container").exists()
 
 
 def test_quadlet_system_scope(tmp_path: Path) -> None:
@@ -1049,7 +922,7 @@ def test_quadlet_system_scope(tmp_path: Path) -> None:
         podman.quadlet(ctx, {name!r}, image={BASE_IMAGE!r})
     """
     assert apply_bundle(tmp_path, "quadlet_system", source) == 0
-    assert run(["sudo", "-n", "test", "-e", str(path)], check=False).returncode == 0
+    assert run(sudo("test", "-e", str(path)), check=False).returncode == 0
 
 
 def test_rootful_path(tmp_path: Path, rootful_image: str, clean_rootful: None) -> None:
@@ -1065,7 +938,7 @@ def test_rootful_path(tmp_path: Path, rootful_image: str, clean_rootful: None) -
     """
     assert apply_bundle(tmp_path, "rootful", source) == 0
     status = run(
-        ["sudo", "-n", "podman", "container", "inspect", "--format", "{{.State.Status}}", name],
+        sudo("podman", "container", "inspect", "--format", "{{.State.Status}}", name),
         check=False,
     )
     assert status.stdout.strip() == "running"

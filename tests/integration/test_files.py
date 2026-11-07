@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from .helpers import run, run_kitup, write_bundle
+from .helpers import run, run_kitup, sudo, write_bundle
 
 pytestmark = pytest.mark.integration
 
@@ -33,15 +33,15 @@ def managed_paths_absent() -> Iterator[None]:
 
 def _cleanup() -> None:
     for path in (MANAGED_PATH, WORKER_ROOT, DRY_FILE, DRY_LINK, MOVE_PATH):
-        run(["sudo", "-n", "rm", "-rf", str(path)], check=False)
+        run(sudo("rm", "-rf", str(path)), check=False)
 
 
 def exists(path: Path) -> bool:
-    return run(["sudo", "-n", "test", "-e", str(path)], check=False).returncode == 0
+    return run(sudo("test", "-e", str(path)), check=False).returncode == 0
 
 
 def link_exists(path: Path) -> bool:
-    return run(["sudo", "-n", "test", "-L", str(path)], check=False).returncode == 0
+    return run(sudo("test", "-L", str(path)), check=False).returncode == 0
 
 
 def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
@@ -65,8 +65,8 @@ def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
         """,
     )
     assert run_kitup("apply", write_root) == 0
-    assert run(["sudo", "-n", "cat", str(MANAGED_PATH)]).stdout == "managed\n"
-    details = run(["sudo", "-n", "stat", "-c", "%a %u %g", str(MANAGED_PATH)])
+    assert run(sudo("cat", str(MANAGED_PATH))).stdout == "managed\n"
+    details = run(sudo("stat", "-c", "%a %u %g", str(MANAGED_PATH)))
     assert details.stdout.strip() == "640 0 0"
     assert not os.access(MANAGED_PATH, os.R_OK)
 
@@ -112,12 +112,12 @@ def test_privileged_move_is_idempotent(tmp_path: Path) -> None:
     try:
         assert run_kitup("apply", root) == 0
         assert not source.exists()
-        assert run(["sudo", "-n", "cat", str(MOVE_PATH)]).stdout == "moved\n"
-        details = run(["sudo", "-n", "stat", "-c", "%a %u %g", str(MOVE_PATH)])
+        assert run(sudo("cat", str(MOVE_PATH))).stdout == "moved\n"
+        details = run(sudo("stat", "-c", "%a %u %g", str(MOVE_PATH)))
         assert details.stdout.strip() == "640 0 0"
 
         assert run_kitup("apply", root) == 0
-        assert run(["sudo", "-n", "cat", str(MOVE_PATH)]).stdout == "moved\n"
+        assert run(sudo("cat", str(MOVE_PATH))).stdout == "moved\n"
     finally:
         source.unlink(missing_ok=True)
 
@@ -189,16 +189,14 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
 
     assert run_kitup("apply", root) == 0
 
-    assert run(["sudo", "-n", "cat", str(WORKER_FILE)]).stdout == (
-        "alpha\nbeta\n# BEGIN managed\ninside\n# END managed\n"
-    )
-    assert run(["sudo", "-n", "stat", "-c", "%a %u %g", str(WORKER_FILE)]).stdout.strip() == "640 0 0"
-    assert run(["sudo", "-n", "stat", "-c", "%a", str(WORKER_ROOT)]).stdout.strip() == "750"
-    assert run(["sudo", "-n", "cat", str(WORKER_COPY)]).stdout == "copied\n"
-    assert run(["sudo", "-n", "stat", "-c", "%a", str(WORKER_COPY)]).stdout.strip() == "600"
-    assert run(["sudo", "-n", "readlink", str(WORKER_LINK)]).stdout.strip() == str(WORKER_FILE)
-    assert run(["sudo", "-n", "stat", "-c", "%a", str(WORKER_DIR)]).stdout.strip() == "700"
-    assert run(["sudo", "-n", "cat", str(WORKER_NESTED)]).stdout == "nested\n"
+    assert run(sudo("cat", str(WORKER_FILE))).stdout == ("alpha\nbeta\n# BEGIN managed\ninside\n# END managed\n")
+    assert run(sudo("stat", "-c", "%a %u %g", str(WORKER_FILE))).stdout.strip() == "640 0 0"
+    assert run(sudo("stat", "-c", "%a", str(WORKER_ROOT))).stdout.strip() == "750"
+    assert run(sudo("cat", str(WORKER_COPY))).stdout == "copied\n"
+    assert run(sudo("stat", "-c", "%a", str(WORKER_COPY))).stdout.strip() == "600"
+    assert run(sudo("readlink", str(WORKER_LINK))).stdout.strip() == str(WORKER_FILE)
+    assert run(sudo("stat", "-c", "%a", str(WORKER_DIR))).stdout.strip() == "700"
+    assert run(sudo("cat", str(WORKER_NESTED))).stdout == "nested\n"
 
     cleanup_root = write_bundle(
         tmp_path / "cleanup",
@@ -253,8 +251,8 @@ def test_privileged_dry_run_does_not_mutate(tmp_path: Path) -> None:
     assert not link_exists(DRY_LINK)
 
     assert run_kitup("apply", root) == 0
-    assert run(["sudo", "-n", "cat", str(DRY_FILE)]).stdout == "dry\n"
-    assert run(["sudo", "-n", "readlink", str(DRY_LINK)]).stdout.strip() == str(DRY_FILE)
+    assert run(sudo("cat", str(DRY_FILE))).stdout == "dry\n"
+    assert run(sudo("readlink", str(DRY_LINK))).stdout.strip() == str(DRY_FILE)
 
 
 def test_privileged_directory_requires_force_for_non_empty(tmp_path: Path) -> None:

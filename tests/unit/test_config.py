@@ -1,4 +1,3 @@
-import textwrap
 from pathlib import Path
 from types import ModuleType
 
@@ -7,9 +6,7 @@ import pytest
 from kitup.config import load_config
 from kitup.errors import ConfigError
 
-
-def write(path, text: str) -> None:
-    path.write_text(textwrap.dedent(text), encoding="utf-8")
+from ..helpers import write
 
 
 def module(**values) -> ModuleType:

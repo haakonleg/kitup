@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from .._utils import file_ops
+from .._utils import file_ops, ini
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
@@ -110,15 +110,11 @@ def _normalize_ws(value: str) -> str:
     return " ".join(value.split())
 
 
-def _entry_pattern(name: str) -> re.Pattern[str]:
-    return re.compile(r"^\s*" + re.escape(name) + r"\s*=")
-
-
 def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> CallResult:
-    pattern = _entry_pattern(name)
-    text = _read_text(ctx, target)
+    pattern = ini.option_re(name)
+    text = file_ops.read_text(ctx, target, sudo=True)
     lines = text.splitlines(keepends=True)
-    matches = [line for line in lines if pattern.search(line)]
+    matches = [line for line in lines if pattern.match(line) is not None]
     if len(matches) == 1 and _entry_value(matches[0]) == _normalize_ws(desired):
         # Keep the existing line, including its spacing and position.
         return CallResult(
@@ -128,83 +124,42 @@ def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> Cal
             path=str(target),
             key=name,
         )
-    remaining = [line for line in lines if not pattern.search(line)]
+    remaining = [line for line in lines if pattern.match(line) is None]
     if remaining and not remaining[-1].endswith("\n"):
         remaining[-1] += "\n"
-    remaining.append(f"{name} = {desired}\n")
-    return _apply_text(
+    remaining.append(ini.render_option(name, desired))
+    return file_ops.apply_text(
         ctx,
         target,
         text,
         "".join(remaining),
+        action="sysctl.key",
         summary=f"set {name} in {target}",
         unchanged_summary=f"ensure {name} in {target}",
         data={"path": str(target), "key": name},
-    )
-
-
-def _entry_value(line: str) -> str:
-    _, _, value = line.partition("=")
-    return _normalize_ws(value)
-
-
-def _remove_entry(ctx: TaskContext, target: Path, name: str) -> CallResult:
-    pattern = _entry_pattern(name)
-    text = _read_text(ctx, target)
-    new_text = "".join(line for line in text.splitlines(keepends=True) if not pattern.search(line))
-    return _apply_text(
-        ctx,
-        target,
-        text,
-        new_text,
-        summary=f"remove {name} from {target}",
-        unchanged_summary=f"ensure {name} is absent from {target}",
-        data={"path": str(target), "key": name},
-    )
-
-
-def _apply_text(
-    ctx: TaskContext,
-    target: Path,
-    old_text: str,
-    new_text: str,
-    *,
-    summary: str,
-    data: dict[str, object],
-    unchanged_summary: str | None = None,
-) -> CallResult:
-    if new_text == old_text:
-        return CallResult(
-            action="sysctl.key",
-            changed=False,
-            summary=unchanged_summary or summary,
-            **data,
-        )
-    return file_ops.apply_bytes(
-        ctx,
-        target,
-        new_text.encode(),
-        action="sysctl.key",
-        mode=None,
-        owner=None,
-        group=None,
-        summary=summary,
-        data=data,
         sudo=True,
     )
 
 
-def _read_text(ctx: TaskContext, path: Path) -> str:
-    info = file_ops.stat(ctx, path, sudo=True)
-    if info is None:
+def _entry_value(line: str) -> str:
+    parsed = ini.parse_option(line)
+    if parsed is None:
         return ""
-    if info.is_dir:
-        raise TaskFailed(f"path is a directory: {path}")
-    if info.is_symlink:
-        raise TaskFailed(f"refusing to edit symlink: {path}")
-    if not info.is_file:
-        raise TaskFailed(f"path is not a regular file: {path}")
-    try:
-        return file_ops.read_bytes(ctx, path, info, sudo=True).decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise TaskFailed(f"not a UTF-8 text file: {path}") from exc
+    return _normalize_ws(parsed[1])
+
+
+def _remove_entry(ctx: TaskContext, target: Path, name: str) -> CallResult:
+    pattern = ini.option_re(name)
+    text = file_ops.read_text(ctx, target, sudo=True)
+    new_text = "".join(line for line in text.splitlines(keepends=True) if pattern.match(line) is None)
+    return file_ops.apply_text(
+        ctx,
+        target,
+        text,
+        new_text,
+        action="sysctl.key",
+        summary=f"remove {name} from {target}",
+        unchanged_summary=f"ensure {name} is absent from {target}",
+        data={"path": str(target), "key": name},
+        sudo=True,
+    )

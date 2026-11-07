@@ -1,15 +1,18 @@
-"""Idempotent file, directory, and symlink management."""
+"""Idempotent file, directory, symlink, and text-file management."""
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from .._utils import file_ops
+from .._utils import ini as ini_ops
 from .._utils.file_helper import mkdir_path, move_path, symlink_path
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
 from ..validation import (
     State,
+    require_bool,
     require_metadata,
     require_mode,
     require_path,
@@ -249,7 +252,7 @@ def line(
         require_regex(match, "line match")
 
     target = Path(path)
-    text = _read_text(ctx, target, sudo=sudo)
+    text = file_ops.read_text(ctx, target, sudo=sudo)
     lines = text.splitlines(keepends=True)
     desired = line.rstrip("\n")
 
@@ -274,7 +277,18 @@ def line(
 
     new_text = "".join(new_lines)
     if new_text != text:
-        return ctx.changed(_rewrite_text(ctx, target, new_text, summary, action="files.line", sudo=sudo))
+        return ctx.changed(
+            file_ops.apply_text(
+                ctx,
+                target,
+                text,
+                new_text,
+                action="files.line",
+                summary=summary,
+                data={"path": str(target)},
+                sudo=sudo,
+            )
+        )
     return ctx.changed(
         action="files.line",
         changed=False,
@@ -298,7 +312,7 @@ def block(
     require_text(marker, "block marker")
 
     target = Path(path)
-    text = _read_text(ctx, target, sudo=sudo)
+    text = file_ops.read_text(ctx, target, sudo=sudo)
     lines = text.splitlines(keepends=True)
     begin = f"# BEGIN {marker}\n"
     end = f"# END {marker}\n"
@@ -332,13 +346,118 @@ def block(
 
     new_text = "".join(new_lines)
     if new_text != text:
-        return ctx.changed(_rewrite_text(ctx, target, new_text, summary, action="files.block", sudo=sudo))
+        return ctx.changed(
+            file_ops.apply_text(
+                ctx,
+                target,
+                text,
+                new_text,
+                action="files.block",
+                summary=summary,
+                data={"path": str(target)},
+                sudo=sudo,
+            )
+        )
     return ctx.changed(
         action="files.block",
         changed=False,
         summary=unchanged_summary,
         path=str(target),
     )
+
+
+def ini(
+    ctx: TaskContext,
+    path: str | Path,
+    *,
+    section: str | None = None,
+    option: str | None = None,
+    value: str | None = None,
+    match: Mapping[str, str] | None = None,
+    state: State = "present",
+    create: bool = True,
+    sudo: bool = False,
+) -> CallResult:
+    """Set or remove one option in an INI-style file, section by section.
+
+    Sections are matched case-sensitively as ``[section]`` headers; with
+    ``section=None`` the preamble before the first header is edited. Options
+    are written canonically as ``option = value``. ``match`` selects one of
+    several same-named sections and is never written to the file.
+    """
+    require_state(state, "ini")
+    require_path(path, "ini path")
+    require_bool(create, "ini create")
+    if section is not None:
+        section = ini_ops.require_ini_section(section)
+    if option is not None:
+        option = ini_ops.require_ini_option(option)
+    if match is not None:
+        if section is None:
+            raise TaskFailed("ini match requires a section")
+        match = ini_ops.require_ini_match(match)
+    # Validate the state-dependent arguments before any filesystem access.
+    set_args: tuple[str, str] | None = None
+    if state == "present":
+        if option is None:
+            raise TaskFailed("ini state 'present' requires an option")
+        if value is None:
+            raise TaskFailed("ini state 'present' requires a value")
+        set_args = (option, ini_ops.require_ini_value(value))
+    elif section is None and option is None:
+        raise TaskFailed("ini state 'absent' requires a section or an option")
+
+    target = Path(path)
+    if not create and file_ops.stat(ctx, target, sudo=sudo) is None:
+        raise TaskFailed(f"file does not exist and create=False: {target}")
+    text = file_ops.read_text(ctx, target, sudo=sudo)
+    lines = text.splitlines(keepends=True)
+
+    where = f"[{section}] of {target}" if section is not None else str(target)
+    data: dict[str, object] = {"path": str(target), "section": section, "option": option, "value": value}
+
+    new_lines: list[str]
+    summary: str
+    unchanged_summary: str
+    ini_action: str
+    if set_args is not None:
+        opt, desired = set_args
+        new_lines, ini_action = ini_ops.set_option(lines, section, opt, desired, match)
+        summary = f"set {opt} in {where}"
+        unchanged_summary = f"ensure {opt} is {desired} in {where}"
+    elif option is not None:
+        new_lines = ini_ops.remove_option(lines, section, option, match)
+        ini_action = "removed"
+        summary = f"remove {option} from {where}"
+        unchanged_summary = f"ensure {option} is absent from {where}"
+    else:
+        if section is None:
+            raise TaskFailed("ini state 'absent' requires a section or an option")
+        new_lines = ini_ops.remove_section(lines, section, match)
+        ini_action = "removed"
+        summary = f"remove section [{section}] from {target}"
+        unchanged_summary = f"ensure section [{section}] is absent from {target}"
+
+    new_text = "".join(new_lines)
+    if new_text != text and new_text and not new_text.endswith("\n"):
+        new_text += "\n"
+
+    changed = new_text != text
+    data["ini_action"] = ini_action if changed else "unchanged"
+    if changed:
+        return ctx.changed(
+            file_ops.apply_text(
+                ctx,
+                target,
+                text,
+                new_text,
+                action="files.ini",
+                summary=summary,
+                data=data,
+                sudo=sudo,
+            )
+        )
+    return ctx.changed(action="files.ini", changed=False, summary=unchanged_summary, **data)
 
 
 def directory(
@@ -476,47 +595,6 @@ def symlink(
     except OSError as exc:
         raise TaskFailed(f"could not create symlink {link}: {exc}") from exc
     return ctx.changed(result)
-
-
-def _rewrite_text(
-    ctx: TaskContext,
-    path: Path,
-    text: str,
-    summary: str,
-    *,
-    action: str,
-    sudo: bool,
-) -> CallResult:
-    info = file_ops.stat(ctx, path, sudo=sudo)
-    mode = info.mode if info is not None and info.is_file and not info.is_symlink else 0o644
-    return file_ops.apply_bytes(
-        ctx,
-        path,
-        text.encode(),
-        action=action,
-        mode=mode,
-        owner=None,
-        group=None,
-        summary=summary,
-        data={"path": str(path)},
-        sudo=sudo,
-    )
-
-
-def _read_text(ctx: TaskContext, path: Path, *, sudo: bool) -> str:
-    info = file_ops.stat(ctx, path, sudo=sudo)
-    if info is None:
-        return ""
-    if info.is_dir:
-        raise TaskFailed(f"path is a directory: {path}")
-    if info.is_symlink:
-        raise TaskFailed(f"refusing to edit symlink: {path}")
-    if not info.is_file:
-        raise TaskFailed(f"path is not a regular file: {path}")
-    try:
-        return file_ops.read_bytes(ctx, path, info, sudo=sudo).decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise TaskFailed(f"not a UTF-8 text file: {path}") from exc
 
 
 def _move(ctx: TaskContext, source: Path, target: Path, *, sudo: bool) -> None:

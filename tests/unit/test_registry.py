@@ -1,6 +1,5 @@
 import importlib
 import sys
-import textwrap
 import uuid
 from pathlib import Path
 
@@ -9,10 +8,7 @@ import pytest
 from kitup.errors import BundleError
 from kitup.registry import Bundle, SideEffect, bundle_of, side_effect, task
 
-
-def write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(text), encoding="utf-8")
+from ..helpers import write
 
 
 def import_package(tmp_path: Path, files: dict[str, str]) -> tuple[str, object]:

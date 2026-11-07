@@ -2,7 +2,6 @@ import gzip
 import hashlib
 import http.server
 import stat
-import threading
 import zlib
 from compression import zstd
 
@@ -11,7 +10,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import download
 
-from .helpers import make_context
+from .helpers import make_context, serve_http
 
 
 class ServerState:
@@ -87,18 +86,8 @@ def http_server(monkeypatch):
         def log_message(self, format: str, *args: object) -> None:
             pass
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(
-        target=lambda: server.serve_forever(poll_interval=0.01),
-        daemon=True,
-    )
-    thread.start()
-    try:
-        yield state, f"http://127.0.0.1:{server.server_port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    with serve_http(Handler) as base:
+        yield state, base
 
 
 def test_to_file_downloads_and_is_idempotent(tmp_path, http_server):

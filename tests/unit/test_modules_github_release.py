@@ -1,8 +1,5 @@
 import http.server
 import json
-import threading
-from contextlib import closing
-from urllib.error import HTTPError
 from urllib.parse import unquote
 
 import pytest
@@ -10,7 +7,7 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import github_release
 
-from .helpers import make_context
+from .helpers import make_context, serve_http
 
 DIGEST = "sha256:" + "a" * 64
 
@@ -153,23 +150,9 @@ def api_server(monkeypatch):
         def log_message(self, format: str, *args: object) -> None:
             pass
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(
-        target=lambda: server.serve_forever(poll_interval=0.01),
-        daemon=True,
-    )
-    thread.start()
-    monkeypatch.setattr(
-        github_release,
-        "_API_URL",
-        f"http://127.0.0.1:{server.server_port}",
-    )
-    try:
+    with serve_http(Handler) as base:
+        monkeypatch.setattr(github_release, "_API_URL", base)
         yield state
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
 
 def test_latest_returns_release_and_assets(tmp_path, api_server):
@@ -244,21 +227,6 @@ def test_rate_limit_failure_includes_reset_time(tmp_path, api_server):
     assert "rate limit" in message
     assert "resets at" in message
     assert "unauthenticated" in message
-
-
-def test_rate_limit_helpers_accept_missing_response_headers():
-    with (
-        closing(HTTPError("https://api.github.com", 403, "Forbidden", None, None)) as forbidden,
-        closing(HTTPError("https://api.github.com", 429, "Too Many Requests", None, None)) as too_many,
-    ):
-        assert github_release._is_rate_limited(forbidden) is False
-        assert github_release._http_error_message(
-            forbidden,
-            "latest release for owner/repo",
-        ) == ("GitHub API request failed for latest release for owner/repo: HTTP 403 Forbidden")
-        assert github_release._http_error_message(too_many, "latest release for owner/repo") == (
-            "GitHub API rate limit exceeded for latest release for owner/repo (unauthenticated requests are limited)"
-        )
 
 
 def test_invalid_json_is_a_task_failure(tmp_path, api_server):

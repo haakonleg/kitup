@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from .helpers import run, write_bundle
+from .helpers import run, sudo, write_bundle
 
 pytestmark = pytest.mark.integration
 
@@ -16,9 +16,9 @@ WORKER_PATH = "/etc/kitup-zipapp-worker-test.conf"
 
 @pytest.fixture(autouse=True)
 def worker_file_absent() -> Iterator[None]:
-    run(["sudo", "-n", "rm", "-f", WORKER_PATH], check=False)
+    run(sudo("rm", "-f", WORKER_PATH), check=False)
     yield
-    run(["sudo", "-n", "rm", "-f", WORKER_PATH], check=False)
+    run(sudo("rm", "-f", WORKER_PATH), check=False)
 
 
 def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> None:
