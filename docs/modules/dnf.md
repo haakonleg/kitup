@@ -1,6 +1,6 @@
 # `dnf`
 
-RPM package, package-group, and repository management using `dnf5` (Fedora 44+).
+RPM package, package-group, repository, and dnf.conf configuration management using `dnf5` (Fedora 44+).
 
 ```python
 from kitup.modules import dnf
@@ -160,7 +160,60 @@ def install_example_releases(ctx):
     )
 ```
 
+## `config(ctx, option, value=None, *, section="main", state="present", path=None, sudo=True)`
+
+Set or remove one option in a `dnf.conf`-style INI file.
+
+### Parameters
+
+- `option` — option name, written canonically as `option = value`.
+- `value` — required for `state="present"`. A string is written as-is, a
+  boolean as `True`/`False`, an integer in decimal form, and an iterable of
+  strings as a comma-separated list.
+- `section` — INI section to edit, default `"main"`.
+- `state="present"` sets the option; `state="absent"` removes it.
+- `path` — config file to edit, default `/etc/dnf/dnf.conf`. A missing file
+  is created with mode `0644`. Pass an explicit path with `sudo=False` for
+  user-scoped config files.
+- `sudo` — request privilege when reading and writing the file; default
+  `True`.
+
+### Result fields
+
+- `path`, `section`, `option` — the edited file, section, and option.
+- `value` — the normalized value written, or `None` when `state="absent"`.
+- `ini_action` — `"added"`, `"replaced"`, `"removed"`, or `"unchanged"`.
+
+```python
+@task("Prefer the newest available packages", tags={"dnf"})
+def prefer_newest_packages(ctx):
+    dnf.config(ctx, "best", True)
+
+
+@task("Keep at most two installed kernels", tags={"dnf"})
+def limit_installed_kernels(ctx):
+    dnf.config(ctx, "installonly_limit", 2)
+
+
+@task("Remove a custom option", tags={"dnf"})
+def remove_custom_option(ctx):
+    dnf.config(ctx, "max_parallel_downloads", state="absent")
+
+
+@task("Edit a user-scoped dnf config", tags={"dnf"})
+def edit_user_dnf_config(ctx):
+    dnf.config(
+        ctx,
+        "keepcache",
+        True,
+        path="/home/alice/.config/dnf/dnf.conf",
+        sudo=False,
+    )
+```
+
 ## Notes
 
 - `exclude` is only valid with `state="present"`.
 - Mutating operations request sudo themselves.
+- `config()` edits `/etc/dnf/dnf.conf` by default; dnf reads the file on every
+  run, so no reload is needed after a change.

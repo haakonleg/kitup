@@ -206,7 +206,7 @@ See [task results](docs/profile.md#task-results) and
 
 All built-in modules are idempotent:
 
-- `dnf` — packages, groups, release RPMs, repositories, and COPR.
+- `dnf` — packages, groups, release RPMs, repositories, COPR, and dnf.conf options.
 - `flatpak` — remotes, applications, and runtimes.
 - `files` — files, directories, symlinks, lines, blocks, INI files, and moves.
 - `command` — guarded one-off commands.

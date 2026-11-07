@@ -397,67 +397,29 @@ def ini(
             raise TaskFailed("ini match requires a section")
         match = ini_ops.require_ini_match(match)
     # Validate the state-dependent arguments before any filesystem access.
-    set_args: tuple[str, str] | None = None
+    set_value: str | None = None
     if state == "present":
         if option is None:
             raise TaskFailed("ini state 'present' requires an option")
         if value is None:
             raise TaskFailed("ini state 'present' requires a value")
-        set_args = (option, ini_ops.require_ini_value(value))
+        set_value = ini_ops.require_ini_value(value)
     elif section is None and option is None:
         raise TaskFailed("ini state 'absent' requires a section or an option")
 
-    target = Path(path)
-    if not create and file_ops.stat(ctx, target, sudo=sudo) is None:
-        raise TaskFailed(f"file does not exist and create=False: {target}")
-    text = file_ops.read_text(ctx, target, sudo=sudo)
-    lines = text.splitlines(keepends=True)
-
-    where = f"[{section}] of {target}" if section is not None else str(target)
-    data: dict[str, object] = {"path": str(target), "section": section, "option": option, "value": value}
-
-    new_lines: list[str]
-    summary: str
-    unchanged_summary: str
-    ini_action: str
-    if set_args is not None:
-        opt, desired = set_args
-        new_lines, ini_action = ini_ops.set_option(lines, section, opt, desired, match)
-        summary = f"set {opt} in {where}"
-        unchanged_summary = f"ensure {opt} is {desired} in {where}"
-    elif option is not None:
-        new_lines = ini_ops.remove_option(lines, section, option, match)
-        ini_action = "removed"
-        summary = f"remove {option} from {where}"
-        unchanged_summary = f"ensure {option} is absent from {where}"
-    else:
-        if section is None:
-            raise TaskFailed("ini state 'absent' requires a section or an option")
-        new_lines = ini_ops.remove_section(lines, section, match)
-        ini_action = "removed"
-        summary = f"remove section [{section}] from {target}"
-        unchanged_summary = f"ensure section [{section}] is absent from {target}"
-
-    new_text = "".join(new_lines)
-    if new_text != text and new_text and not new_text.endswith("\n"):
-        new_text += "\n"
-
-    changed = new_text != text
-    data["ini_action"] = ini_action if changed else "unchanged"
-    if changed:
-        return ctx.changed(
-            file_ops.apply_text(
-                ctx,
-                target,
-                text,
-                new_text,
-                action="files.ini",
-                summary=summary,
-                data=data,
-                sudo=sudo,
-            )
+    return ctx.changed(
+        file_ops.apply_ini(
+            ctx,
+            Path(path),
+            section=section,
+            option=option,
+            value=set_value if state == "present" else value,
+            match=match,
+            create=create,
+            action="files.ini",
+            sudo=sudo,
         )
-    return ctx.changed(action="files.ini", changed=False, summary=unchanged_summary, **data)
+    )
 
 
 def directory(

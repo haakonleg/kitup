@@ -3,6 +3,7 @@
 import base64
 import difflib
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -11,6 +12,7 @@ from .._privileged.protocol import Request
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
+from . import ini as ini_ops
 from .file_helper import (
     apply_metadata,
     read_path,
@@ -284,6 +286,76 @@ def apply_text(
         sudo=sudo,
         unchanged_summary=unchanged_summary,
     )
+
+
+def apply_ini(
+    ctx: TaskContext,
+    target: Path,
+    *,
+    section: str | None,
+    option: str | None,
+    value: str | None,
+    match: Mapping[str, str] | None,
+    create: bool,
+    action: str,
+    sudo: bool,
+) -> CallResult:
+    """Apply one INI edit to ``target`` and return the resulting call.
+
+    Shared by modules that edit INI-style files (``files.ini``,
+    ``dnf.config``). Callers validate the arguments first: ``value`` is the
+    canonical value to write, and when it is ``None`` the ``option`` line —
+    or the whole ``section`` when ``option`` is also ``None`` — is removed
+    instead. The returned call is not recorded; the caller records it with
+    ``ctx.changed``.
+    """
+    if not create and stat(ctx, target, sudo=sudo) is None:
+        raise TaskFailed(f"file does not exist and create=False: {target}")
+    text = read_text(ctx, target, sudo=sudo)
+    lines = text.splitlines(keepends=True)
+
+    where = f"[{section}] of {target}" if section is not None else str(target)
+    data: dict[str, object] = {"path": str(target), "section": section, "option": option, "value": value}
+
+    new_lines: list[str]
+    summary: str
+    unchanged_summary: str
+    ini_action: str
+    if value is not None and option is not None:
+        new_lines, ini_action = ini_ops.set_option(lines, section, option, value, match)
+        summary = f"set {option} in {where}"
+        unchanged_summary = f"ensure {option} is {value} in {where}"
+    elif option is not None:
+        new_lines = ini_ops.remove_option(lines, section, option, match)
+        ini_action = "removed"
+        summary = f"remove {option} from {where}"
+        unchanged_summary = f"ensure {option} is absent from {where}"
+    elif section is not None:
+        new_lines = ini_ops.remove_section(lines, section, match)
+        ini_action = "removed"
+        summary = f"remove section [{section}] from {target}"
+        unchanged_summary = f"ensure section [{section}] is absent from {target}"
+    else:
+        raise TaskFailed("ini edit requires a section or an option")
+
+    new_text = "".join(new_lines)
+    if new_text != text and new_text and not new_text.endswith("\n"):
+        new_text += "\n"
+
+    changed = new_text != text
+    data["ini_action"] = ini_action if changed else "unchanged"
+    if changed:
+        return apply_text(
+            ctx,
+            target,
+            text,
+            new_text,
+            action=action,
+            summary=summary,
+            data=data,
+            sudo=sudo,
+        )
+    return CallResult(action=action, changed=False, summary=unchanged_summary, **data)
 
 
 def apply_metadata_ctx(

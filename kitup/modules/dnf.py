@@ -1,17 +1,21 @@
-"""RPM package, package-group, and repository management."""
+"""RPM package, package-group, repository, and dnf.conf configuration management."""
 
 import re
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Final
 from urllib.parse import urlparse
 
+from .._utils import file_ops
+from .._utils import ini as ini_ops
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
 from ..validation import (
     State,
     normalize_strings,
+    require_bool,
     require_collection,
     require_path,
     require_state,
@@ -20,6 +24,8 @@ from ..validation import (
     require_texts,
     unique_strings,
 )
+
+_DEFAULT_CONFIG_PATH: Final = Path("/etc/dnf/dnf.conf")
 
 
 def packages(
@@ -313,6 +319,53 @@ def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> CallRes
     return ctx.changed(call)
 
 
+def config(
+    ctx: TaskContext,
+    option: str,
+    value: str | bool | int | Iterable[str] | None = None,  # noqa: FBT001 - positional value matches the module API
+    *,
+    section: str = "main",
+    state: State = "present",
+    path: str | Path | None = None,
+    sudo: bool = True,
+) -> CallResult:
+    """Set or remove one option in a ``dnf.conf``-style INI file.
+
+    Options are written canonically as ``option = value`` in ``[section]``.
+    ``path`` defaults to ``/etc/dnf/dnf.conf``; pass an explicit path with
+    ``sudo=False`` for user-scoped config files. A missing file is created.
+    ``value`` may be a string, a boolean (written as ``True``/``False``), an
+    integer, or an iterable of strings (written as a comma-separated list).
+    """
+    require_state(state, "config")
+    require_bool(sudo, "config sudo")
+    section = ini_ops.require_ini_section(section)
+    option = ini_ops.require_ini_option(option)
+    if path is not None:
+        require_path(path, "config path")
+
+    set_value: str | None = None
+    if state == "present":
+        if value is None:
+            raise TaskFailed("config state 'present' requires a value")
+        set_value = _normalize_config_value(value)
+
+    target = Path(path) if path is not None else _DEFAULT_CONFIG_PATH
+    return ctx.changed(
+        file_ops.apply_ini(
+            ctx,
+            target,
+            section=section,
+            option=option,
+            value=set_value,
+            match=None,
+            create=True,
+            action="dnf.config",
+            sudo=sudo,
+        )
+    )
+
+
 def _ensure_present(
     ctx: TaskContext,
     *,
@@ -437,6 +490,24 @@ def _normalize_excludes(exclude: Iterable[str] | str | None) -> list[str]:
     values = unique_strings(normalize_strings(exclude))
     require_texts(values, "excluded package")
     return values
+
+
+def _normalize_config_value(value: object) -> str:
+    """Normalize a typed config value to its canonical DNF text form."""
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return ini_ops.require_ini_value(value)
+    if isinstance(value, Iterable):
+        items = list(value)
+        if not all(isinstance(item, str) for item in items):
+            raise TaskFailed("config value list items must be strings")
+        require_collection(items, "config value")
+        require_texts(items, "config value item")
+        return ", ".join(unique_strings(items))
+    raise TaskFailed(f"unsupported config value type: {type(value).__name__}")
 
 
 def _split_names(names: list[str], *, group: bool) -> tuple[list[str], list[str]]:

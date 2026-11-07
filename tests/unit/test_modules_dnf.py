@@ -1,10 +1,20 @@
+import stat
+
 import pytest
 
 from kitup.errors import TaskFailed
 from kitup.modules import dnf
 from kitup.registry import Bundle
 
-from .helpers import FakeCommandRunner, FakeSudo, argvs, call_data, make_context, response
+from .helpers import (
+    FakeCommandRunner,
+    FakeSudo,
+    argvs,
+    call_data,
+    make_context,
+    privileged_context,
+    response,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +31,11 @@ def bundle_context(tmp_path, bundle_dir, command):
     ctx = make_context(tmp_path, command=command)
     ctx.begin_task(bundle.tasks[0])
     return ctx
+
+
+def config_context(tmp_path, **kwargs):
+    # is_root=True makes sudo=True file operations run locally in tests.
+    return make_context(tmp_path, sudo=FakeSudo(is_root=True), **kwargs)
 
 
 def test_read_only_probes_do_not_request_sudo(tmp_path):
@@ -515,3 +530,207 @@ def test_repository_absent_scenarios(tmp_path):
     dnf.repository(ctx, state="absent", name="tool.repo")
     assert command.calls[2][0] == ["dnf5", "--dump-main-config"]
     assert ctx.changes == []
+
+
+def test_config_sets_option_and_is_idempotent(tmp_path):
+    path = tmp_path / "dnf.conf"
+    path.write_text("[main]\ninstallonly_limit = 3\n")
+    ctx = config_context(tmp_path)
+
+    result = dnf.config(ctx, "best", value=True, path=path)
+
+    assert path.read_text() == "[main]\ninstallonly_limit = 3\nbest = True\n"
+    assert result.action == "dnf.config"
+    assert result.changed is True
+    assert result.summary == f"set best in [main] of {path}"
+    assert call_data(result) == {
+        "path": str(path),
+        "section": "main",
+        "option": "best",
+        "value": "True",
+        "ini_action": "added",
+    }
+
+    result = dnf.config(ctx, "best", value=True, path=path)
+    assert result.changed is False
+    assert result.summary == f"ensure best is True in [main] of {path}"
+    assert call_data(result)["ini_action"] == "unchanged"
+    assert len(ctx.changes) == 1
+
+
+def test_config_replaces_existing_option_value(tmp_path):
+    path = tmp_path / "dnf.conf"
+    path.write_text("[main]\nbest = 1\n")
+    ctx = config_context(tmp_path)
+
+    result = dnf.config(ctx, "best", value=True, path=path)
+
+    assert path.read_text() == "[main]\nbest = True\n"
+    assert result.changed is True
+    assert call_data(result)["ini_action"] == "replaced"
+
+    result = dnf.config(ctx, "best", value=True, path=path)
+    assert result.changed is False
+
+
+def test_config_absent_removes_option_and_is_idempotent(tmp_path):
+    path = tmp_path / "dnf.conf"
+    path.write_text("[main]\nbest = True\nkeep = 1\n")
+    ctx = config_context(tmp_path)
+
+    result = dnf.config(ctx, "best", state="absent", path=path)
+
+    assert path.read_text() == "[main]\nkeep = 1\n"
+    assert result.changed is True
+    assert result.summary == f"remove best from [main] of {path}"
+    assert call_data(result) == {
+        "path": str(path),
+        "section": "main",
+        "option": "best",
+        "value": None,
+        "ini_action": "removed",
+    }
+
+    result = dnf.config(ctx, "best", state="absent", path=path)
+    assert result.changed is False
+    assert result.summary == f"ensure best is absent from [main] of {path}"
+    assert call_data(result)["ini_action"] == "unchanged"
+    assert len(ctx.changes) == 1
+
+
+def test_config_creates_a_missing_file(tmp_path):
+    path = tmp_path / "dnf.conf"
+    ctx = config_context(tmp_path)
+
+    result = dnf.config(ctx, "gpgcheck", value=True, path=path)
+
+    assert path.read_text() == "[main]\ngpgcheck = True\n"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+    assert call_data(result)["ini_action"] == "added"
+
+
+def test_config_edits_a_custom_section(tmp_path):
+    path = tmp_path / "dnf.conf"
+    path.write_text("[main]\na = 1\n[other]\nb = 2\n")
+    ctx = config_context(tmp_path)
+
+    result = dnf.config(ctx, "c", "3", section="other", path=path)
+
+    assert path.read_text() == "[main]\na = 1\n[other]\nb = 2\nc = 3\n"
+    assert result.summary == f"set c in [other] of {path}"
+
+
+def test_config_normalizes_typed_values(tmp_path):
+    path = tmp_path / "dnf.conf"
+    path.write_text("[main]\n")
+    ctx = config_context(tmp_path)
+
+    dnf.config(ctx, "installonly_limit", 5, path=path)
+    dnf.config(ctx, "excludepkgs", ["foo", "bar", "foo"], path=path)
+    dnf.config(ctx, "best", value=False, path=path)
+    dnf.config(ctx, "releasever", "42", path=path)
+
+    assert path.read_text() == (
+        "[main]\ninstallonly_limit = 5\nexcludepkgs = foo, bar\nbest = False\nreleasever = 42\n"
+    )
+
+
+def test_config_dry_run_reports_without_writing(tmp_path):
+    path = tmp_path / "dnf.conf"
+    path.write_text("[main]\nbest = False\n")
+    ctx = config_context(tmp_path, dry_run=True)
+
+    result = dnf.config(ctx, "best", value=True, path=path)
+
+    assert result.changed is True
+    assert result.summary == f"set best in [main] of {path}"
+    assert path.read_text() == "[main]\nbest = False\n"
+    assert len(ctx.changes) == 1
+
+
+def test_config_validates_arguments_before_touching_the_file(tmp_path):
+    ctx = config_context(tmp_path)
+    missing = tmp_path / "missing.conf"
+
+    with pytest.raises(TaskFailed, match="requires a value"):
+        dnf.config(ctx, "best", path=missing)
+    with pytest.raises(TaskFailed, match="invalid config state"):
+        dnf.config(ctx, "best", "1", path=missing, state="maybe")
+    with pytest.raises(TaskFailed, match="must be a boolean"):
+        dnf.config(ctx, "best", "1", path=missing, sudo="yes")
+    with pytest.raises(TaskFailed, match="ini option must not be empty"):
+        dnf.config(ctx, "  ", "1", path=missing)
+    with pytest.raises(TaskFailed, match="config path must not be empty"):
+        dnf.config(ctx, "best", "1", path="")
+    with pytest.raises(TaskFailed, match="line breaks"):
+        dnf.config(ctx, "best", "a\nb", path=missing)
+    with pytest.raises(TaskFailed, match="unsupported config value type"):
+        dnf.config(ctx, "best", 1.5, path=missing)
+    with pytest.raises(TaskFailed, match="must be strings"):
+        dnf.config(ctx, "best", ["a", 1], path=missing)
+    with pytest.raises(TaskFailed, match="config value must not be empty"):
+        dnf.config(ctx, "best", [], path=missing)
+
+    assert not missing.exists()
+    assert ctx.changes == []
+
+
+def test_config_defaults_to_etc_dnf_conf(tmp_path, monkeypatch):
+    target = tmp_path / "dnf.conf"
+    monkeypatch.setattr(dnf, "_DEFAULT_CONFIG_PATH", target)
+    ctx = config_context(tmp_path)
+
+    result = dnf.config(ctx, "best", value=True)
+
+    assert target.read_text() == "[main]\nbest = True\n"
+    assert result["path"] == str(target)
+    assert result["section"] == "main"
+
+
+def test_config_uses_privileged_worker_when_sudo(tmp_path):
+    path = tmp_path / "dnf.conf"
+    path.write_text("[main]\nbest = False\n")
+    ctx = privileged_context(tmp_path)
+
+    try:
+        result = dnf.config(ctx, "best", value=True, path=path)
+        assert result.changed is True
+        assert path.read_text() == "[main]\nbest = True\n"
+
+        result = dnf.config(ctx, "best", value=True, path=path)
+        assert result.changed is False
+        assert ctx.sudo.refresh_count > 0
+    finally:
+        ctx.close()
+
+
+def test_config_user_scoped_file_without_sudo(tmp_path):
+    path = tmp_path / "user-dnf.conf"
+    ctx = make_context(tmp_path)
+
+    result = dnf.config(ctx, "keepcache", value=True, path=path, sudo=False)
+
+    assert result.changed is True
+    assert path.read_text() == "[main]\nkeepcache = True\n"
+    assert ctx.sudo.refresh_count == 0
+
+
+def test_config_rejects_directories_symlinks_and_non_utf8_files(tmp_path):
+    ctx = config_context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="directory"):
+        dnf.config(ctx, "best", "1", path=tmp_path)
+
+    target = tmp_path / "target.conf"
+    target.write_text("[main]\nbest = False\n")
+    link = tmp_path / "link.conf"
+    link.symlink_to(target)
+    with pytest.raises(TaskFailed, match="symlink"):
+        dnf.config(ctx, "best", "1", path=link)
+
+    binary = tmp_path / "binary.conf"
+    binary.write_bytes(b"[main]\n\xff\xfe\n")
+    with pytest.raises(TaskFailed, match="UTF-8"):
+        dnf.config(ctx, "best", "1", path=binary)
+
+    assert target.read_text() == "[main]\nbest = False\n"

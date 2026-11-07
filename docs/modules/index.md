@@ -36,7 +36,7 @@ changes.
 
 Each module page documents its parameters, result fields, and usage examples.
 
-- [dnf](dnf.md) — RPM packages, groups, repositories, and COPR
+- [dnf](dnf.md) — RPM packages, groups, repositories, COPR, and dnf.conf options
 - [flatpak](flatpak.md) — Flatpak remotes, applications, and runtimes
 - [files](files.md) — files, directories, symlinks, lines, blocks, INI files, and moves
 - [command](command.md) — guarded one-off commands
