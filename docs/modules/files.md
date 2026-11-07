@@ -186,6 +186,46 @@ files.ini(ctx, "/etc/example.conf", section="server", match={"id": "db"}, option
 files.ini(ctx, "/etc/example.conf", section="drinks", option="fav", state="absent", sudo=True)
 ```
 
+## `toml(ctx, path, *, table=None, key=None, value=None, state="present", create=True, sudo=False)`
+
+Set or remove one key in a TOML file, table by table.
+
+### Parameters
+
+- `path` — file to edit.
+- `table=None` — target table as a dotted path (e.g. `tool.uv`); `None` edits
+  the top-level keys before the first header.
+- `key` — a possibly dotted bare TOML key (e.g. `pip.no-cache`), resolving into
+  an existing sub-table (`[tool.uv.pip]`) when that header exists. Required
+  with `state="present"`.
+- `value` — required with `state="present"`: a string, boolean, integer, float,
+  or list/tuple of strings written as a TOML value (a multi-line array in the
+  file keeps its layout when changed).
+- `state="present"` writes `key = value` in the target table: an existing entry
+  is replaced only when its parsed value differs (spacing and quote style never
+  cause rewrites); a missing key or table is appended at the end.
+- `state="absent"` removes the `key`, or the whole `table` when `key=None`
+  (comments inside it go with it), and takes no `value`.
+- `create=True` creates a missing file with mode `0o644` (parents `0o755`);
+  `create=False` fails when the file does not exist. An absent edit on a
+  missing file is a no-op.
+- `sudo=True` edits the file through the privileged worker.
+
+Array-of-tables (`[[...]]`) cannot be edited and are rejected.
+
+### Result fields
+
+- `path` — edited file path.
+- `toml_action` — `"added"`, `"replaced"`, `"removed"`, or `"unchanged"`.
+- `table`, `key`, `value` — the arguments as given; `None` when not given.
+
+```python
+files.toml(ctx, "/etc/app/config.toml", table="server", key="host", value="db.internal", sudo=True)
+files.toml(ctx, "/etc/app/config.toml", table="tool.uv", key="native-tls", value=True, sudo=True)
+files.toml(ctx, "/etc/app/config.toml", table="server", key="port", state="absent", sudo=True)
+files.toml(ctx, "/etc/app/config.toml", table="legacy", state="absent", sudo=True)
+```
+
 ## `directory(ctx, path, *, state="present", force=False, mode=None, owner=None, group=None, sudo=False)`
 
 Ensure a directory exists or is absent.

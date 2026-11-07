@@ -9,10 +9,7 @@ from urllib.parse import urlparse
 
 from .._utils import file_ops
 from .._utils import ini as ini_ops
-from ..context import TaskContext
-from ..errors import TaskFailed
-from ..results import CallResult
-from ..validation import (
+from .._utils.validation import (
     State,
     normalize_strings,
     require_bool,
@@ -24,6 +21,9 @@ from ..validation import (
     require_texts,
     unique_strings,
 )
+from ..context import TaskContext
+from ..errors import TaskFailed
+from ..results import CallResult
 
 _DEFAULT_CONFIG_PATH: Final = Path("/etc/dnf/dnf.conf")
 

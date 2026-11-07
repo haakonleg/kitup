@@ -9,13 +9,13 @@ from types import SimpleNamespace
 from typing import Any, Final, Never, cast, overload
 
 from ._privileged.client import PrivilegedWorker
+from ._utils.validation import require_text
 from .commands import CommandRunner
 from .errors import SkipTask, TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
 from .registry import Bundle, SideEffect, Task
 from .results import CallResult, TaskResult
-from .validation import require_text
 
 _MISSING: Final = object()
 

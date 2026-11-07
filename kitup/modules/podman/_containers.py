@@ -2,10 +2,10 @@
 
 from collections.abc import Mapping, Sequence
 
+from ..._utils.validation import require_bool, require_non_negative_int, require_state, require_text
 from ...context import TaskContext
 from ...errors import TaskFailed
 from ...results import CallResult
-from ...validation import require_bool, require_non_negative_int, require_state, require_text
 from ._common import (
     CONTAINER_STATES,
     CONTAINER_STATUSES,

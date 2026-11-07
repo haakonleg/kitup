@@ -6,10 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from ..context import TaskContext
-from ..errors import TaskFailed
-from ..results import CallResult
-from ..validation import (
+from .._utils.validation import (
     State,
     require_bool,
     require_identity,
@@ -18,6 +15,9 @@ from ..validation import (
     require_state,
     require_text,
 )
+from ..context import TaskContext
+from ..errors import TaskFailed
+from ..results import CallResult
 
 _NAME_PATTERN: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")
 

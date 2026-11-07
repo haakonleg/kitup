@@ -2,9 +2,9 @@
 
 from typing import Final, Literal
 
+from .._utils.validation import require_scope, require_state, require_text
 from ..context import TaskContext
 from ..results import CallResult
-from ..validation import require_scope, require_state, require_text
 
 type SystemdState = Literal["started", "stopped"]
 

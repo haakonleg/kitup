@@ -10,9 +10,9 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 
 from .._utils.http import open_url, read_bytes, validate_timeout
+from .._utils.validation import require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..validation import require_text
 
 _API_URL: Final = "https://api.github.com"
 _DEFAULT_TIMEOUT: Final = 30

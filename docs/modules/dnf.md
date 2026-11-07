@@ -1,6 +1,6 @@
 # `dnf`
 
-RPM package, package-group, repository, and dnf.conf configuration management using `dnf5` (Fedora 44+).
+RPM package, package-group, repository, and dnf.conf configuration management using `dnf5`.
 
 ```python
 from kitup.modules import dnf

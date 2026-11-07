@@ -10,11 +10,10 @@ from typing import Final, Literal
 
 from .._utils import file_ops
 from .._utils import ini as ini_ops
-from ..context import TaskContext
-from ..errors import TaskFailed
-from ..results import CallResult
-from ..validation import (
+from .._utils.pep508 import dist_name_of, normalize_dist_name, parse_requirement
+from .._utils.validation import (
     State,
+    normalize_extra_args,
     normalize_strings,
     require_bool,
     require_choice,
@@ -24,6 +23,9 @@ from ..validation import (
     require_texts,
     unique_strings,
 )
+from ..context import TaskContext
+from ..errors import TaskFailed
+from ..results import CallResult
 
 type PipState = Literal["present", "absent", "latest"]
 type VenvState = Literal["exists", "created", "would-create", "missing"]
@@ -34,8 +36,6 @@ _CONFIG_SCOPES: Final = ("global", "user", "site")
 _PIP_STATES: Final[tuple[PipState, ...]] = ("present", "absent", "latest")
 _VENV_PYTHON: Final = Path("bin") / "python"
 _VENV_CFG: Final = Path("pyvenv.cfg")
-_NAME_PREFIX_RE: Final = re.compile(r"^\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
-_NORMALIZE_RE: Final = re.compile(r"[-_.]+")
 
 
 def packages(
@@ -74,7 +74,7 @@ def packages(
     require_texts(wanted, "package name")
     require_state(state, "pip", allowed=_PIP_STATES)
     require_bool(sudo, "sudo")
-    extra = _normalize_extra_args(extra_args)
+    extra = normalize_extra_args(extra_args)
     if state == "absent":
         for name in wanted:
             _require_absent_name(name)
@@ -237,8 +237,8 @@ def _ensure_absent(
     installed: set[str] = set() if venv_state != "exists" else _installed_names(ctx, pip, sudo=sudo)
     targets: list[str] = []
     for name in wanted:
-        dist = _dist_name(name)
-        if _normalize_name(dist) in installed:
+        dist = dist_name_of(name)
+        if normalize_dist_name(dist) in installed:
             targets.append(dist)
     targets = unique_strings(targets)
     if not targets:
@@ -261,7 +261,7 @@ def _ensure_absent(
         return result
 
     ctx.run([*pip, "uninstall", "-y", *extra, *targets], sudo=sudo)
-    remaining = [name for name in targets if _normalize_name(name) in _installed_names(ctx, pip, sudo=sudo)]
+    remaining = [name for name in targets if normalize_dist_name(name) in _installed_names(ctx, pip, sudo=sudo)]
     if remaining:
         raise TaskFailed(f"packages still installed after removal: {', '.join(remaining)}")
     return result
@@ -333,7 +333,7 @@ def _installed_names(ctx: TaskContext, pip: list[str], *, sudo: bool) -> set[str
         name = item.get("name") if isinstance(item, dict) else None
         if not isinstance(name, str) or not name:
             raise TaskFailed(f"malformed entry in pip list output: {item!r}")
-        names.add(_normalize_name(name))
+        names.add(normalize_dist_name(name))
     return names
 
 
@@ -402,15 +402,6 @@ def _python_bin(ctx: TaskContext, python: str | None) -> str:
     return resolved
 
 
-def _normalize_extra_args(extra_args: Iterable[str] | str | None) -> list[str]:
-    if extra_args is None:
-        return []
-    # no dedup: some flags are meaningfully repeatable, e.g. -v -v
-    values = normalize_strings(extra_args)
-    require_texts(values, "extra arg")
-    return values
-
-
 def _normalize_venv(venv: str | Path | None) -> Path | None:
     if venv is None:
         return None
@@ -469,23 +460,12 @@ def _packages_result(
     return CallResult(action="pip.packages", changed=changed, summary=summary, **data)
 
 
-def _dist_name(requirement: str) -> str:
-    """Return the distribution name prefix of a requirement string."""
-    match = _NAME_PREFIX_RE.match(requirement)
-    if match is None:
-        raise TaskFailed(f"cannot determine a distribution name from {requirement!r}")
-    return match.group(1)
-
-
 def _require_absent_name(name: str) -> None:
     """Reject URL and path entries, which have no removable distribution name."""
-    if "://" in name or "/" in name or name.startswith("~") or " @ " in name:
-        raise TaskFailed(f"state='absent' supports package names only, not URLs or paths: {name!r}")
-
-
-def _normalize_name(name: str) -> str:
-    """Normalize a distribution name per PEP 503."""
-    return _NORMALIZE_RE.sub("-", name).lower()
+    try:
+        parse_requirement(name)
+    except TaskFailed as exc:
+        raise TaskFailed(f"state='absent' supports package names only, not URLs or paths: {name!r}") from exc
 
 
 def _config_target(

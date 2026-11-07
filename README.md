@@ -222,6 +222,7 @@ All built-in modules are idempotent:
 - `users` — local users, groups, and group membership.
 - `podman` — images, containers, registries, and systemd/Quadlet units.
 - `pip` — Python packages via pip (optionally in a virtualenv) and pip.conf options.
+- `uv` — uv project dependencies, per-user CLI tools, and uv.toml options.
 
 See [docs/modules/index.md](docs/modules/index.md) for the full API.
 

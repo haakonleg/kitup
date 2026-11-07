@@ -6,9 +6,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .._utils.timing import timed
+from .._utils.validation import normalize_strings, require_collection, require_path, require_text
 from ..context import TaskContext
 from ..results import CallResult
-from ..validation import normalize_strings, require_collection, require_path, require_text
 
 
 def run(

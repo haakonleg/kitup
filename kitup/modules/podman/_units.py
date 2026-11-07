@@ -4,10 +4,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from ..._utils import file_ops
-from ...context import TaskContext
-from ...errors import TaskFailed
-from ...results import CallResult
-from ...validation import (
+from ..._utils.validation import (
     require_bool,
     require_choice,
     require_mode,
@@ -16,6 +13,9 @@ from ...validation import (
     require_success,
     require_text,
 )
+from ...context import TaskContext
+from ...errors import TaskFailed
+from ...results import CallResult
 from ._common import (
     RESTART_POLICIES,
     default_dir,

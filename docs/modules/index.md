@@ -52,3 +52,4 @@ Each module page documents its parameters, result fields, and usage examples.
 - [users](users.md) — local users, groups, and group membership
 - [podman](podman.md) — images, containers, registries, and systemd/Quadlet units
 - [pip](pip.md) — Python packages via pip (optionally in a virtualenv) and pip.conf options
+- [uv](uv.md) — uv project dependencies, per-user CLI tools, and uv.toml options

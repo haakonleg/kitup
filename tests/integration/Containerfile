@@ -33,7 +33,7 @@ RUN mkdir -p /srv/flatpak-repo \
     && rm -rf /tmp/flatpak-fixture
 
 # Build a local wheel repository with two versions of a fixture package.
-# Tests run with no network, so pip installs must come from /srv/pip-repo.
+# Tests run with no network, so pip/uv installs must come from /srv/pip-repo.
 COPY tests/integration/fixtures/pip /tmp/pip-fixture
 RUN mkdir -p /srv/pip-repo \
     && python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-fixture \
@@ -41,6 +41,15 @@ RUN mkdir -p /srv/pip-repo \
     && sed -i 's/__version__ = "1.0"/__version__ = "1.1"/' /tmp/pip-fixture/kitup_pip_test/__init__.py \
     && python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-fixture \
     && rm -rf /tmp/pip-fixture /root/.cache/pip
+
+# Build a fixture CLI tool wheel (with a console script) into the same repo,
+# for uv tool install tests.
+COPY tests/integration/fixtures/pip-tool /tmp/pip-tool-fixture
+RUN python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-tool-fixture \
+    && sed -i 's/^version = "1.0"$/version = "1.1"/' /tmp/pip-tool-fixture/pyproject.toml \
+    && sed -i 's/__version__ = "1.0"/__version__ = "1.1"/' /tmp/pip-tool-fixture/kitup_tool_test/__init__.py \
+    && python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-tool-fixture \
+    && rm -rf /tmp/pip-tool-fixture
 
 FROM registry.fedoraproject.org/fedora-minimal:44
 
@@ -69,6 +78,7 @@ RUN dnf5 install -y \
         sudo \
         systemd \
         tzdata \
+        uv \
         util-linux \
     && dnf5 clean all \
     && rm -rf /usr/share/locale /usr/share/licenses

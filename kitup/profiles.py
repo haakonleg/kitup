@@ -8,10 +8,10 @@ from types import ModuleType
 from typing import Any, Final
 
 from ._utils.importer import load_module
+from ._utils.validation import split_tags
 from .config import ConfigSource, mapping_key_error
 from .errors import ProfileError
 from .registry import Bundle, bundle_of
-from .validation import split_tags
 
 
 @dataclass(frozen=True, slots=True)

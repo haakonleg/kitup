@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Final
 
 from .._utils import file_ops, ini
+from .._utils.validation import State, require_state, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
-from ..validation import State, require_state, require_text
 
 _KEY_PATTERN: Final = r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*"
 

@@ -11,6 +11,7 @@ from typing import Any
 
 from kitup.commands import CommandRunner
 from kitup.context import TaskContext
+from kitup.errors import TaskFailed
 from kitup.output import Output
 from kitup.registry import Bundle
 from kitup.results import CallResult
@@ -35,9 +36,19 @@ class FakeCommandRunner:
         command = list(argv)
         self.calls.append((command, kwargs))
         response = self.responses.pop(0)(command) if self.responses else self.returncode
-        if isinstance(response, subprocess.CompletedProcess):
-            return response
-        return subprocess.CompletedProcess(command, response, self.stdout, self.stderr)
+        result = (
+            response
+            if isinstance(response, subprocess.CompletedProcess)
+            else subprocess.CompletedProcess(command, response, self.stdout, self.stderr)
+        )
+        if kwargs.get("check", True) and result.returncode != 0:
+            raise TaskFailed(
+                f"command failed with exit code {result.returncode}",
+                command=command,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+        return result
 
 
 def completed(

@@ -3,10 +3,7 @@
 import shutil
 from collections.abc import Iterable
 
-from ..context import TaskContext
-from ..errors import TaskFailed
-from ..results import CallResult
-from ..validation import (
+from .._utils.validation import (
     State,
     normalize_strings,
     require_collection,
@@ -17,6 +14,9 @@ from ..validation import (
     require_texts,
     unique_strings,
 )
+from ..context import TaskContext
+from ..errors import TaskFailed
+from ..results import CallResult
 
 
 def remote(

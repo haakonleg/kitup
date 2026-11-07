@@ -7,8 +7,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Final, override
 
+from ._utils.validation import normalize_string_sequence
 from .errors import BundleError
-from .validation import normalize_string_sequence
 
 _TASKS_ATTR: Final = "__kitup_tasks__"
 _CLAIMED_ATTR: Final = "__kitup_bundle_owner__"

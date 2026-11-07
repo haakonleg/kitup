@@ -5,10 +5,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ..._utils import file_ops
+from ..._utils.validation import require_mode, require_non_negative_int, require_scope, require_text
 from ...context import TaskContext
 from ...errors import TaskFailed
 from ...results import CallResult
-from ...validation import require_mode, require_non_negative_int, require_scope, require_text
 from ._common import (
     NATIVE_QUADLET_KEYS,
     QUADLET_KEY,

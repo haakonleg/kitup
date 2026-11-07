@@ -6,10 +6,10 @@ import subprocess
 import time
 from collections.abc import Mapping, Sequence
 
+from ._utils.validation import normalize_strings
 from .errors import TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
-from .validation import normalize_strings
 
 
 class CommandRunner:

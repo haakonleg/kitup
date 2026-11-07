@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kitup-tool-test"
+version = "1.0"
+description = "kitup integration fixture CLI tool"
+requires-python = ">=3.9"
+
+[project.scripts]
+kitup-tool-test = "kitup_tool_test:main"

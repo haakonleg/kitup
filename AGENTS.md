@@ -184,7 +184,7 @@ When changing packaging or the zipapp builder:
   subclass (`ConfigError`, `BundleError`, `ResolutionError`, `PrivilegeError`)
   elsewhere. Never swallow exceptions silently; chain with `raise ... from exc`.
 - DO validate public API arguments at the top of the function using
-  `kitup/validation.py` (`require_path`, `require_text`, `require_state`,
+  `kitup/_utils/validation.py` (`require_path`, `require_text`, `require_state`,
   `require_collection`, `normalize_strings`, and friends).
 - DO use `pathlib.Path` internally. Accept `str | Path` at public boundaries
   and convert immediately.
@@ -193,7 +193,7 @@ When changing packaging or the zipapp builder:
   directory. Do not add module-specific path resolvers.
 - DO check for an existing shared helper before implementing generic validation,
   filesystem, or similar logic. If none exists and the logic is generic, add it
-  to `kitup/validation.py` or `kitup/_utils/` rather than duplicating it.
+  to `kitup/_utils/` (`validation.py` for argument checks) rather than duplicating it.
 
 ## Don't
 

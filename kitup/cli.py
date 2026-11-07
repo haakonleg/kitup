@@ -9,6 +9,7 @@ from typing import Any
 
 from . import PACKAGE_NAME, __version__
 from ._utils.security import disable_same_uid_ptrace
+from ._utils.validation import split_tags
 from .commands import CommandRunner
 from .config import load_config
 from .context import TaskContext
@@ -19,7 +20,6 @@ from .privileges import PrivilegeManager
 from .profiles import RunDefinition, load_profile
 from .resolver import BundlePlan, filter_plan, resolve
 from .runner import Runner
-from .validation import split_tags
 
 
 def build_parser() -> argparse.ArgumentParser:

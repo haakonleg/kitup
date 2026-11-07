@@ -5,7 +5,7 @@ from collections.abc import Collection, Iterable
 from pathlib import Path
 from typing import Final, Literal
 
-from .errors import TaskFailed
+from ..errors import TaskFailed
 
 type State = Literal["present", "absent"]
 
@@ -17,6 +17,18 @@ def normalize_strings(values: str | Iterable[str]) -> list[str]:
     if isinstance(values, str):
         return [values]
     return list(values)
+
+
+def normalize_extra_args(extra_args: str | Iterable[str] | None, label: str = "extra arg") -> list[str]:
+    """Normalize extra CLI arguments to a list, rejecting empty ones.
+
+    No dedup: some flags are meaningfully repeatable, e.g. ``-v -v``.
+    """
+    if extra_args is None:
+        return []
+    values = normalize_strings(extra_args)
+    require_texts(values, label)
+    return values
 
 
 def normalize_string_sequence(values: Iterable[str], label: str) -> tuple[str, ...]:

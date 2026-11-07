@@ -20,10 +20,10 @@ from .._utils import file_ops
 from .._utils.file_helper import digest_path, replace_path
 from .._utils.http import open_url, read_response, validate_timeout
 from .._utils.timing import timed
+from .._utils.validation import require_bool, require_mode, require_path
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
-from ..validation import require_bool, require_mode, require_path
 
 _DEFAULT_MAX_BYTES: Final = 10 * 1024 * 1024
 _ACCEPT_ENCODING: Final = "gzip, deflate, zstd"

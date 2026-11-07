@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Final, Literal, NamedTuple
 
 from ..errors import TaskFailed
-from ..validation import require_collection, require_encodable, require_regex, require_text
+from .validation import require_collection, require_encodable, require_regex, require_text
 
 
 class OptionEntry(NamedTuple):

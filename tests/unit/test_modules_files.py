@@ -1284,6 +1284,405 @@ def test_ini_absent_removes_a_bom_prefixed_section_and_strips_the_bom(tmp_path):
     assert result.changed is False
 
 
+def test_toml_sets_key_and_is_idempotent(tmp_path):
+    path = tmp_path / "app.toml"
+    path.write_text('[server]\nhost = "old"\nport = 8080\n')
+    ctx = context(tmp_path)
+
+    result = files.toml(ctx, path, table="server", key="host", value="example.com")
+
+    assert path.read_text() == '[server]\nhost = "example.com"\nport = 8080\n'
+    assert result.action == "files.toml"
+    assert result.changed is True
+    assert result.summary == f"set host in [server] of {path}"
+    assert call_data(result) == {
+        "path": str(path),
+        "table": "server",
+        "key": "host",
+        "value": "example.com",
+        "toml_action": "replaced",
+    }
+
+    result = files.toml(ctx, path, table="server", key="host", value="example.com")
+    assert result.changed is False
+    assert result.summary == f'ensure host is "example.com" in [server] of {path}'
+    assert call_data(result)["toml_action"] == "unchanged"
+    assert len(ctx.changes) == 1
+
+
+def test_toml_result_fields_report_toml_action_and_arguments(tmp_path):
+    path = tmp_path / "app.toml"
+    path.write_text("[s]\na = 1\n")
+    ctx = context(tmp_path)
+
+    result = files.toml(ctx, path, table="s", key="b", value=2)
+    assert call_data(result) == {
+        "path": str(path),
+        "table": "s",
+        "key": "b",
+        "value": 2,
+        "toml_action": "added",
+    }
+
+    result = files.toml(ctx, path, table="s", key="a", value=9)
+    assert call_data(result)["toml_action"] == "replaced"
+
+    result = files.toml(ctx, path, table="s", key="a", state="absent")
+    assert call_data(result) == {
+        "path": str(path),
+        "table": "s",
+        "key": "a",
+        "value": None,
+        "toml_action": "removed",
+    }
+
+    result = files.toml(ctx, path, table="s", state="absent")
+    assert call_data(result)["toml_action"] == "removed"
+
+    result = files.toml(ctx, path, table="s", state="absent")
+    assert call_data(result) == {
+        "path": str(path),
+        "table": "s",
+        "key": None,
+        "value": None,
+        "toml_action": "unchanged",
+    }
+
+    result = files.toml(ctx, path, key="pre", value=True)
+    assert call_data(result) == {
+        "path": str(path),
+        "table": None,
+        "key": "pre",
+        "value": True,
+        "toml_action": "added",
+    }
+
+
+def test_toml_edit_scenarios(tmp_path):
+    ctx = context(tmp_path)
+
+    # Spacing and quote variants that already match are no-ops.
+    path = tmp_path / "spacing.toml"
+    path.write_text('[server]\nhost  =  "example.com"  # main\n')
+    result = files.toml(ctx, path, table="server", key="host", value="example.com")
+    assert path.read_text() == '[server]\nhost  =  "example.com"  # main\n'
+    assert result.changed is False
+
+    # Insertion goes to the end of the table body and preserves the rest.
+    path = tmp_path / "insert.toml"
+    path.write_text("# top\n[s]\na = 1\n\n# trailing\n[t]\nb = 2\n")
+    files.toml(ctx, path, table="s", key="c", value=3)
+    assert path.read_text() == "# top\n[s]\na = 1\nc = 3\n\n# trailing\n[t]\nb = 2\n"
+
+    # Missing tables are appended; missing files are created with mode 0o644.
+    path = tmp_path / "append.toml"
+    path.write_text("[s]\na = 1\n")
+    files.toml(ctx, path, table="t", key="b", value=2)
+    assert path.read_text() == "[s]\na = 1\n[t]\nb = 2\n"
+
+    fresh = tmp_path / "new.toml"
+    files.toml(ctx, fresh, table="s", key="a", value=1)
+    assert fresh.read_text() == "[s]\na = 1\n"
+    assert stat.S_IMODE(fresh.stat().st_mode) == 0o644
+
+    # The top-level preamble is edited when table is None.
+    path = tmp_path / "preamble.toml"
+    path.write_text("a = 1\n[s]\nb = 2\n")
+    files.toml(ctx, path, key="c", value=3)
+    assert path.read_text() == "a = 1\nc = 3\n[s]\nb = 2\n"
+    result = files.toml(ctx, path, key="c", value=3)
+    assert result.changed is False
+    assert result.summary == f"ensure c is 3 in {path}"
+
+    # A dotted key resolves into an existing sub-table header.
+    path = tmp_path / "dotted.toml"
+    path.write_text("[tool.uv]\nnative-tls = true\n\n[tool.uv.pip]\nno-cache = false\n")
+    files.toml(ctx, path, table="tool.uv", key="pip.no-cache", value=True)
+    assert path.read_text() == "[tool.uv]\nnative-tls = true\n\n[tool.uv.pip]\nno-cache = true\n"
+
+    # A multi-line array keeps its layout when changed.
+    path = tmp_path / "array.toml"
+    path.write_text('[project]\ndependencies = [\n    "a",\n]\n')
+    files.toml(ctx, path, table="project", key="dependencies", value=["b", "c"])
+    assert path.read_text() == '[project]\ndependencies = [\n    "b",\n    "c",\n]\n'
+
+    # A no-op does not repair a missing final newline.
+    path = tmp_path / "newline.toml"
+    path.write_text("[s]\na = 1")
+    result = files.toml(ctx, path, table="s", key="a", value=1)
+    assert path.read_text() == "[s]\na = 1"
+    assert result.changed is False
+
+
+def test_toml_value_types(tmp_path):
+    path = tmp_path / "typed.toml"
+    ctx = context(tmp_path)
+
+    files.toml(ctx, path, key="flag", value=True)
+    files.toml(ctx, path, key="count", value=4)
+    files.toml(ctx, path, key="ratio", value=1.5)
+    files.toml(ctx, path, key="name", value="demo")
+    files.toml(ctx, path, key="groups", value=["dev", "lint"])
+    files.toml(ctx, path, key="empty", value=[])
+
+    assert path.read_text() == (
+        'flag = true\ncount = 4\nratio = 1.5\nname = "demo"\ngroups = ["dev", "lint"]\nempty = []\n'
+    )
+
+    # values compare by parsed type: true is not 1, and 1 is not 1.0
+    assert files.toml(ctx, path, key="flag", value=True).changed is False
+    assert files.toml(ctx, path, key="flag", value=1).changed is True
+    assert path.read_text().splitlines()[0] == "flag = 1"
+    assert files.toml(ctx, path, key="count", value=4.0).changed is True
+
+
+def test_toml_absent_scenarios(tmp_path):
+    path = tmp_path / "absent.toml"
+    path.write_text("a = 0\n[s]\na = 1\nb = 2\n[t]\na = 3\n")
+    ctx = context(tmp_path)
+
+    result = files.toml(ctx, path, table="s", key="a", state="absent")
+    assert path.read_text() == "a = 0\n[s]\nb = 2\n[t]\na = 3\n"
+    assert result.changed is True
+    assert result.summary == f"remove a from [s] of {path}"
+
+    result = files.toml(ctx, path, table="s", key="a", state="absent")
+    assert result.changed is False
+    assert result.summary == f"ensure a is absent from [s] of {path}"
+
+    # removing a table takes its span, comments included, and keeps the rest
+    path = tmp_path / "table.toml"
+    path.write_text("pre = 1\n[s]\na = 1\n# note\n\n[t]\nb = 2\n")
+    result = files.toml(ctx, path, table="s", state="absent")
+    assert path.read_text() == "pre = 1\n[t]\nb = 2\n"
+    assert result.summary == f"remove table [s] from {path}"
+
+    result = files.toml(ctx, path, table="s", state="absent")
+    assert result.changed is False
+    assert result.summary == f"ensure table [s] is absent from {path}"
+
+    # removing the only table leaves an empty file
+    path = tmp_path / "only.toml"
+    path.write_text("[s]\na = 1\n")
+    result = files.toml(ctx, path, table="s", state="absent")
+    assert path.read_text() == ""
+    assert result.changed is True
+
+
+def test_toml_absent_removes_a_dotted_key_declared_table(tmp_path):
+    path = tmp_path / "dotted-table.toml"
+    path.write_text('tool.uv.native-tls = true\n[project]\nname = "demo"\n')
+    ctx = context(tmp_path)
+
+    result = files.toml(ctx, path, table="tool.uv", state="absent")
+
+    assert path.read_text() == '[project]\nname = "demo"\n'
+    assert result.changed is True
+    assert result.summary == f"remove table [tool.uv] from {path}"
+
+
+def test_toml_create_false_rejects_a_missing_file(tmp_path):
+    ctx = context(tmp_path)
+    missing = tmp_path / "missing.toml"
+
+    with pytest.raises(TaskFailed, match="does not exist"):
+        files.toml(ctx, missing, table="s", key="a", value=1, create=False)
+    with pytest.raises(TaskFailed, match="does not exist"):
+        files.toml(ctx, missing, table="s", key="a", state="absent", create=False)
+
+    assert not missing.exists()
+
+
+def test_toml_creates_a_missing_file_with_parents(tmp_path):
+    path = tmp_path / "deep" / "nested" / "app.toml"
+    ctx = context(tmp_path)
+
+    result = files.toml(ctx, path, table="s", key="a", value=1)
+
+    assert path.read_text() == "[s]\na = 1\n"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+    assert stat.S_IMODE((tmp_path / "deep").stat().st_mode) == 0o755
+    assert result.changed is True
+
+
+def test_toml_absent_on_a_missing_file_is_a_noop_and_creates_nothing(tmp_path):
+    missing = tmp_path / "missing.toml"
+    ctx = context(tmp_path)
+
+    result = files.toml(ctx, missing, table="s", key="a", state="absent")
+    assert result.changed is False
+    result = files.toml(ctx, missing, table="s", state="absent")
+    assert result.changed is False
+
+    assert not missing.exists()
+    assert ctx.changes == []
+
+
+def test_toml_dry_run_reports_without_writing_or_creating(tmp_path):
+    path = tmp_path / "app.toml"
+    path.write_text("[s]\na = 1\n")
+    ctx = context(tmp_path, dry_run=True)
+
+    result = files.toml(ctx, path, table="s", key="b", value=2)
+
+    assert path.read_text() == "[s]\na = 1\n"
+    assert result.changed is True
+    assert len(ctx.changes) == 1
+
+    missing = tmp_path / "deep" / "new.toml"
+    result = files.toml(ctx, missing, table="s", key="a", value=1)
+    assert result.changed is True
+    assert not missing.exists()
+    assert not (tmp_path / "deep").exists()
+
+
+def test_toml_invalid_arguments_are_rejected(tmp_path):
+    path = tmp_path / "app.toml"
+    path.write_text("[s]\na = 1\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="invalid toml state"):
+        files.toml(ctx, path, table="s", key="a", value=1, state="unknown")
+    with pytest.raises(TaskFailed, match="toml path must not be empty"):
+        files.toml(ctx, "", table="s", key="a", value=1)
+    with pytest.raises(TaskFailed, match="toml table must use bare key parts"):
+        files.toml(ctx, path, table="a b", key="a", value=1)
+    with pytest.raises(TaskFailed, match="toml key must use bare key parts"):
+        files.toml(ctx, path, table="s", key='"quoted"', value=1)
+    with pytest.raises(TaskFailed, match="requires a key"):
+        files.toml(ctx, path, table="s", value=1)
+    with pytest.raises(TaskFailed, match="requires a value"):
+        files.toml(ctx, path, table="s", key="a")
+    with pytest.raises(TaskFailed, match="requires a key or a table"):
+        files.toml(ctx, path, state="absent")
+    with pytest.raises(TaskFailed, match="does not take a value"):
+        files.toml(ctx, path, table="s", key="a", value=1, state="absent")
+    with pytest.raises(TaskFailed, match="must be a boolean"):
+        files.toml(ctx, path, table="s", key="a", value=1, create="yes")
+    with pytest.raises(TaskFailed, match="unsupported toml value type"):
+        files.toml(ctx, path, table="s", key="a", value={"a": 1})
+    with pytest.raises(TaskFailed, match="toml array items must be strings"):
+        files.toml(ctx, path, table="s", key="a", value=["a", 1])
+
+    assert ctx.changes == []
+    assert path.read_text() == "[s]\na = 1\n"
+
+
+def test_toml_rejects_array_of_tables_targets(tmp_path):
+    path = tmp_path / "aot.toml"
+    path.write_text('[[tool.uv.index]]\nurl = "https://x"\n')
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="array-of-tables"):
+        files.toml(ctx, path, table="tool.uv.index", key="url", value="https://y")
+    with pytest.raises(TaskFailed, match="array-of-tables"):
+        files.toml(ctx, path, table="tool.uv.index", key="url", state="absent")
+    with pytest.raises(TaskFailed, match="array-of-tables"):
+        files.toml(ctx, path, table="tool.uv.index", state="absent")
+
+    assert path.read_text() == '[[tool.uv.index]]\nurl = "https://x"\n'
+    assert ctx.changes == []
+
+
+def test_toml_rejects_directories_symlinks_and_non_utf8_files(tmp_path):
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="directory"):
+        files.toml(ctx, tmp_path, table="s", key="a", value=1)
+
+    target = tmp_path / "target.toml"
+    target.write_text("[s]\na = 1\n")
+    link = tmp_path / "link.toml"
+    link.symlink_to(target)
+    with pytest.raises(TaskFailed, match="symlink"):
+        files.toml(ctx, link, table="s", key="a", value=2)
+
+    binary = tmp_path / "binary.toml"
+    binary.write_bytes(b"[s]\n\xff\xfe\n")
+    with pytest.raises(TaskFailed, match="UTF-8"):
+        files.toml(ctx, binary, table="s", key="a", value=2)
+
+    assert target.read_text() == "[s]\na = 1\n"
+
+
+def test_toml_preserves_existing_file_mode(tmp_path):
+    path = tmp_path / "app.toml"
+    path.write_text("[s]\na = 1\n")
+    path.chmod(0o600)
+    ctx = context(tmp_path)
+
+    files.toml(ctx, path, table="s", key="a", value=2)
+
+    assert path.read_text() == "[s]\na = 2\n"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_toml_uses_privileged_worker(tmp_path):
+    path = tmp_path / "root-owned.toml"
+    ctx = privileged_context(tmp_path)
+
+    try:
+        result = files.toml(ctx, path, table="s", key="a", value=1, sudo=True)
+        assert result.changed is True
+        assert path.read_text() == "[s]\na = 1\n"
+
+        result = files.toml(ctx, path, table="s", key="a", value=1, sudo=True)
+        assert result.changed is False
+        assert ctx.sudo.refresh_count > 0
+    finally:
+        ctx.close()
+
+
+def test_toml_validates_arguments_before_touching_the_file(tmp_path):
+    ctx = context(tmp_path)
+
+    # argument errors win over filesystem errors (the path is a directory)
+    with pytest.raises(TaskFailed, match="requires a value"):
+        files.toml(ctx, tmp_path, table="s", key="a")
+    with pytest.raises(TaskFailed, match="requires a key or a table"):
+        files.toml(ctx, tmp_path, state="absent")
+    # argument errors win over the create=False missing-file check
+    with pytest.raises(TaskFailed, match="requires a value"):
+        files.toml(ctx, tmp_path / "missing.toml", key="a", create=False)
+
+    assert ctx.changes == []
+
+
+@pytest.mark.parametrize("char", ["\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029", "\0"])
+def test_toml_rejects_line_breaks_and_null_bytes_in_arguments(tmp_path, char):
+    path = tmp_path / "app.toml"
+    path.write_text("[s]\na = 1\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="must not contain"):
+        files.toml(ctx, path, table=f"s{char}t", key="a", value=1)
+    with pytest.raises(TaskFailed, match="must not contain"):
+        files.toml(ctx, path, table="s", key=f"a{char}b", value=1)
+
+    assert path.read_text() == "[s]\na = 1\n"
+    assert ctx.changes == []
+
+
+def test_toml_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
+    path = tmp_path / "bom.toml"
+    path.write_bytes(b"\xef\xbb\xbf[s]\na = 1\nb = 2\n")
+    ctx = context(tmp_path)
+
+    # a no-op run only reads, so the BOM is kept
+    result = files.toml(ctx, path, table="s", key="a", value=1)
+    assert result.changed is False
+    assert path.read_bytes() == b"\xef\xbb\xbf[s]\na = 1\nb = 2\n"
+
+    # the first real write drops the BOM
+    result = files.toml(ctx, path, table="s", key="a", value=9)
+    assert result.changed is True
+    assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
+
+    result = files.toml(ctx, path, table="s", key="a", value=9)
+    assert result.changed is False
+    assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
+
+
 def test_line_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
     path = tmp_path / "lines"
     path.write_bytes(b"\xef\xbb\xbfone\ntwo\n")

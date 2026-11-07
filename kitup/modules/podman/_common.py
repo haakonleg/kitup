@@ -1,6 +1,5 @@
 """Shared types, validation, and command helpers for the Podman modules."""
 
-import json
 import re
 import shlex
 import shutil
@@ -8,9 +7,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Final, Literal
 
+from ..._utils.validation import normalize_strings, require_success, require_text, require_texts, unique_strings
 from ...context import TaskContext
 from ...errors import TaskFailed
-from ...validation import normalize_strings, require_success, require_text, require_texts, unique_strings
 
 type PullPolicy = Literal["missing", "always", "never"]
 type ContainerState = Literal["present", "started", "stopped", "absent"]
@@ -198,11 +197,6 @@ def command_parts(
 def container_command(command: str | Sequence[str] | None) -> list[str]:
     """Normalize a container command into an argv list."""
     return command_parts(command, label="container command", split_string=True) or []
-
-
-def toml_string(value: str) -> str:
-    """Render a TOML-compatible basic string."""
-    return json.dumps(value, ensure_ascii=False)
 
 
 def build_arg_args(build_args: Mapping[str, str | int | float] | None) -> list[str]:

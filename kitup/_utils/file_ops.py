@@ -68,20 +68,23 @@ def worker_request(ctx: TaskContext, action: str, **params: Any) -> dict[str, An
     return cast(dict[str, Any], ctx.privileged_worker.request(Request(action, params)))
 
 
-def stat(ctx: TaskContext, path: Path, *, sudo: bool) -> FileInfo | None:
-    """Return path metadata, using the privileged worker when needed."""
+def stat(ctx: TaskContext, path: Path, *, sudo: bool, follow: bool = False) -> FileInfo | None:
+    """Return path metadata, using the privileged worker when needed.
+
+    ``follow=True`` stats the target of a symlink instead of the link itself.
+    """
     if not privileged(ctx, sudo=sudo):
-        return stat_local(path)
-    result = worker_request(ctx, "stat", path=str(path))
+        return stat_local(path, follow=follow)
+    result = worker_request(ctx, "stat", path=str(path), follow=follow)
     if not result or not result.get("exists"):
         return None
     return _file_info(result)
 
 
-def stat_local(path: Path) -> FileInfo | None:
+def stat_local(path: Path, *, follow: bool = False) -> FileInfo | None:
     """Return path metadata for the current process."""
     try:
-        result = stat_path(path)
+        result = stat_path(path, follow=follow)
     except OSError as exc:
         raise TaskFailed(f"could not stat {path}: {exc}") from exc
     if not result:
