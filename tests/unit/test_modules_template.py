@@ -11,23 +11,23 @@ from kitup.registry import Bundle
 from .helpers import call_data, make_context, plain_output, privileged_context
 
 
-def context(tmp_path, *, config=None, facts=None, dry_run=False, diff=False):
+def context(tmp_path, *, vars=None, facts=None, dry_run=False, diff=False):
     return make_context(
         tmp_path,
         dry_run=dry_run,
         diff=diff,
-        config=config,
+        vars=vars,
         facts=facts,
         output=plain_output(),
     )
 
 
-def bundle_context(tmp_path, *, config=None, facts=None):
+def bundle_context(tmp_path, *, vars=None, facts=None):
     bundle_dir = tmp_path / "bundles" / "base"
     (bundle_dir / "files").mkdir(parents=True)
     bundle = Bundle("base", path=bundle_dir)
     bundle.task("Task")(lambda ctx: None)
-    ctx = make_context(tmp_path, config=config, facts=facts)
+    ctx = make_context(tmp_path, vars=vars, facts=facts)
     ctx.begin_task(bundle.tasks[0])
     return ctx, bundle_dir
 
@@ -37,16 +37,16 @@ def write_source(path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def test_file_renders_config_facts_and_variables(tmp_path):
+def test_file_renders_vars_facts_and_variables(tmp_path):
     source = tmp_path / "template.j2"
     write_source(
         source,
-        'port={{ config.SSH_PORT }}\nhost={{ config["HOSTNAME"] }}\nfact={{ facts.hostname }}\nuser={{ user }}\n',
+        'port={{ vars.SSH_PORT }}\nhost={{ vars["HOSTNAME"] }}\nfact={{ facts.hostname }}\nuser={{ user }}\n',
     )
     dest = tmp_path / "rendered.conf"
     ctx = context(
         tmp_path,
-        config=SimpleNamespace(SSH_PORT=2222, HOSTNAME="example"),
+        vars=SimpleNamespace(SSH_PORT=2222, HOSTNAME="example"),
         facts={"hostname": "example"},
     )
 
@@ -61,9 +61,9 @@ def test_file_renders_config_facts_and_variables(tmp_path):
 
 def test_file_is_idempotent(tmp_path):
     source = tmp_path / "template.j2"
-    write_source(source, "value={{ config.VALUE }}\n")
+    write_source(source, "value={{ vars.VALUE }}\n")
     dest = tmp_path / "rendered.conf"
-    ctx = context(tmp_path, config=SimpleNamespace(VALUE=1))
+    ctx = context(tmp_path, vars=SimpleNamespace(VALUE=1))
 
     template.file(ctx, source, dest)
     template.file(ctx, source, dest)
@@ -107,11 +107,11 @@ def test_file_rejects_undefined_variable(tmp_path):
     assert not dest.exists()
 
 
-def test_file_rejects_undefined_config_field(tmp_path):
+def test_file_rejects_undefined_var_field(tmp_path):
     source = tmp_path / "template.j2"
-    write_source(source, "{{ config.MISSING }}\n")
+    write_source(source, "{{ vars.MISSING }}\n")
     dest = tmp_path / "rendered.conf"
-    ctx = context(tmp_path, config=SimpleNamespace(PRESENT="yes"))
+    ctx = context(tmp_path, vars=SimpleNamespace(PRESENT="yes"))
 
     with pytest.raises(TaskFailed, match="undefined variable"):
         template.file(ctx, source, dest)
@@ -138,7 +138,7 @@ def test_file_reports_syntax_error_location(tmp_path):
         (["not", "a", "mapping"], "variables must be a mapping"),
         ({"bad-name": 1}, "valid identifier"),
         ({1: "value"}, "valid identifier"),
-        ({"config": {}}, "reserved"),
+        ({"vars": {}}, "reserved"),
         ({"facts": {}}, "reserved"),
     ],
 )
@@ -172,10 +172,10 @@ def test_file_resolves_sources_relative_to_the_bundle(tmp_path):
 def test_file_allows_bundle_context(tmp_path):
     ctx, bundle_dir = bundle_context(
         tmp_path,
-        config=SimpleNamespace(NAME="kitup"),
+        vars=SimpleNamespace(NAME="kitup"),
         facts={"hostname": "example"},
     )
-    write_source(bundle_dir / "files" / "template.j2", "{{ config.NAME }}@{{ facts.hostname }}\n")
+    write_source(bundle_dir / "files" / "template.j2", "{{ vars.NAME }}@{{ facts.hostname }}\n")
 
     template.file(ctx, "template.j2", tmp_path / "out")
 
@@ -296,9 +296,9 @@ def test_file_reports_metadata_only_change(tmp_path):
 
 def test_dry_run_reports_without_writing(tmp_path):
     source = tmp_path / "template.j2"
-    write_source(source, "value={{ config.VALUE }}\n")
+    write_source(source, "value={{ vars.VALUE }}\n")
     dest = tmp_path / "rendered.conf"
-    ctx = context(tmp_path, config=SimpleNamespace(VALUE=1), dry_run=True)
+    ctx = context(tmp_path, vars=SimpleNamespace(VALUE=1), dry_run=True)
 
     template.file(ctx, source, dest)
 
@@ -345,10 +345,10 @@ def test_diff_prints_unified_diff(tmp_path):
 
 def test_privileged_write_uses_worker(tmp_path):
     source = tmp_path / "template.j2"
-    write_source(source, "value={{ config.VALUE }}\n")
+    write_source(source, "value={{ vars.VALUE }}\n")
     dest = tmp_path / "root-owned.conf"
     ctx = privileged_context(tmp_path)
-    ctx.config = SimpleNamespace(VALUE=1)
+    ctx.vars = SimpleNamespace(VALUE=1)
 
     try:
         template.file(ctx, source, dest, mode=0o600, sudo=True)

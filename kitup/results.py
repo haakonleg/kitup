@@ -4,10 +4,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from ._utils.mapping import AttrDict
 from .registry import Task
 
 
-class CallResult(dict[str, Any]):
+class CallResult(AttrDict):
     """Result of a module call, with change data inlined.
 
     ``action``, ``changed``, and ``summary`` are reserved keys. ``action``
@@ -42,12 +43,6 @@ class CallResult(dict[str, Any]):
     def summary(self) -> str:
         """Short human-readable description of the call."""
         return str(self["summary"])
-
-    def __getattr__(self, name: str) -> Any:
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name) from None
 
 
 class Status(StrEnum):

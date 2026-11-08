@@ -1,7 +1,6 @@
 """RPM package, package-group, repository, and dnf.conf configuration management."""
 
 import re
-import shutil
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Final
@@ -9,6 +8,8 @@ from urllib.parse import urlparse
 
 from .._utils import file_ops
 from .._utils import ini as ini_ops
+from .._utils.executables import require_command
+from .._utils.paths import expand_path
 from .._utils.validation import (
     State,
     normalize_strings,
@@ -230,7 +231,11 @@ def repository(
     state: State = "present",
     name: str | None = None,
 ) -> CallResult:
-    """Ensure a repository from a .repo file is present or absent."""
+    """Ensure a repository from a .repo file is present or absent.
+
+    URLs are passed through, while relative local paths resolve from the
+    current working directory.
+    """
     require_state(state, "repository")
 
     if state == "present":
@@ -239,7 +244,7 @@ def repository(
         require_path(source, "repository source")
         if name is not None:
             require_text(name, "repository name")
-        resolved_source = _resolve_dnf_source(ctx, source)
+        resolved_source = _resolve_dnf_source(source)
         filename = _repo_filename(resolved_source, name)
         path = _repository_path(ctx, filename)
         if path.exists():
@@ -288,7 +293,11 @@ def repository(
 
 
 def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> CallResult:
-    """Install release RPMs from URLs or local paths."""
+    """Install release RPMs from URLs or local paths.
+
+    URLs are passed through, while relative local paths resolve from the
+    current working directory.
+    """
     if isinstance(sources, (str, Path)):
         sources = [sources]
     validated = unique_strings(sources)
@@ -296,7 +305,7 @@ def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> CallRes
     for source in validated:
         require_path(source, "RPM source")
 
-    wanted = unique_strings(_resolve_dnf_source(ctx, source) for source in validated)
+    wanted = unique_strings(_resolve_dnf_source(source) for source in validated)
     labels = [Path(urlparse(source).path).name or source for source in wanted]
     names = _rpm_source_names(ctx, wanted)
     missing = _missing_packages(ctx, names)
@@ -350,7 +359,7 @@ def config(
             raise TaskFailed("config state 'present' requires a value")
         set_value = _normalize_config_value(value)
 
-    target = Path(path) if path is not None else _DEFAULT_CONFIG_PATH
+    target = expand_path(path, error=TaskFailed) if path is not None else _DEFAULT_CONFIG_PATH
     return ctx.changed(
         file_ops.apply_ini(
             ctx,
@@ -426,11 +435,12 @@ def _ensure_present(
     return result
 
 
-def _resolve_dnf_source(ctx: TaskContext, source: str | Path) -> str:
+def _resolve_dnf_source(source: str | Path) -> str:
+    """Return a URL unchanged or expand a local path from the working directory."""
     text = str(source)
     if urlparse(text).scheme:
         return text
-    return str(ctx.resolve_source(text))
+    return str(expand_path(text, error=TaskFailed))
 
 
 def _rpm_source_names(ctx: TaskContext, sources: list[str]) -> list[str]:
@@ -573,10 +583,7 @@ def _parse_installed_groups(output: str) -> set[str]:
 
 def _dnf_command(ctx: TaskContext) -> str:
     """Return the dnf5 executable or fail clearly when it is unavailable."""
-    command = ctx.memo("dnf-command", lambda: shutil.which("dnf5"))
-    if command is None:
-        raise TaskFailed("dnf5 is required but was not found")
-    return command
+    return require_command(ctx, "dnf5")
 
 
 def _rpm_installed(ctx: TaskContext, name: str) -> bool:

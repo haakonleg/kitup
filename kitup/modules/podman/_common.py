@@ -2,11 +2,11 @@
 
 import re
 import shlex
-import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Final, Literal
 
+from ..._utils.executables import require_command
 from ..._utils.validation import normalize_strings, require_success, require_text, require_texts, unique_strings
 from ...context import TaskContext
 from ...errors import TaskFailed
@@ -49,10 +49,7 @@ NATIVE_QUADLET_KEYS: Final[frozenset[str]] = frozenset({"ContainerName", "Image"
 
 def podman(ctx: TaskContext) -> str:
     """Return the Podman executable path, failing when it is missing."""
-    command = ctx.memo("podman-command", lambda: shutil.which("podman"))
-    if command is None:
-        raise TaskFailed("podman is required but was not found")
-    return command
+    return require_command(ctx, "podman")
 
 
 def require_object_name(value: str, label: str) -> None:

@@ -457,11 +457,11 @@ def remove(
     is_dir = info is not None and info.is_dir and not info.is_symlink
     if info is not None and is_dir and not allow_directory:
         raise TaskFailed(f"path is a directory: {path}")
-    action = "rmdir" if is_dir and not force else "remove"
+    operation = "rmdir" if is_dir and not force else "remove"
     if data is None:
         data = {"path": str(path)}
     if summary is None:
-        summary = f"{action} {path}"
+        summary = f"{operation} {path}"
     if info is None:
         return CallResult(
             action=action,

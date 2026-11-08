@@ -4,7 +4,7 @@ RPM package, package-group, repository, and dnf.conf configuration management us
 
 ```python
 from kitup.modules import dnf
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `packages(ctx, names, *, state="present", group=False, weak_deps=False, exclude=None)`
@@ -109,9 +109,8 @@ Manage a repository from a `.repo` file.
 ### Parameters
 
 - `source` — local path or URL of a `.repo` file; required for `"present"`.
-  Relative paths resolve like `files.copy()`: a bare filename comes from the
-  bundle's `files/` directory, other relative paths from the bundle directory,
-  and absolute paths or URLs are used as-is.
+  Relative local paths resolve from the current working directory. Absolute
+  paths or URLs are used as-is. `~` is expanded.
 - `state="present"` adds the repository; `"absent"` removes the installed
   repository file.
 - `name` — installed filename. Required for `"absent"`; for `"present"` it
@@ -139,9 +138,9 @@ Install one or more release RPMs from URLs or local paths.
 
 ### Parameters
 
-- `sources` — a single source or an iterable. Local paths follow the same
-  bundle-relative rules as `files.copy()`; URLs and absolute paths are used
-  as-is. Already-installed packages are left alone.
+- `sources` — a single source or an iterable. Local paths resolve from the
+  current working directory. URLs and absolute paths are used as-is, and `~` is
+  expanded. Already-installed packages are left alone.
 
 ### Result fields
 

@@ -1,7 +1,6 @@
 """Helpers shared by the container integration tests."""
 
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
@@ -45,49 +44,25 @@ def run(
 
 
 def write_bundle(root: Path, name: str, source: str) -> Path:
-    """Create a configuration root with an imported bundle and a profile."""
-    bundles = root / "bundles"
-    folder = bundles / name
+    """Create a project root containing one auto-discovered bundle."""
+    folder = root / "bundles" / name
     folder.mkdir(parents=True)
-    (bundles / "__init__.py").write_text("", encoding="utf-8")
     (folder / "__init__.py").write_text(
-        "from kitup.registry import Bundle\n\n"
-        "from . import tasks\n\n"
-        f"Bundle({name!r}, 'integration test bundle', modules=[tasks])\n",
+        "from kitup import Bundle\n\nBundle()\n",
         encoding="utf-8",
     )
 
     body = textwrap.dedent(source).strip()
     (folder / "tasks.py").write_text(
-        f"from kitup.registry import task\n\n{body}\n",
-        encoding="utf-8",
-    )
-
-    (root / "kitup.py").write_text(
-        "from bundles import " + name + f"\n\nfrom kitup import profile\n\nprofile(bundles=[{name}])\n",
+        f"from kitup import task\n\n{body}\n",
         encoding="utf-8",
     )
     return root
 
 
 def run_kitup(command: str, root: Path, *args: str) -> int:
-    """Run the CLI in-process against a temporary configuration root."""
-    _purge_profile_modules()
-    try:
-        return main([command, str(root / "kitup.py"), "--no-color", *args])
-    finally:
-        _purge_profile_modules()
-
-
-def _purge_profile_modules() -> None:
-    """Keep separate configuration roots isolated inside one pytest process."""
-    for name in tuple(sys.modules):
-        if (
-            name == "bundles"
-            or name.startswith("bundles.")
-            or name in {"base_profile", "middle_profile", "child_profile"}
-        ):
-            sys.modules.pop(name, None)
+    """Run the CLI in-process against a temporary project root."""
+    return main([command, str(root), "--no-color", *args])
 
 
 def rpm_installed(name: str = TEST_PACKAGE) -> bool:

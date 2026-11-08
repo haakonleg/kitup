@@ -19,7 +19,7 @@ LIST = ["flatpak", "list", "--system", "--columns=application,ref"]
 @pytest.fixture(autouse=True)
 def flatpak_available(monkeypatch):
     monkeypatch.setattr(
-        "kitup.modules.flatpak.shutil.which",
+        "kitup._utils.executables.shutil.which",
         lambda name: "flatpak" if name == "flatpak" else None,
     )
 

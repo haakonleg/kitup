@@ -5,8 +5,8 @@ accepts `ctx` first. Methods inspect the current system state and change only
 what is needed, and mutating operations honor `--dry-run`.
 
 ```python
+from kitup import task
 from kitup.modules import dnf, files
-from kitup.registry import task
 ```
 
 ## Return values

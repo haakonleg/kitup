@@ -4,7 +4,7 @@ Manage local user accounts, groups, and group membership.
 
 ```python
 from kitup.modules import users
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `user(ctx, name, *, state="present", uid=None, group=None, home=None, shell=None, create_home=True, password=None)`

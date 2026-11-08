@@ -4,6 +4,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from ..._utils import file_ops
+from ..._utils.paths import expand_path
 from ..._utils.toml import toml_string
 from ..._utils.validation import (
     State,
@@ -122,6 +123,7 @@ def login(
         raise TaskFailed("registry password must not contain newlines or null bytes")
     if authfile is not None:
         require_path(authfile, "registry authfile")
+    authfile_path = expand_path(authfile, error=TaskFailed) if authfile is not None else None
     if tls_verify is not None:
         require_bool(tls_verify, "registry tls_verify")
     require_bool(force, "registry force")
@@ -133,7 +135,7 @@ def login(
             ctx,
             podman_command,
             registry,
-            authfile=authfile,
+            authfile=authfile_path,
             sudo=sudo,
         )
         == username
@@ -156,8 +158,8 @@ def login(
     if ctx.dry_run:
         return ctx.changed(call)
     command = [podman_command, "login", f"--username={username}", "--password-stdin"]
-    if authfile is not None:
-        command.append(f"--authfile={authfile}")
+    if authfile_path is not None:
+        command.append(f"--authfile={authfile_path}")
     if tls_verify is not None:
         command.append(f"--tls-verify={'true' if tls_verify else 'false'}")
     command.append(registry)
@@ -176,9 +178,10 @@ def logout(
     require_text(registry, "registry")
     if authfile is not None:
         require_path(authfile, "registry authfile")
+    authfile_path = expand_path(authfile, error=TaskFailed) if authfile is not None else None
 
     podman_command = podman(ctx)
-    if _login_status(ctx, podman_command, registry, authfile=authfile, sudo=sudo) is None:
+    if _login_status(ctx, podman_command, registry, authfile=authfile_path, sudo=sudo) is None:
         return ctx.changed(
             action="podman.logout",
             changed=False,
@@ -195,8 +198,8 @@ def logout(
     if ctx.dry_run:
         return ctx.changed(call)
     command = [podman_command, "logout"]
-    if authfile is not None:
-        command.append(f"--authfile={authfile}")
+    if authfile_path is not None:
+        command.append(f"--authfile={authfile_path}")
     command.append(registry)
     ctx.run(command, sudo=sudo)
     return ctx.changed(call)
@@ -210,7 +213,7 @@ def _registry_path(name: str, *, scope: str, path: str | Path | None) -> Path:
             Path(".config/containers/registries.conf.d"),
         )
         return directory / f"{name}.conf"
-    target = Path(path)
+    target = expand_path(path, error=TaskFailed)
     if not str(target).endswith(".conf"):
         target = Path(f"{target}.conf")
     return target

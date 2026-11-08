@@ -5,7 +5,7 @@ an existing checkout at the desired version.
 
 ```python
 from kitup.modules import git
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `repo(ctx, url, dest, *, version="HEAD", single_branch=False, depth=None, update=True, force=False)`

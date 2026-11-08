@@ -1,24 +1,8 @@
 """Helpers shared by the unit and integration suites."""
 
-import sys
 import textwrap
+from collections.abc import Mapping
 from pathlib import Path
-
-# Modules imported from temporary configuration roots that must not leak between tests.
-_PROJECT_MODULES = frozenset(
-    {
-        "bundles",
-        "config",
-        "base_profile",
-        "middle_profile",
-        "child_profile",
-        "empty_profile",
-        "helper_profile",
-        "left_profile",
-        "right_profile",
-        "laptop_profile",
-    }
-)
 
 
 def write(path: Path, text: str) -> None:
@@ -27,8 +11,42 @@ def write(path: Path, text: str) -> None:
     path.write_text(textwrap.dedent(text), encoding="utf-8")
 
 
-def purge_project_modules() -> None:
-    """Drop modules imported from temporary configuration roots."""
-    for name in tuple(sys.modules):
-        if name in _PROJECT_MODULES or name.startswith(("bundles.", "_kitup_profile_", "_kitup_config_")):
-            sys.modules.pop(name, None)
+def make_project(
+    root: Path,
+    *,
+    bundles: Mapping[str, str | Mapping[str, str]] | None = None,
+    var_files: Mapping[str, str] | None = None,
+    vars: str | None = None,
+    preset: Mapping[str, str] | None = None,
+) -> Path:
+    """Build a project tree and return its root.
+
+    A bundle value may be a mapping of files relative to the bundle folder, or
+    a string used as an auto-discovered ``tasks.py``. ``vars`` is written to
+    ``vars/base.py``; ``var_files`` adds further files under ``vars/``. Preset
+    files are written under ``presets/``.
+    """
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+
+    if bundles:
+        (root / "bundles").mkdir(exist_ok=True)
+        for name, value in bundles.items():
+            folder = root / "bundles" / name
+            if isinstance(value, str):
+                write(folder / "__init__.py", "from kitup import Bundle\n\nBundle()\n")
+                write(folder / "tasks.py", value)
+            else:
+                for relative, text in value.items():
+                    write(folder / relative, text)
+
+    if vars is not None:
+        write(root / "vars" / "base.py", vars)
+    if var_files:
+        for stem, text in var_files.items():
+            write(root / "vars" / f"{stem}.py", text)
+    if preset:
+        for name, text in preset.items():
+            write(root / "presets" / name, text)
+
+    return root

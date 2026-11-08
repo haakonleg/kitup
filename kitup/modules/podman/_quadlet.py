@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ..._utils import file_ops
+from ..._utils.paths import expand_path
 from ..._utils.validation import require_mode, require_non_negative_int, require_scope, require_text
 from ...context import TaskContext
 from ...errors import TaskFailed
@@ -56,7 +57,7 @@ def quadlet(
 
     sudo = scope == "system"
     destination = (
-        Path(dest)
+        expand_path(dest, error=TaskFailed)
         if dest is not None
         else default_dir(
             scope,

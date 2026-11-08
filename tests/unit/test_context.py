@@ -3,9 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from kitup.errors import TaskFailed
+from kitup.errors import TaskFailed, VarsError
+from kitup.project import Project
 from kitup.registry import Bundle, side_effect
 from kitup.results import CallResult, Status, TaskResult
+from kitup.vars import Vars
 
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
 
@@ -131,6 +133,7 @@ def test_get_returns_default_and_raises_for_missing_key(tmp_path):
 def test_result_returns_stored_results_and_raises_for_unrun_tasks(tmp_path):
     context = make_context(tmp_path)
     task = task_for("Check")
+    context.begin_task(task)
     result = TaskResult(task=task, status=Status.CHANGED, value="done")
     context._store_result(task, result)
 
@@ -148,16 +151,28 @@ def test_result_returns_stored_results_and_raises_for_unrun_tasks(tmp_path):
 def test_results_returns_a_snapshot_that_survives_begin_task(tmp_path):
     context = make_context(tmp_path)
     task = task_for("Check")
+    context.begin_task(task)
     result = TaskResult(task=task, status=Status.OK)
     context._store_result(task, result)
 
     snapshot = context.results
-    assert snapshot == {task.func: result}
+    assert snapshot == {task.id: result}
     snapshot.clear()
     assert context.result(task.func) is result
 
     context.begin_task(task_for("Other"))
     assert context.result(task.func) is result
+
+
+def test_result_and_results_are_empty_without_a_current_bundle(tmp_path):
+    context = make_context(tmp_path)
+    task = task_for("Check")
+    result = TaskResult(task=task, status=Status.OK)
+    context._store_result(task, result)
+
+    assert context.results == {}
+    with pytest.raises(TaskFailed, match="no current bundle"):
+        context.result(task.func)
 
 
 def test_run_executes_and_forwards_options(tmp_path):
@@ -242,43 +257,115 @@ def test_bundle_is_the_owning_bundle_for_the_current_task(tmp_path):
     assert context.bundle_path == tmp_path
 
 
-def test_register_side_effect_queues_for_the_current_task(tmp_path):
+def test_context_exposes_root_project_and_vars(tmp_path):
+    project = Project(root=tmp_path)
+    values = Vars(VALUE=1)
+    context = make_context(tmp_path, project=project, vars=values)
+
+    assert context.root == tmp_path
+    assert context.project is project
+    assert context.vars.VALUE == 1
+    assert context.vars.get("MISSING", "fallback") == "fallback"
+
+    with pytest.raises(VarsError, match="missing var value: MISSING"):
+        context.vars.require("MISSING")
+
+
+def test_begin_task_switches_to_bundle_scoped_vars(tmp_path):
+    project_values = Vars(VALUE="project")
+    base = Bundle("base")
+    other = Bundle("other")
+    add_task(base, _noop, name="Base")
+    add_task(other, _noop, name="Other")
+    context = make_context(
+        tmp_path,
+        vars=project_values,
+        bundle_vars={base: Vars(VALUE="base")},
+    )
+
+    context.begin_task(base.tasks[0])
+    assert context.vars.VALUE == "base"
+
+    context.begin_task(other.tasks[0])
+    assert context.vars.VALUE == "project"
+
+
+def test_side_effect_queues_for_the_current_task(tmp_path):
     context = make_context(tmp_path)
     context.begin_task(task_for())
     effect = side_effect("Refresh")(lambda ctx: None)
 
-    context.register_side_effect(effect)
+    context.side_effect(effect)
 
     assert context._take_side_effects() == [effect]
 
 
-def test_register_side_effect_rejects_invalid_contexts(tmp_path):
+def test_side_effect_rejects_invalid_contexts(tmp_path):
     context = make_context(tmp_path)
     effect = side_effect("Refresh")(lambda ctx: None)
 
     with pytest.raises(TaskFailed, match="side effects can only be registered from a task"):
-        context.register_side_effect(effect)
+        context.side_effect(effect)
 
     context.begin_task(task_for(), is_side_effect=True)
     with pytest.raises(TaskFailed, match="side effects cannot register other side effects"):
-        context.register_side_effect(effect)
+        context.side_effect(effect)
 
     context.begin_task(task_for())
-    with pytest.raises(TaskFailed, match="register_side_effect expects a SideEffect"):
-        context.register_side_effect(lambda ctx: None)  # type: ignore[arg-type]
+    with pytest.raises(TaskFailed, match="side_effect expects a SideEffect"):
+        context.side_effect(lambda ctx: None)  # type: ignore[arg-type]
 
 
 def test_side_effect_queue_lifecycle(tmp_path):
     context = make_context(tmp_path)
     context.begin_task(task_for())
-    first = side_effect("First")(lambda ctx: None)
-    second = side_effect("Second", one_shot=False)(lambda ctx: None)
-    context.register_side_effect(first)
-    context.register_side_effect(second)
+
+    def first_effect(ctx):
+        pass
+
+    def second_effect(ctx):
+        pass
+
+    first = side_effect("First")(first_effect)
+    second = side_effect("Second", one_shot=False)(second_effect)
+    context.side_effect(first)
+    context.side_effect(second)
 
     assert context._take_side_effects() == [first, second]
     assert context._take_side_effects() == []
 
-    context.register_side_effect(first)
+    context.side_effect(first)
     context.begin_task(task_for("Other"))
     assert context._take_side_effects() == []
+
+
+def test_side_effect_rejects_duplicate_function_names(tmp_path):
+    context = make_context(tmp_path)
+    context.begin_task(task_for())
+
+    def refresh(ctx):
+        pass
+
+    first = side_effect("Refresh")(refresh)
+    second = side_effect("Refresh again")(refresh)
+
+    context.side_effect(first)
+    context.side_effect(first)
+
+    with pytest.raises(TaskFailed, match="duplicate side effect function name in bundle 'test': refresh"):
+        context.side_effect(second)
+
+
+def test_side_effect_rejects_task_function_name_collisions(tmp_path):
+    bundle = Bundle("test")
+
+    def shared(ctx):
+        pass
+
+    add_task(bundle, shared, name="Shared")
+    context = make_context(tmp_path)
+    context.begin_task(bundle.tasks[0])
+    effect = side_effect("Shared effect")(shared)
+
+    with pytest.raises(TaskFailed, match="collides with a task in bundle 'test'"):
+        context.side_effect(effect)

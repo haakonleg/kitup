@@ -17,7 +17,7 @@ IS_REPO = ["git", "-C", "{dest}", "rev-parse", "--show-toplevel"]
 @pytest.fixture(autouse=True)
 def git_available(monkeypatch):
     monkeypatch.setattr(
-        "kitup.modules.git.shutil.which",
+        "kitup._utils.executables.shutil.which",
         lambda name: "git" if name == "git" else None,
     )
 
@@ -529,7 +529,7 @@ def test_invalid_arguments_are_rejected(tmp_path):
 
 
 def test_missing_git_binary_fails(tmp_path, monkeypatch):
-    monkeypatch.setattr("kitup.modules.git.shutil.which", lambda name: None)
+    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: None)
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
 

@@ -65,14 +65,14 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
     elsewhere.mkdir()
 
     listed = run(
-        [str(ZIPAPP), "list", str(root / "kitup.py"), "--no-color"],
+        [str(ZIPAPP), "list", str(root), "--no-color"],
         cwd=elsewhere,
         check=False,
     )
     assert listed.returncode == 0
 
     dry_run = run(
-        [str(ZIPAPP), "apply", str(root / "kitup.py"), "--no-color", "--dry-run"],
+        [str(ZIPAPP), "apply", str(root), "--no-color", "--dry-run"],
         cwd=elsewhere,
         check=False,
     )
@@ -81,7 +81,7 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
     assert not rendered_path.exists()
 
     applied = run(
-        [str(ZIPAPP), "apply", str(root / "kitup.py"), "--no-color"],
+        [str(ZIPAPP), "apply", str(root), "--no-color"],
         cwd=elsewhere,
         check=False,
     )
@@ -91,3 +91,33 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
     assert rendered.startswith("name=zipapp\nhost=")
     assert rendered.endswith("\n")
     assert not Path(WORKER_PATH).exists()
+
+
+def test_zipapp_init_check_and_list(tmp_path: Path) -> None:
+    assert ZIPAPP.is_file(), f"prebuilt zipapp is missing: {ZIPAPP}"
+    root = tmp_path / "machine"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    initialized = run(
+        [str(ZIPAPP), "init", str(root), "--no-color"],
+        cwd=elsewhere,
+        check=False,
+    )
+    assert initialized.returncode == 0, initialized.stderr
+    assert (root / "bundles" / "example" / "tasks.py").is_file()
+
+    checked = run(
+        [str(ZIPAPP), "check", str(root), "--no-color"],
+        cwd=elsewhere,
+        check=False,
+    )
+    assert checked.returncode == 0, checked.stderr
+
+    listed = run(
+        [str(ZIPAPP), "list", str(root), "--no-color"],
+        cwd=elsewhere,
+        check=False,
+    )
+    assert listed.returncode == 0, listed.stderr
+    assert "bundle: example" in listed.stdout

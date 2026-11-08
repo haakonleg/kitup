@@ -1,6 +1,6 @@
 """Bundle dependency resolution."""
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from .errors import BundleError, ResolutionError
@@ -14,18 +14,24 @@ class BundlePlan:
     bundles: tuple[Bundle, ...]
 
 
-def resolve(roots: Sequence[Bundle]) -> BundlePlan:
-    """Resolve a root bundle sequence into a dependency-first run plan."""
+def resolve(roots: Sequence[Bundle], *, registry: Mapping[str, Bundle] | None = None) -> BundlePlan:
+    """Resolve a root bundle sequence into a dependency-first run plan.
+
+    String dependencies are looked up in ``registry``, which normally contains
+    every bundle discovered in the project.
+    """
+    known: dict[str, Bundle] = dict(registry or {})
     ordered: list[Bundle] = []
-    by_name: dict[str, Bundle] = {}
+    by_id: dict[str, Bundle] = {}
     done: set[int] = set()
     active: list[Bundle] = []
 
     def register(bundle: Bundle) -> None:
-        existing = by_name.get(bundle.name)
+        existing = by_id.get(bundle.id)
         if existing is not None and existing is not bundle:
-            raise BundleError(f"duplicate bundle name: {bundle.name}")
-        by_name[bundle.name] = bundle
+            raise BundleError(f"duplicate bundle id: {bundle.id}")
+        by_id[bundle.id] = bundle
+        known.setdefault(bundle.id, bundle)
 
     def visit(bundle: Bundle) -> None:
         register(bundle)
@@ -33,11 +39,11 @@ def resolve(roots: Sequence[Bundle]) -> BundlePlan:
             return
         for index, active_bundle in enumerate(active):
             if active_bundle is bundle:
-                cycle = " -> ".join([entry.name for entry in (*active[index:], bundle)])
+                cycle = " -> ".join([entry.id for entry in (*active[index:], bundle)])
                 raise ResolutionError(f"dependency cycle: {cycle}")
 
         active.append(bundle)
-        for dependency in bundle.depends_on:
+        for dependency in _resolved_dependencies(bundle, known):
             visit(dependency)
         active.pop()
 
@@ -55,6 +61,7 @@ def filter_plan(
     *,
     include: Collection[str] | None = None,
     exclude: Collection[str] | None = None,
+    registry: Mapping[str, Bundle] | None = None,
 ) -> BundlePlan:
     """Return a plan restricted to the selected bundles and their dependencies.
 
@@ -65,13 +72,18 @@ def filter_plan(
     if include is None and not exclude:
         return plan
 
-    by_name = {bundle.name: bundle for bundle in plan.bundles}
+    by_id = {bundle.id: bundle for bundle in plan.bundles}
+    if registry is not None:
+        for bundle_id, bundle in registry.items():
+            by_id.setdefault(bundle_id, bundle)
+
     included = frozenset(include or ())
     excluded = frozenset(exclude or ())
 
-    unknown = sorted((included | excluded) - set(by_name))
+    unknown = sorted((included | excluded) - set(by_id))
     if unknown:
-        raise ResolutionError(f"unknown bundle: {', '.join(unknown)}")
+        available = ", ".join(sorted(by_id)) or "none"
+        raise ResolutionError(f"unknown bundle: {', '.join(unknown)} (available: {available})")
 
     overlap = included & excluded
     if overlap:
@@ -81,29 +93,43 @@ def filter_plan(
         keep = set(plan.bundles)
     else:
         keep = set()
-        for name in included:
-            bundle = by_name[name]
+        for bundle_id in included:
+            bundle = by_id[bundle_id]
             keep.add(bundle)
-            keep.update(_transitive_dependencies(bundle))
+            keep.update(_transitive_dependencies(bundle, by_id))
 
-    excluded_bundles = {by_name[name] for name in excluded}
+    excluded_bundles = {by_id[bundle_id] for bundle_id in excluded}
     keep -= excluded_bundles
     for bundle in excluded_bundles:
-        dependents = sorted(kept.name for kept in keep if bundle in _transitive_dependencies(kept))
+        dependents = sorted(kept.id for kept in keep if bundle in _transitive_dependencies(kept, by_id))
         if dependents:
-            required_by = ", ".join(repr(name) for name in dependents)
-            raise ResolutionError(f"cannot exclude bundle {bundle.name!r}: required by {required_by}")
+            required_by = ", ".join(repr(bundle_id) for bundle_id in dependents)
+            raise ResolutionError(f"cannot exclude bundle {bundle.id!r}: required by {required_by}")
 
     return BundlePlan(tuple(bundle for bundle in plan.bundles if bundle in keep))
 
 
-def _transitive_dependencies(bundle: Bundle) -> set[Bundle]:
+def _transitive_dependencies(bundle: Bundle, by_id: Mapping[str, Bundle]) -> set[Bundle]:
     dependencies: set[Bundle] = set()
-    stack = list(bundle.depends_on)
+    stack = list(_resolved_dependencies(bundle, by_id))
     while stack:
         dependency = stack.pop()
         if dependency in dependencies:
             continue
         dependencies.add(dependency)
-        stack.extend(dependency.depends_on)
+        stack.extend(_resolved_dependencies(dependency, by_id))
     return dependencies
+
+
+def _resolved_dependencies(bundle: Bundle, by_id: Mapping[str, Bundle]) -> tuple[Bundle, ...]:
+    resolved: list[Bundle] = []
+    for dependency in bundle.depends_on:
+        if isinstance(dependency, Bundle):
+            resolved.append(dependency)
+            continue
+        target = by_id.get(dependency)
+        if target is None:
+            available = ", ".join(sorted(by_id)) or "none"
+            raise ResolutionError(f"unknown bundle dependency {dependency!r} in {bundle.id!r} (available: {available})")
+        resolved.append(target)
+    return tuple(resolved)

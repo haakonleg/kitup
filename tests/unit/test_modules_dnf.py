@@ -4,14 +4,13 @@ import pytest
 
 from kitup.errors import TaskFailed
 from kitup.modules import dnf
-from kitup.registry import Bundle
 
 from .helpers import (
     FakeCommandRunner,
     FakeSudo,
     argvs,
     call_data,
-    config_context,
+    local_sudo_context,
     make_context,
     privileged_context,
     response,
@@ -21,17 +20,9 @@ from .helpers import (
 @pytest.fixture(autouse=True)
 def dnf5(monkeypatch):
     monkeypatch.setattr(
-        "kitup.modules.dnf.shutil.which",
+        "kitup._utils.executables.shutil.which",
         lambda name: "dnf5" if name == "dnf5" else None,
     )
-
-
-def bundle_context(tmp_path, bundle_dir, command):
-    bundle = Bundle("base", path=bundle_dir)
-    bundle.task("Task")(lambda ctx: None)
-    ctx = make_context(tmp_path, command=command)
-    ctx.begin_task(bundle.tasks[0])
-    return ctx
 
 
 def test_read_only_probes_do_not_request_sudo(tmp_path):
@@ -397,22 +388,17 @@ def test_rpm_release_scenarios(tmp_path):
     assert call_data(result) == {"installed": ["tool-release"]}
 
 
-def test_rpm_release_resolves_bundle_relative_source(tmp_path):
+def test_rpm_release_does_not_use_bundle_file_discovery(tmp_path):
     bundle_dir = tmp_path / "bundles" / "base"
     (bundle_dir / "files").mkdir(parents=True)
     (bundle_dir / "files" / "tool-release.rpm").write_text("rpm")
     command = FakeCommandRunner()
     command.responses = [response(0, "tool-release\n"), response(1)]
-    ctx = bundle_context(tmp_path, bundle_dir, command)
+    ctx = make_context(tmp_path, command=command)
 
     dnf.rpm(ctx, "tool-release.rpm")
 
-    assert command.calls[2][0] == [
-        "dnf5",
-        "install",
-        "-y",
-        str(bundle_dir / "files" / "tool-release.rpm"),
-    ]
+    assert command.calls[2][0] == ["dnf5", "install", "-y", "tool-release.rpm"]
 
 
 def test_rpm_release_accepts_local_path(tmp_path):
@@ -484,7 +470,7 @@ def test_repository_present_scenarios(tmp_path):
     assert ctx.changes == []
 
 
-def test_repository_resolves_bundle_relative_source(tmp_path):
+def test_repository_does_not_use_bundle_file_discovery(tmp_path):
     reposdir = tmp_path / "repos.d"
     reposdir.mkdir()
     bundle_dir = tmp_path / "bundles" / "base"
@@ -492,16 +478,15 @@ def test_repository_resolves_bundle_relative_source(tmp_path):
     (bundle_dir / "files" / "tool.repo").write_text("[tool]\n")
     command = FakeCommandRunner()
     command.responses = [response(0, f"reposdir = {reposdir}\n"), response(0)]
-    ctx = bundle_context(tmp_path, bundle_dir, command)
+    ctx = make_context(tmp_path, command=command)
 
     dnf.repository(ctx, "tool.repo")
 
-    source = bundle_dir / "files" / "tool.repo"
     assert command.calls[1][0] == [
         "dnf5",
         "config-manager",
         "addrepo",
-        f"--from-repofile={source}",
+        "--from-repofile=tool.repo",
         "--save-filename=tool.repo",
     ]
 
@@ -531,7 +516,7 @@ def test_repository_absent_scenarios(tmp_path):
 def test_config_sets_option_and_is_idempotent(tmp_path):
     path = tmp_path / "dnf.conf"
     path.write_text("[main]\ninstallonly_limit = 3\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = dnf.config(ctx, "best", value=True, path=path)
 
@@ -557,7 +542,7 @@ def test_config_sets_option_and_is_idempotent(tmp_path):
 def test_config_replaces_existing_option_value(tmp_path):
     path = tmp_path / "dnf.conf"
     path.write_text("[main]\nbest = 1\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = dnf.config(ctx, "best", value=True, path=path)
 
@@ -572,7 +557,7 @@ def test_config_replaces_existing_option_value(tmp_path):
 def test_config_absent_removes_option_and_is_idempotent(tmp_path):
     path = tmp_path / "dnf.conf"
     path.write_text("[main]\nbest = True\nkeep = 1\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = dnf.config(ctx, "best", state="absent", path=path)
 
@@ -596,7 +581,7 @@ def test_config_absent_removes_option_and_is_idempotent(tmp_path):
 
 def test_config_creates_a_missing_file(tmp_path):
     path = tmp_path / "dnf.conf"
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = dnf.config(ctx, "gpgcheck", value=True, path=path)
 
@@ -608,7 +593,7 @@ def test_config_creates_a_missing_file(tmp_path):
 def test_config_edits_a_custom_section(tmp_path):
     path = tmp_path / "dnf.conf"
     path.write_text("[main]\na = 1\n[other]\nb = 2\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = dnf.config(ctx, "c", "3", section="other", path=path)
 
@@ -619,7 +604,7 @@ def test_config_edits_a_custom_section(tmp_path):
 def test_config_normalizes_typed_values(tmp_path):
     path = tmp_path / "dnf.conf"
     path.write_text("[main]\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     dnf.config(ctx, "installonly_limit", 5, path=path)
     dnf.config(ctx, "excludepkgs", ["foo", "bar", "foo"], path=path)
@@ -634,7 +619,7 @@ def test_config_normalizes_typed_values(tmp_path):
 def test_config_dry_run_reports_without_writing(tmp_path):
     path = tmp_path / "dnf.conf"
     path.write_text("[main]\nbest = False\n")
-    ctx = config_context(tmp_path, dry_run=True)
+    ctx = local_sudo_context(tmp_path, dry_run=True)
 
     result = dnf.config(ctx, "best", value=True, path=path)
 
@@ -645,7 +630,7 @@ def test_config_dry_run_reports_without_writing(tmp_path):
 
 
 def test_config_validates_arguments_before_touching_the_file(tmp_path):
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
     missing = tmp_path / "missing.conf"
 
     with pytest.raises(TaskFailed, match="requires a value"):
@@ -676,7 +661,7 @@ def test_config_validates_arguments_before_touching_the_file(tmp_path):
 def test_config_defaults_to_etc_dnf_conf(tmp_path, monkeypatch):
     target = tmp_path / "dnf.conf"
     monkeypatch.setattr(dnf, "_DEFAULT_CONFIG_PATH", target)
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = dnf.config(ctx, "best", value=True)
 
@@ -714,7 +699,7 @@ def test_config_user_scoped_file_without_sudo(tmp_path):
 
 
 def test_config_rejects_directories_symlinks_and_non_utf8_files(tmp_path):
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="directory"):
         dnf.config(ctx, "best", "1", path=tmp_path)

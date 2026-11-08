@@ -3,18 +3,20 @@
 import http.server
 import subprocess
 import threading
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from io import StringIO
-from types import SimpleNamespace
+from pathlib import Path
 from typing import Any
 
 from kitup.commands import CommandRunner
 from kitup.context import TaskContext
 from kitup.errors import TaskFailed
 from kitup.output import Output
+from kitup.project import Project
 from kitup.registry import Bundle
 from kitup.results import CallResult
+from kitup.vars import Vars
 
 
 def call_data(result: CallResult) -> dict[str, Any]:
@@ -134,19 +136,25 @@ def make_context(
     verbose: bool = False,
     command: FakeCommandRunner | None = None,
     sudo: FakeSudo | None = None,
-    config: SimpleNamespace | None = None,
+    root: Path | None = None,
+    project: Project | None = None,
+    vars: Vars | None = None,
     facts: dict[str, Any] | None = None,
+    bundle_vars: Mapping[Bundle, Vars] | None = None,
     output=None,
 ) -> TaskContext:
+    root = tmp_path if root is None else root
     return TaskContext(
         dry_run=dry_run,
         diff=diff,
         verbose=verbose,
-        config_dir=tmp_path,
-        config=config or SimpleNamespace(),
+        root=root,
+        project=project or Project(root=root),
+        vars=vars or Vars(),
         facts=facts or {},
         sudo=sudo or FakeSudo(),  # type: ignore[arg-type]
         command=command or FakeCommandRunner(),  # type: ignore[arg-type]
+        bundle_vars=bundle_vars,
         output=output,
     )
 
@@ -157,7 +165,7 @@ def privileged_context(tmp_path) -> TaskContext:
     return make_context(tmp_path, command=CommandRunner(sudo), sudo=sudo, output=plain_output())
 
 
-def config_context(tmp_path, **kwargs) -> TaskContext:
+def local_sudo_context(tmp_path, **kwargs) -> TaskContext:
     """Return a context where ``sudo=True`` file operations run locally in tests."""
     return make_context(tmp_path, sudo=FakeSudo(is_root=True), **kwargs)
 
@@ -169,4 +177,6 @@ def add_task(
     name: str | None = None,
     tags: Sequence[str] = (),
 ) -> Callable[[TaskContext], Any]:
-    return bundle.task(name or func.__name__, tags=tags)(func)
+    if name is None:
+        return bundle.task(tags=tags)(func)
+    return bundle.task(name, tags=tags)(func)

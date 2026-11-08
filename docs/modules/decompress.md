@@ -15,9 +15,8 @@ Extract an archive into the directory `dest`.
 
 ### Parameters
 
-- `src` — archive source. A bare filename resolves to the bundle's `files/`
-  directory, other relative paths resolve against the bundle directory, and
-  absolute paths are used as-is.
+- `src` — archive source. Relative paths resolve like [`files.copy()`](files.md).
+  Absolute paths are used as-is. `~` is expanded.
 - `dest` — destination directory. It is created when missing; its parent must
   exist.
 - `creates` — path, relative to `dest` unless absolute. When it exists the

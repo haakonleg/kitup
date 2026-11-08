@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Final
 
 from .._utils import file_ops, ini
+from .._utils.paths import expand_path
 from .._utils.validation import State, require_state, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
@@ -80,7 +81,7 @@ def _normalize_name(name: str) -> str:
 def _resolve_file(file: str | Path | None) -> Path | None:
     if file is None:
         return None
-    target = Path(file)
+    target = expand_path(file, error=TaskFailed)
     if not target.is_absolute():
         raise TaskFailed("sysctl file must be an absolute path")
     return target

@@ -467,7 +467,7 @@ def test_container_options_and_command_string(tmp_path: Path) -> None:
         "container",
         "inspect",
         "--format",
-        "{{json .Config.Env}}",
+        "{{json .Vars.Env}}",
         name,
     ).stdout
     assert "FOO=bar" in environment
@@ -475,7 +475,7 @@ def test_container_options_and_command_string(tmp_path: Path) -> None:
         "container",
         "inspect",
         "--format",
-        "{{json .Config.Cmd}}",
+        "{{json .Vars.Cmd}}",
         name,
     ).stdout
     assert "/init" in command
@@ -499,7 +499,7 @@ def test_container_options_and_command_string(tmp_path: Path) -> None:
         "container",
         "inspect",
         "--format",
-        "{{json .Config.Cmd}}",
+        "{{json .Vars.Cmd}}",
         name,
     ).stdout
     assert "exit" in command

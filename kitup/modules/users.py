@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from .._utils.paths import expand_path
 from .._utils.validation import (
     State,
     require_bool,
@@ -518,7 +519,7 @@ def _optional_absolute_path(value: str | Path | None, label: str) -> str | None:
     if value is None:
         return None
     require_path(value, label)
-    path = Path(value)
+    path = expand_path(value, error=TaskFailed)
     if not path.is_absolute():
         raise TaskFailed(f"{label} must be an absolute path: {value}")
     text = str(path)

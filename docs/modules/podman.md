@@ -5,7 +5,7 @@ systemd or Quadlet units.
 
 ```python
 from kitup.modules import podman
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `image(ctx, name, *, source=None, state="present", pull="missing", platform=None, force=False, timeout=600, sudo=False)`
@@ -50,9 +50,8 @@ Build an image from a context directory.
 
 ### Parameters
 
-- `context` — build context. A bare name resolves under the bundle's `files/`
-  directory; other relative paths resolve against the bundle directory.
-  Absolute paths are used as-is.
+- `context` — build context. Relative paths resolve like [`files.copy()`](files.md).
+  Absolute paths are used as-is, and `~` is expanded.
 - `tag` — image name to create.
 - `containerfile` — optional Containerfile path, resolved like `context` and
   independently of it.

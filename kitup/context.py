@@ -5,17 +5,20 @@ import subprocess
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Final, Never, cast, overload
 
 from ._privileged.client import PrivilegedWorker
+from ._utils.paths import expand_path
 from ._utils.validation import require_text
 from .commands import CommandRunner
 from .errors import SkipTask, TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
+from .project import FILES_DIR, Project
 from .registry import Bundle, SideEffect, Task
 from .results import CallResult, TaskResult
+from .runtime import BundleState, RunState
+from .vars import Vars
 
 _MISSING: Final = object()
 
@@ -25,8 +28,8 @@ class TaskContext:
 
     One context is reused for the whole run so ``memo`` is a per-run cache and
     ``results`` retains task outcomes. ``begin_task`` resets the task-specific
-    parts before each task executes. ``config_dir`` is the directory of the
-    top-level profile.
+    parts before each task executes. ``root`` is the project root and
+    ``project`` describes the discovered project.
     """
 
     def __init__(
@@ -35,18 +38,23 @@ class TaskContext:
         dry_run: bool,
         diff: bool,
         verbose: bool,
-        config_dir: Path,
-        config: SimpleNamespace,
+        root: Path,
+        project: Project,
+        vars: Vars,
         facts: Mapping[str, Any],
         sudo: PrivilegeManager,
         command: CommandRunner,
+        bundle_vars: Mapping[Bundle, Vars] | None = None,
         output: Output | None = None,
     ) -> None:
         self.dry_run = dry_run
         self.diff = diff
         self.verbose = verbose
-        self.config_dir = config_dir
-        self.config = config
+        self.root = root
+        self.project = project
+        self._project_vars = vars
+        self._bundle_vars = dict(bundle_vars or {})
+        self.vars = vars
         self.facts = facts
         self.sudo = sudo
         self.command = command
@@ -55,11 +63,10 @@ class TaskContext:
         self._calls: list[CallResult] = []
         self._notes: list[str] = []
         self._memo: dict[str, Any] = {}
-        self._results: dict[Callable[..., Any], TaskResult] = {}
+        self._run_state = RunState()
         self._task_name = ""
         self._bundle: Bundle | None = None
         self._bundle_path: Path | None = None
-        self._pending_side_effects: list[SideEffect] = []
         self._task: Task | None = None
         self._running_side_effect = False
         self._sudo_ready = False
@@ -81,17 +88,23 @@ class TaskContext:
         return list(self._notes)
 
     @property
-    def results(self) -> dict[Callable[..., Any], TaskResult]:
-        """Return a snapshot of results keyed by task function."""
-        return dict(self._results)
+    def results(self) -> dict[str, TaskResult]:
+        """Return a snapshot of the current bundle's results keyed by task id."""
+        state = self._run_state.current
+        if state is None:
+            return {}
+        return dict(state.results)
 
     def result(self, task: Callable[..., Any]) -> TaskResult:
-        """Return the result of a task that already ran."""
-        result = self._results.get(task)
-        if result is None:
-            name = getattr(task, "__name__", repr(task))
-            raise TaskFailed(f"no result for task: {name}")
-        return result
+        """Return the result of a task that already ran in the current bundle."""
+        state = self._run_state.current
+        if state is None:
+            raise TaskFailed("no current bundle")
+        for result in state.results.values():
+            if result.task.func is task:
+                return result
+        name = getattr(task, "__name__", repr(task))
+        raise TaskFailed(f"no result for task: {name}")
 
     @property
     def bundle(self) -> Bundle:
@@ -106,51 +119,78 @@ class TaskContext:
         return self._bundle_path
 
     def resolve_source(self, path: str | Path) -> Path:
-        """Resolve a source path against the current bundle.
+        """Resolve a source path against the project and current bundle.
 
-        Absolute paths are returned unchanged. A bare name resolves under the
-        bundle's ``files`` directory, while other relative paths resolve
-        against the bundle directory.
+        Absolute paths are returned unchanged. Relative paths are checked first
+        under ``files/<bundle id>/`` and then under the project's ``files/``
+        directory. A missing overlay falls back to the bundle: a bare name to
+        the bundle's ``files`` directory, and other relative paths to the
+        bundle directory.
         """
-        source = Path(path)
+        source = expand_path(path, error=TaskFailed)
         if source.is_absolute():
             return source
         if self._bundle_path is None:
             raise TaskFailed(f"cannot resolve relative source path: {source}")
+        project_files = self.root / FILES_DIR
+        for overlay in (project_files / self.bundle.id, project_files):
+            candidate = overlay / source
+            if candidate.exists():
+                return candidate
         if len(source.parts) == 1:
-            return self._bundle_path / "files" / source
+            return self._bundle_path / FILES_DIR / source
         return self._bundle_path / source
 
     def begin_task(self, task: Task, *, is_side_effect: bool = False) -> None:
-        """Reset task-scoped state while retaining per-run state."""
+        """Reset task-scoped state and enter the task's bundle."""
         self._calls.clear()
         self._notes.clear()
         self._task_name = task.name
         self._bundle = task.bundle
         self._bundle_path = task.bundle_path
         self._task = task
-        self._pending_side_effects.clear()
+        self.vars = self._bundle_vars.get(task.bundle, self._project_vars)
+        state = self._run_state.for_bundle(task.bundle)
+        state.pending_effects.clear()
+        self._run_state.current = state
         self._running_side_effect = is_side_effect
 
-    def register_side_effect(self, side_effect: SideEffect) -> None:
+    def side_effect(self, effect: SideEffect) -> None:
         """Queue a side effect to run if this task changed."""
-        if not isinstance(side_effect, SideEffect):
-            raise TaskFailed("register_side_effect expects a SideEffect")
+        if not isinstance(effect, SideEffect):
+            raise TaskFailed("side_effect expects a SideEffect")
         if self._task is None:
             raise TaskFailed("side effects can only be registered from a task")
         if self._running_side_effect:
             raise TaskFailed("side effects cannot register other side effects")
-        self._pending_side_effects.append(side_effect)
+        state = self._run_state.current
+        if state is None:
+            raise TaskFailed("side effects can only be registered from a task")
+        self._validate_side_effect(state, effect)
+        state.side_effects[effect.func.__name__] = effect
+        state.pending_effects.append(effect)
+
+    def _validate_side_effect(self, state: BundleState, side_effect: SideEffect) -> None:
+        func_name = side_effect.func.__name__
+        if any(task.func.__name__ == func_name for task in state.bundle.tasks):
+            raise TaskFailed(f"side effect function {func_name!r} collides with a task in bundle {state.bundle.id!r}")
+        existing = state.side_effects.get(func_name)
+        if existing is not None and existing is not side_effect:
+            raise TaskFailed(f"duplicate side effect function name in bundle {state.bundle.id!r}: {func_name}")
 
     def _take_side_effects(self) -> list[SideEffect]:
         """Return and clear the side effects registered by the current task."""
-        effects = self._pending_side_effects
-        self._pending_side_effects = []
+        state = self._run_state.current
+        if state is None:
+            return []
+        effects = list(state.pending_effects)
+        state.pending_effects.clear()
         return effects
 
     def _store_result(self, task: Task, result: TaskResult) -> None:
-        """Store a task result for later tasks."""
-        self._results[task.func] = result
+        """Store a task result in its bundle's runtime state."""
+        state = self._run_state.for_bundle(task.bundle)
+        state.results[task.id] = result
 
     def ensure_sudo(self, reason: str | None = None) -> None:
         """Revalidate sudo, prompting only when cached credentials expired."""

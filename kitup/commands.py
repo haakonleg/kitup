@@ -6,6 +6,7 @@ import subprocess
 import time
 from collections.abc import Mapping, Sequence
 
+from ._utils.paths import expand_path
 from ._utils.validation import normalize_strings
 from .errors import TaskFailed
 from .output import Output
@@ -51,11 +52,13 @@ class CommandRunner:
         if env is not None:
             command_env = {**os.environ, **env}
 
+        working_dir = None if cwd is None else expand_path(os.fspath(cwd), error=TaskFailed)
+
         started = time.monotonic()
         try:
             process = subprocess.Popen(
                 command,
-                cwd=cwd,
+                cwd=working_dir,
                 env=command_env,
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,

@@ -5,7 +5,7 @@ files. Templates are ordinary bundle resources, and rendering is idempotent.
 
 ```python
 from kitup.modules import template
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `file(ctx, src, dest, *, variables=None, mode=None, owner=None, group=None, sudo=False)`
@@ -14,9 +14,8 @@ Render the template `src` and write the result to `dest`.
 
 ### Parameters
 
-- `src` resolves like [`files.copy()`](files.md): a bare filename comes from
-  the bundle's `files/` directory, other relative paths from the bundle
-  directory, and absolute paths are used as-is.
+- `src` resolves like [`files.copy()`](files.md). Absolute paths are used as-is.
+  `~` is expanded.
 - `variables` — an optional mapping of extra values exposed to the template.
 - `dest` — destination file path. The parent directory must already exist; use
   [`files.directory()`](files.md) first.
@@ -44,7 +43,7 @@ def harden_ssh(ctx):
 With `files/sshd.conf.j2` in the bundle:
 
 ```jinja
-Port {{ config.SSH_PORT }}
+Port {{ vars.SSH_PORT }}
 PermitRootLogin no
 PasswordAuthentication no
 ```
@@ -53,8 +52,10 @@ PasswordAuthentication no
 
 Templates receive three things:
 
-- `config` — the merged configuration values, available as attributes or
-  items: `{{ config.SSH_PORT }}` or `{{ config["SSH_PORT"] }}`.
+- `vars` — the merged variable values for the current task, including any
+  bundle-scoped values, available as attributes or items:
+  `{{ vars.SSH_PORT }}` or `{{ vars["SSH_PORT"] }}`. Nested dictionaries work
+  the same way: `{{ vars.SETTINGS.theme.name }}`.
 - `facts` — the host facts snapshot: `{{ facts.hostname }}`.
 - every key from `variables`, at the top level: `{{ workers }}`.
 
@@ -74,17 +75,17 @@ def write_environment(ctx):
 ```jinja
 WORKERS={{ workers }}
 HOSTNAME={{ facts.hostname }}
-PACKAGES={{ config.PACKAGES | join(",") }}
+PACKAGES={{ vars.PACKAGES | join(",") }}
 ```
 
-`config` and `facts` are reserved and cannot be replaced through `variables`.
+`vars` and `facts` are reserved and cannot be replaced through `variables`.
 Variable names must be valid identifiers.
 
 Undefined variables are errors rather than empty strings. Use Jinja's
 `default` filter or `is defined` when a value is genuinely optional:
 
 ```jinja
-LOG_LEVEL={{ config.LOG_LEVEL | default("info") }}
+LOG_LEVEL={{ vars.LOG_LEVEL | default("info") }}
 ```
 
 ## Rendering behavior
@@ -92,7 +93,7 @@ LOG_LEVEL={{ config.LOG_LEVEL | default("info") }}
 - Templates use Jinja2's default syntax. Autoescaping is disabled.
 - A trailing newline in the template is preserved.
 - `include`, `extends`, and custom loaders are not supported.
-- Templates are trusted content, like profiles. No sandbox is used.
+- Templates are trusted content, like bundle code. No sandbox is used.
 
 ## Idempotency
 

@@ -5,9 +5,11 @@ import pwd
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from .._utils.paths import expand_path
 from .._utils.timing import timed
 from .._utils.validation import normalize_strings, require_collection, require_path, require_text
 from ..context import TaskContext
+from ..errors import TaskFailed
 from ..results import CallResult
 
 
@@ -62,7 +64,7 @@ def shell(
     require_text(cmd, "shell command")
     if shell is not None:
         require_path(shell, "shell")
-    executable = str(shell) if shell is not None else _default_shell()
+    executable = str(expand_path(shell, error=TaskFailed)) if shell is not None else _default_shell()
     unless_command = None
     if unless is not None:
         require_text(unless, "shell unless")
@@ -107,11 +109,12 @@ def _run(
     if cwd is not None:
         require_path(cwd, "cwd")
 
+    cwd_path = expand_path(cwd, error=TaskFailed) if cwd is not None else None
     cmd = [str(part) for part in cmd]
     if creates is not None:
-        marker = Path(creates)
-        if cwd is not None and not marker.is_absolute():
-            marker = Path(cwd) / marker
+        marker = expand_path(creates, error=TaskFailed)
+        if cwd_path is not None and not marker.is_absolute():
+            marker = cwd_path / marker
         if marker.exists():
             return ctx.changed(
                 action=action,
@@ -121,7 +124,7 @@ def _run(
             )
 
     if unless is not None:
-        probe = ctx.probe(unless, cwd=cwd, env=env, sudo=sudo, timeout=timeout)
+        probe = ctx.probe(unless, cwd=cwd_path, env=env, sudo=sudo, timeout=timeout)
         if probe.returncode == 0:
             return ctx.changed(
                 action=action,
@@ -144,7 +147,7 @@ def _run(
     with timed() as timing:
         process = ctx.run(
             cmd,
-            cwd=cwd,
+            cwd=cwd_path,
             env=env,
             sudo=sudo,
             timeout=timeout,

@@ -5,7 +5,7 @@ persist them in a sysctl configuration file.
 
 ```python
 from kitup.modules import sysctl
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `key(ctx, name, value=None, *, state="present", file=None)`

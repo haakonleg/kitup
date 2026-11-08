@@ -4,7 +4,7 @@ Manage Flatpak remote repositories, applications, and runtimes.
 
 ```python
 from kitup.modules import flatpak
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `remote(ctx, name, url=None, *, state="present", scope="system", gpg_verify=True)`

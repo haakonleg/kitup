@@ -1,10 +1,11 @@
 """Git repository checkout management."""
 
 import re
-import shutil
 from pathlib import Path
 from typing import Final
 
+from .._utils.executables import require_command
+from .._utils.paths import expand_path
 from .._utils.validation import require_path, require_success, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
@@ -41,8 +42,8 @@ def repo(
         raise TaskFailed("git version must not start with '-'")
     _require_depth(depth)
 
-    git = _git(ctx)
-    path = Path(dest)
+    git = require_command(ctx, "git")
+    path = expand_path(dest, error=TaskFailed)
     if path.exists() and not path.is_dir():
         raise TaskFailed(f"git destination exists and is not a directory: {dest}")
     if not _is_repo(ctx, git, str(path), path):
@@ -145,13 +146,6 @@ def _reconcile(
     if _head(ctx, git, dest) != desired:
         raise TaskFailed(f"could not update {dest} to {desired}")
     return CallResult(action="git.repo", changed=True, summary="; ".join(summaries), **data)
-
-
-def _git(ctx: TaskContext) -> str:
-    command = ctx.memo("git-command", lambda: shutil.which("git"))
-    if command is None:
-        raise TaskFailed("git is required but was not found")
-    return command
 
 
 def _is_repo(ctx: TaskContext, git: str, dest: str, path: Path) -> bool:

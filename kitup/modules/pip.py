@@ -10,6 +10,7 @@ from typing import Final, Literal
 
 from .._utils import file_ops
 from .._utils import ini as ini_ops
+from .._utils.paths import expand_path
 from .._utils.pep508 import dist_name_of, normalize_dist_name, parse_requirement
 from .._utils.validation import (
     State,
@@ -390,8 +391,9 @@ def _python_bin(ctx: TaskContext, python: str | None) -> str:
                 if found is not None:
                     return found
             return None
-        if os.sep in python or (os.altsep is not None and os.altsep in python):
-            return python if Path(python).exists() else None
+        if os.sep in python or (os.altsep is not None and os.altsep in python) or python.startswith("~"):
+            expanded = expand_path(python, error=TaskFailed)
+            return str(expanded) if expanded.exists() else None
         return shutil.which(python)
 
     resolved = ctx.memo(f"pip-python:{python}", load)
@@ -406,7 +408,7 @@ def _normalize_venv(venv: str | Path | None) -> Path | None:
     if venv is None:
         return None
     require_path(venv, "venv")
-    return Path(venv).expanduser()
+    return expand_path(venv, error=TaskFailed)
 
 
 def _prepare_venv(
@@ -479,19 +481,19 @@ def _config_target(
     """Resolve the pip config file to edit for the given scope."""
     if path is not None:
         require_path(path, "config path")
-        return Path(path).expanduser()
+        return expand_path(path, error=TaskFailed)
     if scope == "global":
         return _GLOBAL_CONFIG_PATH
     if scope == "user":
         if ctx.sudo.is_root:
             raise TaskFailed("user-scoped pip config cannot run as root")
         xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "")
-        base = Path(xdg_config_home).expanduser() if xdg_config_home else Path("~/.config").expanduser()
+        base = expand_path(xdg_config_home, error=TaskFailed) if xdg_config_home else Path.home() / ".config"
         return base / "pip" / "pip.conf"
     if venv is None:
         raise TaskFailed("site scope requires a venv")
     require_path(venv, "venv")
-    venv_path = Path(venv).expanduser()
+    venv_path = expand_path(venv, error=TaskFailed)
     if not _is_venv(ctx, venv_path, sudo=sudo):
         raise TaskFailed(f"site scope requires an existing virtualenv: {venv_path}")
     return venv_path / "pip.conf"

@@ -43,9 +43,9 @@ refused.
 
 ### Parameters
 
-- `src` — source file. A bare filename such as `"example.conf"` resolves to the
-  bundle's `files/example.conf`; other relative paths resolve against the bundle
-  directory; absolute paths are used as-is.
+- `src` — source file. Relative paths use the project and bundle lookup described
+  in [Projects](../project.md#resources). Absolute paths are used as-is. `~` is
+  expanded.
 - `dest` — destination path. If it ends with `/`, it is treated as a directory
   and the source filename is appended. The parent directory must already exist.
 - `mode`, `owner`, and `group` override the destination metadata. `owner` and

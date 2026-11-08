@@ -4,6 +4,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from ..._utils import file_ops
+from ..._utils.paths import expand_path
 from ..._utils.validation import (
     require_bool,
     require_choice,
@@ -72,7 +73,9 @@ def generate_systemd(
 
     sudo = scope == "system"
     destination = (
-        Path(dest) if dest is not None else default_dir(scope, "/etc/systemd/system", Path(".config/systemd/user"))
+        expand_path(dest, error=TaskFailed)
+        if dest is not None
+        else default_dir(scope, "/etc/systemd/system", Path(".config/systemd/user"))
     )
     prefix = container_prefix or "container"
     separator_value = separator or "-"

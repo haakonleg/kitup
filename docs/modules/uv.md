@@ -4,7 +4,7 @@ Manage uv projects, per-user CLI tools, and uv configuration files with uv's nat
 
 ```python
 from kitup.modules import uv
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `dependencies(ctx, names, *, project, state="present", group=None, python=None, extra_args=None)`

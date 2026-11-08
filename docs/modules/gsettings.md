@@ -4,7 +4,7 @@ Manage GNOME settings through `gsettings`.
 
 ```python
 from kitup.modules import gsettings
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `key(ctx, schema, key, value=None, *, state="present")`

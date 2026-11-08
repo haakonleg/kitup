@@ -5,7 +5,7 @@ import pytest
 from kitup._utils import toml
 from kitup.errors import TaskFailed
 
-from .helpers import call_data, config_context, make_context
+from .helpers import call_data, local_sudo_context, make_context
 
 
 def lines(text: str) -> list[str]:
@@ -275,7 +275,7 @@ def test_apply_toml_key_sets_removes_and_reports(tmp_path):
 def test_apply_toml_key_creates_missing_files_and_tables(tmp_path):
     (tmp_path / "deep").mkdir()
     path = tmp_path / "deep" / "pyproject.toml"
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = toml.apply_toml_key(
         ctx, path, table="tool.uv", key="native-tls", value=True, action="uv.config", sudo=True

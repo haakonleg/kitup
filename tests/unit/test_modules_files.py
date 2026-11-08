@@ -307,10 +307,11 @@ def test_file_absent_removes_file(tmp_path):
     path.write_text("old\n")
     ctx = context(tmp_path)
 
-    files.file(ctx, path, state="absent")
+    result = files.file(ctx, path, state="absent")
 
     assert not path.exists()
     assert len(ctx.changes) == 1
+    assert result.action == "files.file"
 
 
 def test_file_absent_removes_valid_and_broken_symlinks(tmp_path):
@@ -493,10 +494,11 @@ def test_directory_absent_removes_empty_directory(tmp_path):
     path.mkdir()
     ctx = context(tmp_path)
 
-    files.directory(ctx, path, state="absent")
+    result = files.directory(ctx, path, state="absent")
 
     assert not path.exists()
     assert len(ctx.changes) == 1
+    assert result.action == "files.directory"
 
 
 def test_directory_absent_refuses_non_empty_directory(tmp_path):

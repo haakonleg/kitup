@@ -12,7 +12,7 @@ from .helpers import (
     argvs,
     call_data,
     completed,
-    config_context,
+    local_sudo_context,
     make_context,
     response,
 )
@@ -557,7 +557,7 @@ def test_packages_validates_arguments(tmp_path):
 def test_config_sets_option_and_is_idempotent(tmp_path):
     path = tmp_path / "pip.conf"
     path.write_text("[global]\ntimeout = 30\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = pip.config(ctx, "no-cache-dir", value=True, path=path)
 
@@ -582,7 +582,7 @@ def test_config_sets_option_and_is_idempotent(tmp_path):
 
 def test_config_writes_multi_line_value_in_pip_syntax_and_is_idempotent(tmp_path):
     path = tmp_path / "pip.conf"
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
     mirrors = ["https://mirror1.example.com", "https://mirror2.example.com"]
 
     result = pip.config(ctx, "find-links", mirrors, path=path)
@@ -602,7 +602,7 @@ def test_config_writes_multi_line_value_in_pip_syntax_and_is_idempotent(tmp_path
 def test_config_replaces_multi_line_value_with_single_line(tmp_path):
     path = tmp_path / "pip.conf"
     path.write_text("[global]\nfind-links =\n    https://a\n    https://b\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = pip.config(ctx, "find-links", "https://c", path=path)
 
@@ -619,7 +619,7 @@ def test_config_replaces_multi_line_value_with_single_line(tmp_path):
 def test_config_absent_removes_option_and_continuation_lines(tmp_path):
     path = tmp_path / "pip.conf"
     path.write_text("[global]\ntimeout = 30\nfind-links =\n    https://a\n    https://b\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = pip.config(ctx, "find-links", state="absent", path=path)
 
@@ -641,7 +641,7 @@ def test_config_absent_removes_option_and_continuation_lines(tmp_path):
 
 def test_config_creates_a_missing_file_with_parents(tmp_path):
     path = tmp_path / "deep" / "pip" / "pip.conf"
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = pip.config(ctx, "timeout", 60, path=path)
 
@@ -653,7 +653,7 @@ def test_config_creates_a_missing_file_with_parents(tmp_path):
 def test_config_matches_and_writes_canonical_option_names(tmp_path):
     path = tmp_path / "pip.conf"
     path.write_text("[global]\nFind-Links = old\nkeep = 1\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = pip.config(ctx, "find_links", "https://new", path=path)
 
@@ -670,7 +670,7 @@ def test_config_matches_and_writes_canonical_option_names(tmp_path):
 def test_config_absent_removes_non_canonical_option_lines(tmp_path):
     path = tmp_path / "pip.conf"
     path.write_text("[global]\nfind_links: /a\nkeep = 1\n")
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = pip.config(ctx, "find-links", state="absent", path=path)
 
@@ -680,7 +680,7 @@ def test_config_absent_removes_non_canonical_option_lines(tmp_path):
 
 def test_config_edits_per_command_section(tmp_path):
     path = tmp_path / "pip.conf"
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     pip.config(ctx, "no-deps", value=True, section="install", path=path)
 
@@ -689,7 +689,7 @@ def test_config_edits_per_command_section(tmp_path):
 
 def test_config_normalizes_typed_values(tmp_path):
     path = tmp_path / "pip.conf"
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     pip.config(ctx, "no-cache-dir", value=False, path=path)
     pip.config(ctx, "timeout", 42, path=path)
@@ -702,7 +702,7 @@ def test_config_normalizes_typed_values(tmp_path):
 
 def test_config_dry_run_reports_without_writing(tmp_path):
     path = tmp_path / "pip.conf"
-    ctx = config_context(tmp_path, dry_run=True)
+    ctx = local_sudo_context(tmp_path, dry_run=True)
 
     result = pip.config(ctx, "timeout", 30, path=path)
 
@@ -712,7 +712,7 @@ def test_config_dry_run_reports_without_writing(tmp_path):
 
 def test_config_dry_run_does_not_create_parent_directories(tmp_path):
     deep = tmp_path / "deep" / "pip" / "pip.conf"
-    ctx = config_context(tmp_path, dry_run=True)
+    ctx = local_sudo_context(tmp_path, dry_run=True)
 
     result = pip.config(ctx, "timeout", 30, path=deep)
 
@@ -722,7 +722,7 @@ def test_config_dry_run_does_not_create_parent_directories(tmp_path):
 
 def test_config_absent_on_missing_file_does_not_create_parents(tmp_path):
     deep = tmp_path / "deep" / "pip" / "pip.conf"
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = pip.config(ctx, "timeout", state="absent", path=deep)
 
@@ -756,7 +756,7 @@ def test_config_scope_user_defaults_to_dot_config(tmp_path, monkeypatch):
 def test_config_scope_global_defaults_to_etc_pip_conf(tmp_path, monkeypatch):
     target = tmp_path / "pip.conf"
     monkeypatch.setattr(pip, "_GLOBAL_CONFIG_PATH", target)
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     result = pip.config(ctx, "index-url", "https://pypi.example.com/simple", scope="global")
 
@@ -765,7 +765,7 @@ def test_config_scope_global_defaults_to_etc_pip_conf(tmp_path, monkeypatch):
 
 
 def test_config_scope_user_rejected_as_root(tmp_path):
-    ctx = config_context(tmp_path)  # is_root=True
+    ctx = local_sudo_context(tmp_path)  # is_root=True
 
     with pytest.raises(TaskFailed, match="user-scoped pip config cannot run as root"):
         pip.config(ctx, "timeout", 30, scope="user")
@@ -785,7 +785,7 @@ def test_config_scope_user_rejects_sudo(tmp_path, monkeypatch):
 
 
 def test_config_scope_site_uses_the_venv(tmp_path):
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="site scope requires a venv"):
         pip.config(ctx, "timeout", 30, scope="site")
@@ -809,7 +809,7 @@ def test_config_scope_site_uses_the_venv(tmp_path):
 
 def test_config_validates_arguments_before_touching_the_file(tmp_path):
     missing = tmp_path / "missing.conf"
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="config state 'present' requires a value"):
         pip.config(ctx, "timeout", path=missing)
@@ -842,7 +842,7 @@ def test_config_validates_arguments_before_touching_the_file(tmp_path):
 
 def test_config_validates_before_creating_parent_directories(tmp_path):
     deep = tmp_path / "deep" / "pip" / "pip.conf"
-    ctx = config_context(tmp_path)
+    ctx = local_sudo_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="config state 'present' requires a value"):
         pip.config(ctx, "timeout", path=deep)

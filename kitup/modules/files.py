@@ -8,6 +8,7 @@ from .._utils import file_ops
 from .._utils import ini as ini_ops
 from .._utils import toml as toml_ops
 from .._utils.file_helper import move_path, symlink_path
+from .._utils.paths import expand_path
 from .._utils.validation import (
     State,
     require_bool,
@@ -43,7 +44,7 @@ def file(
     require_metadata(owner, group)
     require_mode(mode)
 
-    target = Path(path)
+    target = expand_path(path, error=TaskFailed)
     if state == "absent":
         info = file_ops.stat(ctx, target, sudo=sudo)
         if info is not None and info.is_dir and not info.is_symlink:
@@ -104,17 +105,16 @@ def copy(
 ) -> CallResult:
     """Copy one regular file, preserving its mode unless overridden.
 
-    A bare filename in ``src`` resolves under the bundle's ``files`` directory.
-    Other relative paths resolve against the bundle directory, while absolute
-    paths are used as-is. When ``dest`` ends with a slash it is treated as a
-    directory and the source filename is appended.
+    Relative paths resolve through project file overlays before falling back to
+    the bundle. Absolute paths are used as-is. When ``dest`` ends with a slash
+    it is treated as a directory and the source filename is appended.
     """
     require_path(src, "copy source")
     require_path(dest, "copy destination")
     require_metadata(owner, group)
     require_mode(mode)
     source = ctx.resolve_source(src)
-    target = Path(dest)
+    target = expand_path(dest, error=TaskFailed)
     if str(dest).endswith("/"):
         target /= source.name
     source_info = file_ops.stat(ctx, source, sudo=sudo)
@@ -164,8 +164,8 @@ def move(
     require_path(dest, "move destination")
     require_metadata(owner, group)
     require_mode(mode)
-    source = Path(src)
-    target = Path(dest)
+    source = expand_path(src, error=TaskFailed)
+    target = expand_path(dest, error=TaskFailed)
     if str(dest).endswith("/"):
         target /= source.name
 
@@ -254,7 +254,7 @@ def line(
     if match is not None:
         require_regex(match, "line match")
 
-    target = Path(path)
+    target = expand_path(path, error=TaskFailed)
     text = file_ops.read_text(ctx, target, sudo=sudo)
     lines = text.splitlines(keepends=True)
     desired = line.rstrip("\n")
@@ -279,24 +279,18 @@ def line(
         unchanged_summary = f"ensure line is absent from {target}"
 
     new_text = "".join(new_lines)
-    if new_text != text:
-        return ctx.changed(
-            file_ops.apply_text(
-                ctx,
-                target,
-                text,
-                new_text,
-                action="files.line",
-                summary=summary,
-                data={"path": str(target)},
-                sudo=sudo,
-            )
-        )
     return ctx.changed(
-        action="files.line",
-        changed=False,
-        summary=unchanged_summary,
-        path=str(target),
+        file_ops.apply_text(
+            ctx,
+            target,
+            text,
+            new_text,
+            action="files.line",
+            summary=summary,
+            unchanged_summary=unchanged_summary,
+            data={"path": str(target)},
+            sudo=sudo,
+        )
     )
 
 
@@ -314,7 +308,7 @@ def block(
     require_path(path, "block path")
     require_text(marker, "block marker")
 
-    target = Path(path)
+    target = expand_path(path, error=TaskFailed)
     text = file_ops.read_text(ctx, target, sudo=sudo)
     lines = text.splitlines(keepends=True)
     begin = f"# BEGIN {marker}\n"
@@ -348,24 +342,18 @@ def block(
         unchanged_summary = f"ensure {marker} block is absent from {target}"
 
     new_text = "".join(new_lines)
-    if new_text != text:
-        return ctx.changed(
-            file_ops.apply_text(
-                ctx,
-                target,
-                text,
-                new_text,
-                action="files.block",
-                summary=summary,
-                data={"path": str(target)},
-                sudo=sudo,
-            )
-        )
     return ctx.changed(
-        action="files.block",
-        changed=False,
-        summary=unchanged_summary,
-        path=str(target),
+        file_ops.apply_text(
+            ctx,
+            target,
+            text,
+            new_text,
+            action="files.block",
+            summary=summary,
+            unchanged_summary=unchanged_summary,
+            data={"path": str(target)},
+            sudo=sudo,
+        )
     )
 
 
@@ -413,7 +401,7 @@ def ini(
     return ctx.changed(
         file_ops.apply_ini(
             ctx,
-            Path(path),
+            expand_path(path, error=TaskFailed),
             section=section,
             option=option,
             value=set_value if state == "present" else value,
@@ -478,7 +466,7 @@ def toml(
     return ctx.changed(
         toml_ops.apply_toml_key(
             ctx,
-            Path(path),
+            expand_path(path, error=TaskFailed),
             table=table,
             key=key,
             value=value,
@@ -507,7 +495,7 @@ def directory(
     require_metadata(owner, group)
     require_mode(mode)
 
-    target = Path(path)
+    target = expand_path(path, error=TaskFailed)
     if state == "absent":
         info = file_ops.stat(ctx, target, sudo=sudo)
         if info is None:
@@ -593,8 +581,8 @@ def symlink(
     """Create a symlink, replacing an existing file or symlink."""
     require_text(str(target), "symlink target")
     require_path(path, "symlink path")
-    link = Path(path)
-    desired = str(target)
+    link = expand_path(path, error=TaskFailed)
+    desired = str(expand_path(target, error=TaskFailed))
     info = file_ops.stat(ctx, link, sudo=sudo)
     if info is not None and info.is_symlink and info.link == desired:
         return ctx.changed(

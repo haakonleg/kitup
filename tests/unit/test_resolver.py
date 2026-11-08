@@ -5,15 +5,15 @@ from kitup.registry import Bundle
 from kitup.resolver import filter_plan, resolve
 
 
-def names(plan) -> list[str]:
-    return [bundle.name for bundle in plan.bundles]
+def ids(plan) -> list[str]:
+    return [bundle.id for bundle in plan.bundles]
 
 
 def test_roots_run_in_declared_order():
     base = Bundle("base")
     desktop = Bundle("desktop")
 
-    assert names(resolve([base, desktop])) == ["base", "desktop"]
+    assert ids(resolve([base, desktop])) == ["base", "desktop"]
 
 
 def test_dependencies_run_first_and_are_deduplicated():
@@ -21,8 +21,25 @@ def test_dependencies_run_first_and_are_deduplicated():
     repos = Bundle("repos", depends_on=[base])
     desktop = Bundle("desktop", depends_on=[base, repos])
 
-    assert names(resolve([desktop])) == ["base", "repos", "desktop"]
-    assert names(resolve([desktop, base])) == ["base", "repos", "desktop"]
+    assert ids(resolve([desktop])) == ["base", "repos", "desktop"]
+    assert ids(resolve([desktop, base])) == ["base", "repos", "desktop"]
+
+
+def test_string_dependencies_are_resolved_from_the_registry():
+    base = Bundle("base")
+    repos = Bundle("repos", depends_on=["base"])
+    desktop = Bundle("desktop", depends_on=["base", "repos"])
+    registry = {"base": base, "repos": repos, "desktop": desktop}
+
+    assert ids(resolve([desktop], registry=registry)) == ["base", "repos", "desktop"]
+
+
+def test_unknown_string_dependency_lists_available_bundles():
+    base = Bundle("base")
+    desktop = Bundle("desktop", depends_on=["missing"])
+
+    with pytest.raises(ResolutionError, match=r"unknown bundle dependency 'missing'.*available: base, desktop"):
+        resolve([desktop], registry={"base": base, "desktop": desktop})
 
 
 def test_same_bundle_reached_twice_runs_once():
@@ -30,18 +47,18 @@ def test_same_bundle_reached_twice_runs_once():
     one = Bundle("one", depends_on=[base])
     two = Bundle("two", depends_on=[base])
 
-    assert names(resolve([one, two])) == ["base", "one", "two"]
+    assert ids(resolve([one, two])) == ["base", "one", "two"]
 
 
-def test_duplicate_names_are_rejected():
+def test_duplicate_ids_are_rejected():
     first = Bundle("same")
     second = Bundle("same")
     root = Bundle("root", depends_on=[first, second])
 
-    with pytest.raises(BundleError, match="duplicate bundle name: same"):
+    with pytest.raises(BundleError, match="duplicate bundle id: same"):
         resolve([first, second])
 
-    with pytest.raises(BundleError, match="duplicate bundle name: same"):
+    with pytest.raises(BundleError, match="duplicate bundle id: same"):
         resolve([root])
 
 
@@ -61,7 +78,7 @@ def test_filter_plan_include_keeps_dependencies():
 
     filtered = filter_plan(resolve([desktop]), include={"desktop"})
 
-    assert names(filtered) == ["base", "repos", "desktop"]
+    assert ids(filtered) == ["base", "repos", "desktop"]
 
 
 def test_filter_plan_include_can_select_a_dependency():
@@ -70,7 +87,7 @@ def test_filter_plan_include_can_select_a_dependency():
 
     filtered = filter_plan(resolve([desktop]), include={"base"})
 
-    assert names(filtered) == ["base"]
+    assert ids(filtered) == ["base"]
 
 
 def test_filter_plan_exclude_removes_bundle():
@@ -79,7 +96,7 @@ def test_filter_plan_exclude_removes_bundle():
 
     filtered = filter_plan(resolve([base, desktop]), exclude={"desktop"})
 
-    assert names(filtered) == ["base"]
+    assert ids(filtered) == ["base"]
 
 
 def test_filter_plan_exclude_required_dependency_is_rejected():
@@ -96,20 +113,20 @@ def test_filter_plan_exclude_dependency_when_dependent_is_also_excluded():
 
     filtered = filter_plan(resolve([desktop]), exclude={"base", "desktop"})
 
-    assert names(filtered) == []
+    assert ids(filtered) == []
 
 
 def test_filter_plan_unknown_include_is_rejected():
     base = Bundle("base")
 
-    with pytest.raises(ResolutionError, match="unknown bundle: missing"):
+    with pytest.raises(ResolutionError, match="unknown bundle: missing \\(available: base\\)"):
         filter_plan(resolve([base]), include={"missing"})
 
 
 def test_filter_plan_unknown_exclude_is_rejected():
     base = Bundle("base")
 
-    with pytest.raises(ResolutionError, match="unknown bundle: missing"):
+    with pytest.raises(ResolutionError, match="unknown bundle: missing \\(available: base\\)"):
         filter_plan(resolve([base]), exclude={"missing"})
 
 
@@ -120,7 +137,7 @@ def test_filter_plan_combines_include_and_exclude():
 
     filtered = filter_plan(resolve([base, desktop, gaming]), include={"base", "desktop"}, exclude={"gaming"})
 
-    assert names(filtered) == ["base", "desktop"]
+    assert ids(filtered) == ["base", "desktop"]
 
 
 def test_filter_plan_overlapping_filters_are_rejected():
@@ -133,7 +150,7 @@ def test_filter_plan_overlapping_filters_are_rejected():
 def test_filter_plan_empty_include_selects_nothing():
     base = Bundle("base")
 
-    assert names(filter_plan(resolve([base]), include=frozenset())) == []
+    assert ids(filter_plan(resolve([base]), include=frozenset())) == []
 
 
 def test_filter_plan_without_filters_returns_the_same_plan():

@@ -10,7 +10,6 @@ root-owned project directories by running kitup as root. Only ``config`` takes
 
 import os
 import re
-import shutil
 import subprocess
 import tomllib
 from collections.abc import Iterable, Mapping
@@ -20,6 +19,8 @@ from typing import Final, Literal
 
 from .._utils import file_ops
 from .._utils import toml as toml_ops
+from .._utils.executables import require_command
+from .._utils.paths import expand_path
 from .._utils.pep508 import Requirement, normalize_dist_name, normalize_specifier, parse_requirement
 from .._utils.validation import (
     State,
@@ -482,10 +483,7 @@ def _sync_project(
 
 def _uv_bin(ctx: TaskContext) -> str:
     """Return the uv executable path, failing when it is missing."""
-    resolved = ctx.memo("uv-bin", lambda: shutil.which("uv"))
-    if resolved is None:
-        raise TaskFailed("uv is required but was not found on PATH (https://docs.astral.sh/uv/)")
-    return resolved
+    return require_command(ctx, "uv", memo_key="uv-bin", hint="https://docs.astral.sh/uv/")
 
 
 def _require_uv(ctx: TaskContext, argv: list[str], *, failure: str) -> subprocess.CompletedProcess[str]:
@@ -504,7 +502,7 @@ def _require_uv(ctx: TaskContext, argv: list[str], *, failure: str) -> subproces
 
 def _normalize_project(project: str | Path) -> Path:
     require_path(project, "project")
-    return Path(project).expanduser()
+    return expand_path(project, error=TaskFailed)
 
 
 def _python_args(python: str | None) -> list[str]:
@@ -560,7 +558,7 @@ def _require_project_table(text: str, pyproject: Path) -> None:
 def _project_env_exists(ctx: TaskContext, project_path: Path) -> bool:
     """Return whether the project environment (``.venv`` or ``UV_PROJECT_ENVIRONMENT``) exists."""
     configured = os.environ.get("UV_PROJECT_ENVIRONMENT", "")
-    env = Path(configured).expanduser() if configured else project_path / ".venv"
+    env = expand_path(configured, error=TaskFailed) if configured else project_path / ".venv"
     if not env.is_absolute():
         env = project_path / env
     info = file_ops.stat(ctx, env, sudo=False, follow=True)
@@ -783,16 +781,16 @@ def _config_target(
     """Resolve the uv config file and TOML table to edit for the given scope."""
     if path is not None:
         require_path(path, "config path")
-        target = Path(path).expanduser()
+        target = expand_path(path, error=TaskFailed)
         # a pyproject.toml holds uv settings in its [tool.uv] table; a uv.toml at the top level
         return target, "tool.uv" if target.name == "pyproject.toml" else None
     if scope == "system":
         return _SYSTEM_CONFIG_PATH, None
     if scope == "user":
         xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "")
-        base = Path(xdg_config_home).expanduser() if xdg_config_home else Path("~/.config").expanduser()
+        base = expand_path(xdg_config_home, error=TaskFailed) if xdg_config_home else Path.home() / ".config"
         return base / "uv" / "uv.toml", None
     if project is None:
         raise TaskFailed("project scope requires a project directory")
     require_path(project, "project")
-    return Path(project).expanduser() / "pyproject.toml", "tool.uv"
+    return expand_path(project, error=TaskFailed) / "pyproject.toml", "tool.uv"

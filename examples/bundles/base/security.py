@@ -1,9 +1,10 @@
+from kitup import task
 from kitup.modules import template
-from kitup.registry import task
 
 
-@task("Harden SSH", tags={"security"})
+@task(tags={"security"})
 def harden_ssh(ctx):
+    """Write the hardened SSH daemon configuration."""
     template.file(
         ctx,
         "sshd.conf.j2",

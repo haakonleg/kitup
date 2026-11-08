@@ -1,8 +1,8 @@
 """Flatpak remote repository and package management."""
 
-import shutil
 from collections.abc import Iterable
 
+from .._utils.executables import require_command
 from .._utils.validation import (
     State,
     normalize_strings,
@@ -188,10 +188,7 @@ def _scope_flag(ctx: TaskContext, scope: str) -> str:
 
 
 def _flatpak(ctx: TaskContext) -> str:
-    command = ctx.memo("flatpak-command", lambda: shutil.which("flatpak"))
-    if command is None:
-        raise TaskFailed("flatpak is required but was not found")
-    return command
+    return require_command(ctx, "flatpak")
 
 
 def _remote_names(ctx: TaskContext, flag: str) -> list[str]:

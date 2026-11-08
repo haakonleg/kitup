@@ -1,4 +1,4 @@
-from kitup.registry import Bundle
+from kitup import Bundle
 
 from . import packages, security, services
 

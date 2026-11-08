@@ -1,12 +1,7 @@
-from bundles import base
-
-from kitup.registry import Bundle
-
-from . import desktop, flatpak
+from kitup import Bundle
 
 Bundle(
     "Workstation",
     "Flatpak applications and desktop settings",
-    depends_on=[base],
-    modules=[desktop, flatpak],
+    depends_on=["base"],
 )

@@ -31,13 +31,6 @@ def normalize_extra_args(extra_args: str | Iterable[str] | None, label: str = "e
     return values
 
 
-def normalize_string_sequence(values: Iterable[str], label: str) -> tuple[str, ...]:
-    """Return values as a tuple, rejecting a single string."""
-    if isinstance(values, str):
-        raise TypeError(f"{label} must be a sequence of strings, not a single string")
-    return tuple(values)
-
-
 def split_tags(values: Iterable[str], *, allow_empty: bool = True) -> list[str]:
     """Split comma-separated tag values and strip surrounding whitespace."""
     tags: list[str] = []

@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from typing import Any, Final, TextIO
 
 from .. import PACKAGE_NAME, __version__
+from ..registry import Bundle
 from ..results import Status, TaskResult
 from .animation import Animation
 from .live_line import LiveLine
@@ -28,6 +29,13 @@ _COLORS: Final = {
 }
 _RESET: Final = "\033[0m"
 _DIM: Final = "\033[2m"
+
+
+def bundle_label(bundle: Bundle) -> str:
+    """Return the standard bundle label: ``id (name)`` when they differ."""
+    if bundle.name and bundle.name != bundle.id:
+        return f"{bundle.id} ({bundle.name})"
+    return bundle.id
 
 
 class Output:
@@ -64,9 +72,11 @@ class Output:
         """Write one line of output."""
         self._live.write(text)
 
-    def banner(self, facts: Mapping[str, Any]) -> None:
+    def banner(self, facts: Mapping[str, Any] | None = None) -> None:
         """Print the version and platform banner."""
-        parts = [f"{PACKAGE_NAME} {__version__}", _platform_label(facts)]
+        parts = [f"{PACKAGE_NAME} {__version__}"]
+        if facts is not None:
+            parts.append(_platform_label(facts))
         if desktop := _desktop_label():
             parts.append(desktop)
         self.write("  ·  ".join(part for part in parts if part))
@@ -142,7 +152,8 @@ class Output:
         duration = self._paint(f"  ({result.duration:.2f} s)", _DIM)
         self.write(f"{line}{duration}")
         if self.verbose and result.task.description:
-            self.write(self._paint(f"    {result.task.description}", _DIM))
+            description = result.task.description.replace("\n", "\n    ")
+            self.write(self._paint(f"    {description}", _DIM))
 
     def _task_detail(self, result: TaskResult) -> str:
         calls = result.calls if self.verbose else result.changes

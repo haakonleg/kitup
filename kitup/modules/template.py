@@ -6,12 +6,13 @@ from pathlib import Path
 from typing import Any, Final
 
 from .._utils import file_ops
+from .._utils.paths import expand_path
 from .._utils.validation import require_metadata, require_mode, require_path
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
 
-_RESERVED_VARIABLES: Final = frozenset({"config", "facts"})
+_RESERVED_VARIABLES: Final = frozenset({"vars", "facts"})
 
 
 def file(
@@ -27,11 +28,10 @@ def file(
 ) -> CallResult:
     """Render a Jinja2 template into a managed file.
 
-    ``src`` resolves like :func:`kitup.modules.files.copy`: a bare filename is
-    read from the bundle's ``files`` directory, other relative paths resolve
-    against the bundle directory, and absolute paths are used as-is.
+    ``src`` resolves like :func:`kitup.modules.files.copy`. Absolute paths are
+    used as-is.
 
-    Templates see ``config`` (the merged configuration values), ``facts`` (the
+    Templates see ``vars`` (the merged variable values), ``facts`` (the
     system facts snapshot), and any keys supplied through ``variables``.
     Undefined variables are errors. The rendered text is compared with the
     destination and only written when it differs.
@@ -41,7 +41,8 @@ def file(
     require_metadata(owner, group)
     require_mode(mode)
     extra = _require_variables(variables)
-    file_ops.require_parent(ctx, Path(dest), sudo=sudo)
+    target = expand_path(dest, error=TaskFailed)
+    file_ops.require_parent(ctx, target, sudo=sudo)
 
     source = ctx.resolve_source(src)
     text = _read_template(ctx, source)
@@ -50,15 +51,15 @@ def file(
     return ctx.changed(
         file_ops.apply_bytes(
             ctx,
-            Path(dest),
+            target,
             rendered.encode("utf-8"),
             action="template.file",
             mode=mode,
             owner=owner,
             group=group,
-            summary=f"render {source} -> {dest}",
-            unchanged_summary=f"ensure {dest} from {source}",
-            data={"dest": str(dest), "src": str(source)},
+            summary=f"render {source} -> {target}",
+            unchanged_summary=f"ensure {target} from {source}",
+            data={"dest": str(target), "src": str(source)},
             sudo=sudo,
         )
     )
@@ -107,7 +108,7 @@ def _render(
         autoescape=False,
     )
     context = {
-        "config": dict(vars(ctx.config)),
+        "vars": dict(vars(ctx.vars)),
         "facts": dict(ctx.facts),
         **variables,
     }

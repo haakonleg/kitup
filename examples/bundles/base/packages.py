@@ -1,7 +1,8 @@
+from kitup import task
 from kitup.modules import dnf
-from kitup.registry import task
 
 
-@task("Install base packages", tags={"packages"})
+@task(tags={"packages"})
 def install_base_packages(ctx):
-    dnf.packages(ctx, ctx.config.PACKAGES)
+    """Install the base package set."""
+    dnf.packages(ctx, ctx.vars.PACKAGES)

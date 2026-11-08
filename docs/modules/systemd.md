@@ -4,7 +4,7 @@ Manage systemd units.
 
 ```python
 from kitup.modules import systemd
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `unit(ctx, unit, *, enabled=None, state=None, scope="system")`

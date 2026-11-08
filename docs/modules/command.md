@@ -4,7 +4,7 @@ Run guarded one-off commands.
 
 ```python
 from kitup.modules import command
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `run(ctx, cmd, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None)`

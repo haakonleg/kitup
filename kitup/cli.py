@@ -2,124 +2,323 @@
 
 import argparse
 import sys
+import textwrap
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Final, override
 
 from . import PACKAGE_NAME, __version__
+from ._utils.paths import expand_path
 from ._utils.security import disable_same_uid_ptrace
 from ._utils.validation import split_tags
 from .commands import CommandRunner
-from .config import load_config
 from .context import TaskContext
-from .errors import KitupError, PrivilegeError, UsageError
+from .errors import KitupError, PrivilegeError, ProjectError, UsageError
 from .facts import collect_facts
-from .output import Output
+from .output import Output, bundle_label
+from .presets import parse_with_presets
 from .privileges import PrivilegeManager
-from .profiles import RunDefinition, load_profile
+from .project import BUNDLES_DIR, PRESETS_DIR, VARS_DIR, Project, load_project, on_project_path
+from .registry import Bundle
 from .resolver import BundlePlan, filter_plan, resolve
 from .runner import Runner
+from .vars import Vars, filter_var_paths, load_bundle_vars, load_vars
+
+_NO_DEFAULT: Final = object()
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the command-line argument parser."""
-    parser = argparse.ArgumentParser(
-        prog=PACKAGE_NAME,
-        description="The simple python-driven system configuration tool.",
-    )
-    parser.add_argument("-V", "--version", action="version", version=_version())
-    subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+@dataclass(frozen=True, slots=True)
+class _Option:
+    """One CLI option, shared by the parser and the defaults table."""
 
-    apply_parser = subparsers.add_parser("apply", help="apply a profile")
-    apply_parser.add_argument(
-        "profile",
-        nargs="?",
-        metavar="PROFILE",
-        help="profile file (default: ./kitup.py)",
-    )
-    _add_common_options(apply_parser)
-    _add_bundle_filters(apply_parser)
-    apply_parser.add_argument("-n", "--dry-run", action="store_true", help="report without mutating")
-    apply_parser.add_argument("-d", "--diff", action="store_true", help="show unified diffs")
-    apply_parser.add_argument("-s", "--sudo", action="store_true", help="validate sudo credentials up front")
-    apply_parser.add_argument("-t", "--tags", action="append", default=[], metavar="TAGS", help="only matching tags")
-    apply_parser.add_argument(
-        "-x", "--skip-tags", action="append", default=[], metavar="TAGS", help="skip matching tags"
-    )
-
-    list_parser = subparsers.add_parser("list", help="list bundles and tasks")
-    list_parser.add_argument(
-        "profile",
-        nargs="?",
-        metavar="PROFILE",
-        help="profile file (default: ./kitup.py)",
-    )
-    _add_common_options(list_parser)
-    _add_bundle_filters(list_parser)
-
-    return parser
+    flags: tuple[str, ...]
+    dest: str
+    default: Any
+    action: str = "store"
+    metavar: str | None = None
+    help: str | None = None
+    nargs: str | None = None
+    version: str | None = None
 
 
-def _add_common_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
-    parser.add_argument("-c", "--no-color", action="store_true", help="disable colors")
-    parser.add_argument("-V", "--version", action="version", version=_version())
+class _StrictParser(argparse.ArgumentParser):
+    """An argument parser that only accepts exact option strings.
 
+    Abbreviations such as ``--inc`` and clustered short options such as
+    ``-nm`` are rejected. Subparsers inherit this class, so every command uses
+    the same strict matching.
+    """
 
-def _add_bundle_filters(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "-b",
-        "--only-bundles",
-        action="append",
-        default=[],
-        metavar="BUNDLES",
-        help="only include matching bundles and their dependencies",
-    )
-    parser.add_argument(
-        "-B",
-        "--skip-bundles",
-        action="append",
-        default=[],
-        metavar="BUNDLES",
-        help="exclude matching bundles",
-    )
+    @override
+    def _get_option_tuples(self, option_string: str) -> list[tuple[argparse.Action, str, str | None]]:
+        return []
 
 
 def _version() -> str:
     return f"{PACKAGE_NAME} {__version__}"
 
 
+_PROJECT_OPTION: Final = _Option(
+    flags=("project_dir",),
+    dest="project_dir",
+    default=None,
+    nargs="?",
+    metavar="PROJECT_DIR",
+    help="project directory (default: current directory)",
+)
+_PRESET_OPTION: Final = _Option(
+    flags=("-p", "--preset"),
+    dest="preset",
+    default=_NO_DEFAULT,
+    action="append",
+    metavar="PRESET",
+    help="read options from a preset file (relative to presets/, repeatable)",
+)
+_BUNDLE_PATH_OPTION: Final = _Option(
+    flags=("--bundle-path",),
+    dest="bundle_path",
+    default=(),
+    action="append",
+    metavar="DIR",
+    help="load bundles from an extra directory (repeatable)",
+)
+_VAR_FILE_OPTION: Final = _Option(
+    flags=("--var-file",),
+    dest="var_file",
+    default=(),
+    action="append",
+    metavar="PATH",
+    help="load an extra var file (repeatable)",
+)
+_SELECTION_OPTIONS: Final = (
+    _Option(
+        flags=("-b", "--include-bundles"),
+        dest="include_bundles",
+        default=(),
+        action="append",
+        metavar="LIST",
+        help="only include these bundles and their dependencies",
+    ),
+    _Option(
+        flags=("-B", "--exclude-bundles"),
+        dest="exclude_bundles",
+        default=(),
+        action="append",
+        metavar="LIST",
+        help="exclude these bundles",
+    ),
+    _Option(
+        flags=("-i", "--include-vars"),
+        dest="include_vars",
+        default=(),
+        action="append",
+        metavar="LIST",
+        help="only include these vars",
+    ),
+    _Option(
+        flags=("-E", "--exclude-vars"),
+        dest="exclude_vars",
+        default=(),
+        action="append",
+        metavar="LIST",
+        help="exclude these vars",
+    ),
+)
+_RUN_OPTIONS: Final = (
+    _Option(
+        flags=("-n", "--dry-run"),
+        dest="dry_run",
+        default=False,
+        action="store_true",
+        help="report without mutating",
+    ),
+    _Option(
+        flags=("-d", "--diff"),
+        dest="diff",
+        default=False,
+        action="store_true",
+        help="show unified diffs",
+    ),
+    _Option(
+        flags=("-s", "--sudo"),
+        dest="sudo",
+        default=False,
+        action="store_true",
+        help="validate sudo credentials up front",
+    ),
+    _Option(
+        flags=("-t", "--tags"),
+        dest="tags",
+        default=(),
+        action="append",
+        metavar="TAGS",
+        help="only matching tags",
+    ),
+    _Option(
+        flags=("-x", "--skip-tags"),
+        dest="skip_tags",
+        default=(),
+        action="append",
+        metavar="TAGS",
+        help="skip matching tags",
+    ),
+)
+_VERSION_OPTION: Final = _Option(
+    flags=("-V", "--version"),
+    dest="version",
+    default=_NO_DEFAULT,
+    action="version",
+    version=_version(),
+)
+_COMMON_OPTIONS: Final = (
+    _Option(
+        flags=("-v", "--verbose"),
+        dest="verbose",
+        default=False,
+        action="store_true",
+        help="verbose output",
+    ),
+    _Option(
+        flags=("-c", "--no-color"),
+        dest="no_color",
+        default=False,
+        action="store_true",
+        help="disable colors",
+    ),
+    _VERSION_OPTION,
+)
+_FORCE_OPTION: Final = _Option(
+    flags=("--force",),
+    dest="force",
+    default=False,
+    action="store_true",
+    help="overwrite existing project files",
+)
+
+_APPLY_OPTIONS: Final = (
+    _PROJECT_OPTION,
+    _PRESET_OPTION,
+    _BUNDLE_PATH_OPTION,
+    _VAR_FILE_OPTION,
+    *_SELECTION_OPTIONS,
+    *_RUN_OPTIONS,
+    *_COMMON_OPTIONS,
+)
+_LIST_OPTIONS: Final = (
+    _PROJECT_OPTION,
+    _PRESET_OPTION,
+    _BUNDLE_PATH_OPTION,
+    _VAR_FILE_OPTION,
+    *_SELECTION_OPTIONS,
+    *_COMMON_OPTIONS,
+)
+_CHECK_OPTIONS: Final = _LIST_OPTIONS
+_INIT_OPTIONS: Final = (_PROJECT_OPTION, _FORCE_OPTION, *_COMMON_OPTIONS)
+_ALL_OPTIONS: Final = (*_APPLY_OPTIONS, *_LIST_OPTIONS, *_CHECK_OPTIONS, *_INIT_OPTIONS)
+
+_DEFAULTS: Final[dict[str, Any]] = {
+    option.dest: option.default for option in _ALL_OPTIONS if option.default is not _NO_DEFAULT
+}
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser.
+
+    Defaults are suppressed so preset merging can distinguish an option
+    that was supplied from one that was absent. ``_apply_defaults`` fills the
+    final values from the option table.
+    """
+    parser = _StrictParser(
+        prog=PACKAGE_NAME,
+        description="The simple python-driven system configuration tool.",
+    )
+    _add_options(parser, (_VERSION_OPTION,))
+    subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+
+    apply_parser = subparsers.add_parser(
+        "apply",
+        help="apply a project",
+        epilog=_examples("kitup apply . --preset laptop", "kitup apply -b base,workstation -n"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_options(apply_parser, _APPLY_OPTIONS)
+
+    list_parser = subparsers.add_parser(
+        "list",
+        help="list bundles and tasks",
+        epilog=_examples("kitup list", "kitup list my-machine -v"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_options(list_parser, _LIST_OPTIONS)
+
+    check_parser = subparsers.add_parser(
+        "check",
+        help="discover, resolve, and parse without running",
+        epilog=_examples("kitup check", "kitup check . --preset laptop"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_options(check_parser, _CHECK_OPTIONS)
+
+    init_parser = subparsers.add_parser(
+        "init",
+        help="scaffold a new project",
+        epilog=_examples("kitup init", "kitup init my-machine --force"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_options(init_parser, _INIT_OPTIONS)
+
+    return parser
+
+
+def _examples(*lines: str) -> str:
+    return "examples:\n" + "\n".join(f"  {line}" for line in lines)
+
+
+def _add_option(parser: argparse.ArgumentParser, option: _Option) -> None:
+    """Add one option table entry to a parser."""
+    kwargs: dict[str, Any] = {
+        "action": option.action,
+        "default": argparse.SUPPRESS,
+        "help": option.help,
+    }
+    if option.metavar is not None:
+        kwargs["metavar"] = option.metavar
+    if option.nargs is not None:
+        kwargs["nargs"] = option.nargs
+    if option.version is not None:
+        kwargs["version"] = option.version
+    if option.flags[0].startswith("-"):
+        kwargs["dest"] = option.dest
+    parser.add_argument(*option.flags, **kwargs)
+
+
+def _add_options(parser: argparse.ArgumentParser, options: Sequence[_Option]) -> None:
+    """Add a sequence of option table entries to a parser."""
+    for option in options:
+        _add_option(parser, option)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface and return an exit code."""
     disable_same_uid_ptrace()
-    args = build_parser().parse_args(argv)
-    output = Output(no_color=args.no_color, verbose=args.verbose)
+    arguments = list(sys.argv[1:] if argv is None else argv)
 
     try:
-        profile_path = _resolve_profile(args.profile)
-        old_path = list(sys.path)
-        try:
-            sys.path.insert(0, str(profile_path.parent))
-            definition = load_profile(profile_path)
-            config = load_config(definition.config)
-            plan = filter_plan(
-                resolve(definition.bundles),
-                include=_value_filter(args.only_bundles),
-                exclude=_value_filter(args.skip_bundles),
-            )
+        args, preset_paths = parse_with_presets(build_parser(), arguments)
+        _apply_defaults(args)
+        output = Output(no_color=args.no_color, verbose=args.verbose)
+        if args.command == "init":
+            return _init(args, output)
 
-            facts = collect_facts()
-            output.banner(facts)
-            if args.command == "list":
-                _print_environment(profile_path, definition, output, verbose=args.verbose)
-                _print_plan(plan, output, verbose=args.verbose)
-                return 0
-            if args.verbose:
-                _print_environment(profile_path, definition, output, verbose=args.verbose)
-            return _apply(args, profile_path, definition, plan, config, facts, output)
-        finally:
-            sys.path[:] = old_path
+        project = load_project(
+            _project_root(args.project_dir),
+            preset_paths=preset_paths,
+            bundle_paths=args.bundle_path,
+            extra_var_paths=args.var_file,
+        )
+        with on_project_path(project.root):
+            return _run_project(args, project, output)
     except KitupError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2 if isinstance(exc, (UsageError, PrivilegeError)) else 1
@@ -128,18 +327,65 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 130
 
 
+def _apply_defaults(args: argparse.Namespace) -> None:
+    for key, value in _DEFAULTS.items():
+        if not hasattr(args, key):
+            setattr(args, key, value)
+
+
+def _project_root(value: str | Path | None) -> Path:
+    return expand_path(value or ".", error=ProjectError, resolve=True)
+
+
+def _run_project(args: argparse.Namespace, project: Project, output: Output) -> int:
+    if not project.bundles and args.command in {"apply", "check"}:
+        raise ProjectError(_missing_bundles_message(project))
+
+    registry = {bundle.id: bundle for bundle in project.bundles}
+    plan = resolve(project.bundles, registry=registry)
+    plan = filter_plan(
+        plan,
+        include=_value_filter(args.include_bundles),
+        exclude=_value_filter(args.exclude_bundles),
+        registry=registry,
+    )
+    var_paths = filter_var_paths(
+        project.var_paths,
+        include=_value_filter(args.include_vars),
+        exclude=_value_filter(args.exclude_vars),
+    )
+
+    if args.command in {"list", "check"}:
+        output.banner()
+        if args.command == "check":
+            values = load_vars(var_paths)
+            load_bundle_vars(values, plan.bundles)
+        _print_environment(project, var_paths, output, verbose=args.verbose)
+        _print_plan(plan, output, verbose=args.verbose)
+        if args.command == "check":
+            _warn_empty_bundles(plan, output)
+        return 0
+
+    facts = collect_facts()
+    output.banner(facts)
+    values = load_vars(var_paths)
+    bundle_values = load_bundle_vars(values, plan.bundles)
+
+    if args.verbose:
+        _print_environment(project, var_paths, output, verbose=args.verbose)
+    return _apply(args, project, plan, values, facts, output, bundle_vars=bundle_values)
+
+
 def _apply(
     args: argparse.Namespace,
-    profile_path: Path,
-    definition: RunDefinition,
+    project: Project,
     plan: BundlePlan,
-    config: SimpleNamespace,
+    values: Vars,
     facts: Mapping[str, Any],
     output: Output,
+    *,
+    bundle_vars: Mapping[Bundle, Vars],
 ) -> int:
-    tags = _merge_include_tags(definition.tags, _value_filter(args.tags))
-    skip_tags = _merge_skip_tags(definition.skip_tags, _value_filter(args.skip_tags))
-
     sudo = PrivilegeManager()
     if args.sudo:
         sudo.validate()
@@ -149,11 +395,13 @@ def _apply(
         dry_run=args.dry_run,
         diff=args.diff,
         verbose=args.verbose,
-        config_dir=profile_path.parent,
-        config=config,
+        root=project.root,
+        project=project,
+        vars=values,
         facts=facts,
         sudo=sudo,
         command=command,
+        bundle_vars=bundle_vars,
         output=output,
     )
     try:
@@ -161,65 +409,87 @@ def _apply(
             plan,
             context,
             output,
-            tags=tags,
-            skip_tags=skip_tags,
+            tags=_value_filter(args.tags),
+            skip_tags=_value_filter(args.skip_tags),
         )
         return runner.run()
     finally:
         context.close()
 
 
+def _missing_bundles_message(project: Project) -> str:
+    locations = [project.root / BUNDLES_DIR, *project.bundle_roots]
+    existing = [path for path in locations if path.exists()]
+    if not existing:
+        return f"no bundles found in {project.root}; run 'kitup init {project.root}' to create a project"
+    return "no bundles found in " + ", ".join(str(path) for path in existing)
+
+
 def _print_environment(
-    profile_path: Path,
-    definition: RunDefinition,
+    project: Project,
+    var_paths: Sequence[Path],
     output: Output,
     *,
     verbose: bool,
 ) -> None:
     output.write()
-    output.write(f"profile: {_path_label(profile_path, verbose=verbose)}")
-    if definition.description:
-        output.write(f"description: {definition.description}")
-    if definition.config:
-        sources = ", ".join(_config_label(source, verbose=verbose) for source in definition.config)
-        output.write(f"config: {sources}")
+    project_label = str(project.root) if verbose else (project.root.name or str(project.root))
+    output.write(f"project: {project_label}")
+    if project.bundle_roots:
+        bundle_paths = ", ".join(_path_label(path, verbose=verbose) for path in project.bundle_roots)
+        output.write(f"bundle path: {bundle_paths}")
+    if project.preset_paths:
+        preset_labels = ", ".join(_path_label(path, verbose=verbose) for path in project.preset_paths)
+        output.write(f"preset: {preset_labels}")
+    if var_paths:
+        var_labels = ", ".join(_path_label(path, verbose=verbose) for path in var_paths)
+        output.write(f"vars: {var_labels}")
 
 
 def _path_label(path: Path, *, verbose: bool) -> str:
     return str(path) if verbose else path.name
 
 
-def _config_label(source: object, *, verbose: bool) -> str:
-    if isinstance(source, Path):
-        return _path_label(source, verbose=verbose)
-    if isinstance(source, ModuleType):
-        filename = getattr(source, "__file__", None)
-        if filename:
-            return _path_label(Path(filename).resolve(), verbose=verbose)
-        return source.__name__
-    return "<mapping>"
-
-
 def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
     for bundle in plan.bundles:
         output.write()
-        output.write(f"bundle: {bundle.name}")
-        if bundle.description:
-            output.write(f"  {bundle.description}")
+        output.write(f"bundle: {bundle_label(bundle)}")
         if verbose:
-            dependencies = ", ".join(dependency.name for dependency in bundle.depends_on)
+            if bundle.description:
+                description = bundle.description.replace("\n", "\n  ")
+                output.write(f"  {description}")
+            dependencies = ", ".join(_dependency_id(dependency) for dependency in bundle.depends_on)
             output.write(f"  depends:{f' {dependencies}' if dependencies else ''}")
+            if bundle.var_paths:
+                var_labels = ", ".join(_path_label(path, verbose=verbose) for path in bundle.var_paths)
+                output.write(f"  vars: {var_labels}")
             output.write("  tasks:")
         for task in bundle.tasks:
-            tags = ", ".join(sorted(task.tags))
             if verbose:
+                tags = ", ".join(sorted(map(str, task.tags)))
                 output.write(f"    - {task.name}")
                 output.write(f"      id: {task.id}")
                 output.write(f"      tags:{f' {tags}' if tags else ''}")
                 if task.description:
-                    output.write(f"      description: {task.description}")
+                    description = task.description.replace("\n", "\n      ")
+                    output.write(f"      description: {description}")
             else:
-                output.write(f"    - {task.name}{f' [{tags}]' if tags else ''}")
+                output.write(f"    - {task.name}")
+
+
+def _dependency_id(dependency: str | Bundle) -> str:
+    if isinstance(dependency, str):
+        return dependency
+    return dependency.id
+
+
+def _warn_empty_bundles(plan: BundlePlan, output: Output) -> None:
+    empty = [bundle.id for bundle in plan.bundles if not bundle.tasks]
+    if not empty:
+        return
+    output.write()
+    for bundle_id in empty:
+        output.write(f"warning: bundle {bundle_id!r} has no tasks")
 
 
 def _value_filter(values: Sequence[str]) -> frozenset[str] | None:
@@ -233,20 +503,66 @@ def _value_filter(values: Sequence[str]) -> frozenset[str] | None:
     return frozenset(split_tags(values))
 
 
-def _merge_include_tags(profile_tags: frozenset[str], cli_tags: frozenset[str] | None) -> frozenset[str] | None:
-    if cli_tags is None:
-        return profile_tags or None
-    if profile_tags:
-        return cli_tags & profile_tags
-    return cli_tags
+def _init(args: argparse.Namespace, output: Output) -> int:
+    root = _project_root(args.project_dir)
+    files = _init_files(root)
+    existing = [path for path in files if path.exists()]
+    if existing and not args.force:
+        names = ", ".join(str(path.relative_to(root)) for path in existing)
+        raise ProjectError(f"refusing to overwrite existing files in {root}: {names} (use --force)")
+
+    for path, content in files.items():
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            raise ProjectError(f"cannot create {path}: {exc}") from exc
+
+    output.write(f"Initialized kitup project in {root}")
+    output.write("Next steps:")
+    output.write("  kitup check")
+    output.write("  kitup apply -n")
+    return 0
 
 
-def _merge_skip_tags(profile_tags: frozenset[str], cli_tags: frozenset[str] | None) -> frozenset[str] | None:
-    combined = profile_tags | (cli_tags or frozenset())
-    return combined or None
+def _init_files(root: Path) -> dict[Path, str]:
+    bundle = root / BUNDLES_DIR / "example"
+    return {
+        bundle / "__init__.py": textwrap.dedent(
+            """
+            from kitup import Bundle
+
+            Bundle("Example bundle")
+            """
+        ).lstrip(),
+        bundle / "tasks.py": textwrap.dedent(
+            """
+            from kitup import task
 
 
-def _resolve_profile(value: str | None) -> Path:
-    if value:
-        return Path(value).expanduser().resolve()
-    return (Path.cwd() / "kitup.py").resolve()
+            @task
+            def hello(ctx):
+                \"\"\"Say hello from the example bundle.\"\"\"
+                ctx.note("Hello from the example bundle")
+            """
+        ).lstrip(),
+        root / VARS_DIR / "base.py": textwrap.dedent(
+            """
+            PACKAGES = ["git"]
+            """
+        ).lstrip(),
+        root / VARS_DIR / "example.py": textwrap.dedent(
+            """
+            # Machine-specific values for the example vars.
+            EXAMPLE_VALUE = "change me"
+            """
+        ).lstrip(),
+        root / PRESETS_DIR / "laptop": textwrap.dedent(
+            """
+            # Example preset. Run it with: kitup apply --preset laptop
+            # Each line is split like a shell command line; options only.
+            # --include-bundles example
+            # -t example
+            """
+        ).lstrip(),
+    }

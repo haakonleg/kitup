@@ -1,114 +1,90 @@
 # kitup
 
-The simple Python-driven system configuration tool.
+**The simple Python-driven system configuration tool.**
 
-kitup is a configuration management tool for Linux systems: describe how a
-machine should be set up — what software to install, how services should run,
-which files to manage, and which system settings to apply — and kitup applies
-it idempotently through reusable task bundles.
+kitup describes how a Linux machine should be set up — packages, services,
+files, users, containers, and system settings — and applies that description
+idempotently. Projects and tasks are ordinary Python code, so you can use
+functions, loops, conditions, and imports instead of a separate configuration
+language.
 
-kitup is inspired by Ansible, but with a smaller scope and a more expressive,
-Python-centric design: profiles, bundles, tasks, conditions, and composition are
-ordinary Python code. It currently supports local machines only; remote host
-management is not yet included.
+kitup is inspired by Ansible but has a smaller scope and a more expressive,
+Python-centric design. It currently manages local machines only.
 
 ## Install
 
-Install the CLI with `uv tool install .`, or run `./install.sh` to build a
-standalone zipapp and install it to `~/.local/bin/kitup`.
+kitup requires Python 3.14 or newer.
 
-A standalone zipapp can also be built with `./build.sh`; the result is
-`dist/kitup` and only needs the system Python standard library. Building
-requires [uv](https://docs.astral.sh/uv/): the build creates a temporary uv
-environment from `uv.lock`, installs kitup's runtime dependencies into it, and
-bundles them into the archive.
+```bash
+uv tool install .
+```
+
+Or run `./install.sh` to build the standalone Python zipapp and install it to
+`~/.local/bin`:
+
+```bash
+./install.sh
+```
 
 ## Quick start
 
-Create a configuration directory:
+Create a project:
+
+```bash
+kitup init my-machine
+```
+
+A project looks like this:
 
 ```text
 my-machine/
-├── kitup.py
-├── config.py
-└── bundles/
-    └── workstation/
-        ├── __init__.py
-        ├── tasks.py
-        └── files/
-            └── sshd.conf
+├── bundles/
+│   └── workstation/
+│       ├── __init__.py
+│       ├── tasks.py
+│       ├── files/
+│       │   └── sshd.conf
+│       └── vars/
+│           └── defaults.py
+├── files/
+│   ├── common.conf
+│   └── workstation/
+│       └── sshd.conf
+├── vars/
+│   ├── base.py
+│   └── laptop.py
+└── presets/
+    └── laptop
 ```
 
-`kitup.py` is the profile. It imports the bundle and declares the run:
-
-```python
-import config
-
-from bundles import workstation
-
-from kitup import profile
-
-profile(
-    bundles=[workstation],
-    config=[config],
-    description="Fedora workstation",
-)
-```
-
-`config.py` contains machine-specific values:
-
-```python
-PACKAGES = ["git", "ripgrep", "tmux", "neovim", "podman", "firewalld"]
-FLATPAK_APPLICATIONS = ["com.spotify.Client", "md.obsidian.Obsidian"]
-```
-
-A bundle is a Python package. Its `__init__.py` imports its task modules and
-creates the bundle:
+Bundles group related tasks. An optional `__init__.py` gives the bundle a
+display name and description:
 
 ```python
 # bundles/workstation/__init__.py
-from kitup.registry import Bundle
+from kitup import Bundle
 
-from . import tasks
-
-Bundle("Workstation", modules=[tasks])
+Bundle("Workstation", "Desktop packages and security settings")
 ```
 
-Tasks use the `task` decorator. The name is required and must be a non-empty
-string:
+Tasks are Python functions decorated with `@task`. Built-in modules keep each
+step idempotent:
 
 ```python
 # bundles/workstation/tasks.py
-from kitup.modules import dnf, files, flatpak, systemd
-from kitup.registry import task
+from kitup import task
+from kitup.modules import dnf, files, systemd
 
 
-@task("Install development packages", tags={"packages"})
-def install_dev_packages(ctx):
-    dnf.packages(ctx, ctx.config.PACKAGES)
+@task(tags={"packages"})
+def install_packages(ctx):
+    """Install the base package set."""
+    dnf.packages(ctx, ctx.vars.PACKAGES)
 
 
-@task("Add Flathub", tags={"flatpak"})
-def add_flathub(ctx):
-    flatpak.remote(
-        ctx,
-        "flathub",
-        "https://dl.flathub.org/repo/flathub.flatpakrepo",
-    )
-
-
-@task("Install Flatpak applications", tags={"flatpak"})
-def install_flatpak_apps(ctx):
-    flatpak.packages(ctx, ctx.config.FLATPAK_APPLICATIONS, remote="flathub")
-
-
-@task("Enable and start firewalld", tags={"services"})
-def enable_firewall(ctx):
-    systemd.unit(ctx, "firewalld.service", enabled=True, state="started")
-
-
-@task("Harden SSH", tags={"security"})
+@task(tags={"security"})
 def harden_ssh(ctx):
+    """Write the hardened SSH configuration."""
     files.file(
         ctx,
         "/etc/ssh/sshd_config.d/99-kitup.conf",
@@ -116,127 +92,131 @@ def harden_ssh(ctx):
         mode=0o644,
         sudo=True,
     )
+
+
+@task(tags={"services"})
+def enable_firewall(ctx):
+    """Enable and start firewalld."""
+    systemd.unit(ctx, "firewalld.service", enabled=True, state="started")
 ```
 
-Run it:
+The optional project `files/` tree overlays bundle resources. Relative source
+paths check `files/<bundle_id>/<path>`, then `files/<path>`, then the bundle's
+own resolution, so project files can override or add bundle files.
+
+Variable files hold machine-specific values. Later files replace same-named
+values:
+
+```python
+# vars/base.py
+PACKAGES = ["git", "ripgrep", "tmux", "podman", "firewalld"]
+
+# vars/laptop.py
+PACKAGES = ["git", "ripgrep", "tmux", "neovim", "podman", "firewalld"]
+```
+
+Bundles may also contain a `vars/` folder. Bundle vars are scoped to that
+bundle's tasks and act as defaults: project-level vars (including `--var-file`)
+are layered on top, so project values win on same-named keys.
+
+Plain nested dictionary values can be read with attributes as well as items,
+for example `ctx.vars.SETTINGS.theme.name`. Lists and tuples remain ordinary
+sequences, so indexed dictionaries still use `ctx.vars.SERVERS[0].host`.
+
+Presets are reusable sets of command-line options:
+
+```text
+# presets/laptop
+--include-bundles workstation
+-t packages,security
+```
+
+Inspect and apply the project:
 
 ```bash
-kitup list
-kitup apply
+kitup check my-machine          # discover and print the plan
+kitup list my-machine -v        # show bundles, tasks, and details
+kitup apply my-machine -n       # preview changes
+kitup apply my-machine          # apply the configuration
 ```
 
-`list` shows the bundles and tasks without changing anything. `apply` runs
-them. Every module is idempotent, so applying an unchanged configuration
-changes nothing. Add `--dry-run` to preview changes and `--diff` to see file
-diffs.
+Run selected tasks with tags, or select bundles and vars:
 
-## Commands
+```bash
+kitup apply my-machine -t packages
+kitup apply my-machine -b workstation
+kitup apply my-machine --preset laptop
+```
 
-Both commands use `./kitup.py` by default; pass another profile path to use a
-different configuration, for example `kitup apply examples/kitup.py`.
+## Features
 
-Common options:
+### Bundles and tasks
 
-- `-v`, `--verbose` — show task IDs, descriptions, and profile details.
-- `-n`, `--dry-run` — report what would change without changing anything.
-- `-d`, `--diff` — show unified diffs for file changes.
-- `-s`, `--sudo` — ask for sudo credentials before starting.
-- `-t TAGS` — only run tasks matching these tags.
-- `-x TAGS` — skip tasks matching these tags.
-- `-b BUNDLES`, `--only-bundles BUNDLES` — only include bundles with these names and their dependencies.
-- `-B BUNDLES`, `--skip-bundles BUNDLES` — exclude bundles with these names.
-- `-c`, `--no-color` — disable colors.
+Bundles are Python packages under `bundles/`. Sibling task modules are
+discovered automatically, or you can list them explicitly for exact ordering
+and reuse. Bundles can depend on each other with `depends_on`.
 
-Tags and bundle filters accept comma-separated values or repeated flags, for
-example `-t packages,config` or `-t packages -t config`. Bundle names match the
-names shown by `kitup list`; excluding a bundle that a selected bundle depends
-on is an error.
+### Variables and facts
 
-## Profiles
+`ctx.vars` exposes merged values from `vars/*.py`, additional `--var-file`
+sources, and the current bundle's optional `vars/` folder. Bundle vars are
+scoped to their bundle and act as defaults; project values win on collisions.
+`ctx.facts` provides read-only system information such as the hostname,
+distribution, kernel, and mounted filesystems.
 
-A profile is a Python file that imports bundles and declares the run: bundles,
-config sources, description, and default tags. Because it is ordinary Python,
-you can branch, loop, and build the bundle list conditionally. Profiles can
-reuse or extend other profiles with `profile.use()` and `profile.extend()`.
+### Presets and selection
 
-See [docs/profile.md](docs/profile.md) for the complete profile reference.
+Presets keep common option combinations in `presets/`. Tag filters and bundle
+selection let you apply just the part of a machine you are working on.
 
-## Bundles
+### Shared bundles and extra sources
 
-Bundles group related tasks and are ordinary Python packages. List task modules
-in the bundle's `modules` argument; the list order defines task order within the
-bundle. Bundles can depend on other bundles with `depends_on`; dependencies run
-first, and each bundle runs at most once. Resources such as config files live
-next to the bundle and are read through `ctx.bundle`.
-
-See [docs/profile.md](docs/profile.md#bundles) for details.
-
-## Configuration
-
-Configuration values are declared in the profile and exposed as `ctx.config`.
-Sources can be `Path` objects, imported modules, or dictionaries. They are
-applied from left to right; later values win. Only public names become
-configuration values, and relative config paths resolve relative to the profile
-that declares them.
-
-System information is available read-only as `ctx.facts`, including hostname,
-distribution, architecture, kernel, and mounted filesystems. See
-[docs/facts.md](docs/facts.md) for details.
-
-## Task helpers
-
-Tasks receive `ctx`, which provides the merged configuration (`ctx.config`),
-system facts (`ctx.facts`), the current bundle and its resources (`ctx.bundle`),
-command helpers (`ctx.run()` and `ctx.probe()`), and run controls such as
-`ctx.changed()`, `ctx.note()`, `ctx.memo()`, `ctx.skip()`, and `ctx.fail()`.
-Tasks can prompt for input, store values for later tasks, and read earlier task
-results.
+Bundles can live outside the project with `--bundle-path`, and extra variable
+files can be loaded with `--var-file`. Project `files/` overlays can override or
+add resources globally or for one bundle id. Absolute paths and `~` are accepted
+anywhere kitup takes a path.
 
 ### Task results and side effects
 
-Every task result is stored automatically and keyed by the task function, so a
-later task can inspect an earlier task's outcome and return value. Side effects
-are work a task registers to run only when it changes something; they can run
-immediately or be deferred to the end of the bundle.
+Later tasks can inspect earlier task results, and side effects run only when a
+task reports a change — useful for reloading a service after its configuration
+changes.
 
-See [task results](docs/profile.md#task-results) and
-[side effects](docs/profile.md#side-effects) for the full APIs.
+### Privileges
 
-## Built-in modules
+Mutating system operations request sudo automatically where appropriate.
+`--sudo` validates credentials before a run starts.
 
-All built-in modules are idempotent:
+## Commands
 
-- `dnf` — packages, groups, release RPMs, repositories, COPR, and dnf.conf options.
-- `flatpak` — remotes, applications, and runtimes.
-- `files` — files, directories, symlinks, lines, blocks, INI files, and moves.
-- `command` — guarded one-off commands.
-- `github_release` — public GitHub release metadata and assets.
-- `download` — remote file download over HTTP(S).
-- `decompress` — tar/zip extraction and single-file decompression.
-- `template` — Jinja2 templates rendered into managed files.
-- `systemd` — units and daemon reloads.
-- `gsettings` — GNOME settings.
-- `git` — repository clones and checkouts.
-- `sysctl` — kernel parameters, set at runtime and optionally persisted in a sysctl file.
-- `host` — hostname, time zone, NTP, RTC, and locale.
-- `users` — local users, groups, and group membership.
-- `podman` — images, containers, registries, and systemd/Quadlet units.
-- `pip` — Python packages via pip (optionally in a virtualenv) and pip.conf options.
-- `uv` — uv project dependencies, per-user CLI tools, and uv.toml options.
+| Command | Purpose |
+| --- | --- |
+| `kitup init [PROJECT_DIR]` | Scaffold a new project. |
+| `kitup check [PROJECT_DIR]` | Discover, resolve, and validate without running. |
+| `kitup list [PROJECT_DIR]` | Show the bundles and tasks in the plan. |
+| `kitup apply [PROJECT_DIR]` | Apply the plan. |
 
-See [docs/modules/index.md](docs/modules/index.md) for the full API.
+Common options include `-n/--dry-run`, `-d/--diff`, `-t/--tags`,
+`-x/--skip-tags`, `-b/--include-bundles`, `-p/--preset`, and `-v/--verbose`.
+See the [CLI reference](docs/cli.md) for the full list.
 
-## Privileges
+## Documentation
 
-Pass `sudo=True` to `ctx.run()` or a module helper when an operation needs root.
-Package, system service, and system Flatpak operations request sudo
-automatically. kitup handles sudo prompts and authenticates itself when
-privileged operations are required.
+- [Projects and bundles](docs/project.md) — project layout, tasks, vars,
+  results, and side effects.
+- [CLI reference](docs/cli.md) — commands, options, precedence, and exit codes.
+- [Presets](docs/presets.md) — reusable option sets.
+- [Facts](docs/facts.md) — system information available to tasks.
+- [Built-in modules](docs/modules/index.md) — the full task API.
 
 ## Examples
 
-An example configuration is included in [`examples/`](examples/). Start with
-[`examples/kitup.py`](examples/kitup.py).
+An example project is included in [`examples/`](examples/):
+
+```bash
+kitup list examples
+kitup apply examples --preset laptop -n
+```
 
 ## License
 

@@ -18,7 +18,7 @@ UNIT = "[Unit]\nDescription=test\n\n[Service]\nExecStart=/usr/bin/podman start e
 @pytest.fixture(autouse=True)
 def podman_available(monkeypatch):
     monkeypatch.setattr(
-        "kitup.modules.podman._common.shutil.which",
+        "kitup._utils.executables.shutil.which",
         lambda name: PODMAN if name == "podman" else None,
     )
 
@@ -663,12 +663,14 @@ def test_registry_absent_scenarios(tmp_path):
     target.write_text("old\n")
     ctx = context(tmp_path, sudo=FakeSudo(is_root=True))
 
-    podman.registry(ctx, "example", state="absent", path=target)
+    result = podman.registry(ctx, "example", state="absent", path=target)
     assert not target.exists()
     assert len(ctx.changes) == 1
+    assert result.action == "podman.registry"
 
-    podman.registry(ctx, "example", state="absent", path=target)
+    result = podman.registry(ctx, "example", state="absent", path=target)
     assert len(ctx.changes) == 1
+    assert result.action == "podman.registry"
     assert ctx.calls[-1].summary == f"ensure registry example is absent from {target}"
 
     target = tmp_path / "dir.conf"
@@ -987,7 +989,7 @@ def test_invalid_arguments_are_rejected(tmp_path):
 
 
 def test_missing_podman_binary_is_rejected(tmp_path, monkeypatch):
-    monkeypatch.setattr("kitup.modules.podman._common.shutil.which", lambda name: None)
+    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: None)
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="podman is required"):
@@ -1001,7 +1003,7 @@ def test_missing_podman_binary_is_rejected(tmp_path, monkeypatch):
 
 
 def test_file_backed_functions_do_not_require_podman(tmp_path, monkeypatch):
-    monkeypatch.setattr("kitup.modules.podman._common.shutil.which", lambda name: None)
+    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: None)
     ctx = context(tmp_path, sudo=FakeSudo(is_root=True))
 
     podman.registry(ctx, "example", location="docker.io", path=tmp_path / "example.conf")

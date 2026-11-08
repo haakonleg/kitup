@@ -138,10 +138,9 @@ def build(
 ) -> CallResult:
     """Build an image from a context directory.
 
-    Relative paths resolve like other source paths: a bare name under the
-    bundle's ``files`` directory, other relative paths against the bundle.
-    Content changes in the context are not detected. Use ``force=True`` to
-    rebuild an existing tag.
+    Relative paths resolve like other source paths. Absolute paths are used
+    as-is. Content changes in the context are not detected. Use ``force=True``
+    to rebuild an existing tag.
     """
     require_path(context, "build context")
     require_text(tag, "image tag")

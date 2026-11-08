@@ -5,9 +5,9 @@ Instructions for AI agents and contributors working in this repository.
 ## Project
 
 kitup is a Python-driven Linux configuration management tool inspired by
-Ansible, with a smaller scope. Profiles, bundles, tasks, conditions, and
+Ansible, with a smaller scope. Projects, bundles, tasks, conditions, and
 composition are ordinary Python code. Tasks are idempotent. The CLI loads a
-profile, resolves bundle dependencies into a plan, then runs it sequentially,
+project, resolves bundle dependencies into a plan, then runs it sequentially,
 fail-fast, with a shared `TaskContext`, changing only what is needed.
 
 - Python **3.14+** is required.
@@ -25,8 +25,8 @@ tests/
 ├── unit/          # default suite
 └── integration/   # Fedora container suite
 tools/             # integration runner and zipapp builder
-docs/              # profile, facts, and per-module API reference
-examples/          # example profiles and bundles
+docs/              # project, CLI, facts, and per-module API reference
+examples/          # example projects and bundles
 ```
 
 Put new built-in task APIs in `kitup/modules/`.
@@ -181,7 +181,7 @@ When changing packaging or the zipapp builder:
   implementation details or unnecessary information, and update them when public
   APIs or commands change.
 - DO raise `TaskFailed` for expected task failures and the specific `KitupError`
-  subclass (`ConfigError`, `BundleError`, `ResolutionError`, `PrivilegeError`)
+  subclass (`VarsError`, `BundleError`, `ResolutionError`, `PrivilegeError`)
   elsewhere. Never swallow exceptions silently; chain with `raise ... from exc`.
 - DO validate public API arguments at the top of the function using
   `kitup/_utils/validation.py` (`require_path`, `require_text`, `require_state`,

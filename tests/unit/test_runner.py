@@ -4,16 +4,19 @@ from kitup.registry import Bundle, side_effect
 from kitup.resolver import resolve
 from kitup.results import Status
 from kitup.runner import Runner
+from kitup.vars import Vars
 
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context, plain_output
 
 
-def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False):
+def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False, vars=None, bundle_vars=None):
     context = make_context(
         tmp_path,
         dry_run=dry_run,
         command=FakeCommandRunner(),
         sudo=FakeSudo(),
+        vars=vars,
+        bundle_vars=bundle_vars,
     )
     output = plain_output()
     runner = Runner(
@@ -25,6 +28,11 @@ def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False):
     )
     code = runner.run()
     return code, output.stream.getvalue(), context
+
+
+def stored_result(context, task):
+    """Read a stored result after the run cleared the current bundle."""
+    return context._run_state.bundles[task.bundle.id].results[task.id]
 
 
 def test_dependency_order_and_shared_dependency_once(tmp_path):
@@ -73,7 +81,7 @@ def test_no_change_call_is_recorded_but_keeps_the_task_ok(tmp_path):
 
     code, _, context = run_plan(tmp_path, [bundle])
 
-    result = context.result(check)
+    result = stored_result(context, bundle.tasks[0])
     assert code == 0
     assert result.status is Status.OK
     assert len(result.calls) == 1
@@ -92,7 +100,7 @@ def test_calls_recorded_before_skip_are_retained(tmp_path):
 
     code, _, context = run_plan(tmp_path, [bundle])
 
-    result = context.result(check)
+    result = stored_result(context, bundle.tasks[0])
     assert code == 0
     assert result.status is Status.SKIPPED
     assert [call.summary for call in result.calls] == ["prepared"]
@@ -163,7 +171,7 @@ def test_task_result_statuses_are_available(tmp_path):
     add_task(bundle, fail, name="Fail")
     code, _, context = run_plan(tmp_path, [bundle])
     assert code == 1
-    result = context.result(fail)
+    result = stored_result(context, bundle.tasks[0])
     assert result.failed
     assert result.value is None
 
@@ -186,7 +194,7 @@ def test_result_for_task_that_did_not_run_raises(tmp_path):
     assert "no result for task: check" in text
 
 
-def test_result_is_available_across_bundles(tmp_path):
+def test_result_lookup_does_not_cross_bundles(tmp_path):
     seen = []
     base = Bundle("base")
     desktop = Bundle("desktop", depends_on=[base])
@@ -195,7 +203,10 @@ def test_result_is_available_across_bundles(tmp_path):
         return "ready"
 
     def apply(ctx):
-        seen.append(ctx.result(check).value)
+        try:
+            ctx.result(check)
+        except TaskFailed as exc:
+            seen.append(str(exc))
 
     add_task(base, check, name="Check")
     add_task(desktop, apply, name="Apply")
@@ -203,14 +214,63 @@ def test_result_is_available_across_bundles(tmp_path):
     code, _, _ = run_plan(tmp_path, [desktop])
 
     assert code == 0
-    assert seen == ["ready"]
+    assert seen == ["no result for task: check"]
+
+
+def test_task_results_are_stored_per_bundle(tmp_path):
+    base = Bundle("base")
+    desktop = Bundle("desktop", depends_on=[base])
+
+    def shared(ctx):
+        return ctx.bundle.id
+
+    add_task(base, shared, name="Shared")
+    add_task(desktop, shared, name="Shared")
+
+    code, _, context = run_plan(tmp_path, [desktop])
+
+    assert code == 0
+    assert context._run_state.bundles["base"].results["base.shared"].value == "base"
+    assert context._run_state.bundles["desktop"].results["desktop.shared"].value == "desktop"
+
+
+def test_result_lookup_reads_the_current_bundle_only(tmp_path):
+    seen = []
+    one = Bundle("one")
+    two = Bundle("two")
+
+    def check(ctx):
+        return ctx.bundle.id
+
+    def apply(ctx):
+        seen.append(ctx.result(check).value)
+
+    add_task(one, check, name="Check")
+    add_task(one, apply, name="Apply")
+    add_task(two, check, name="Check")
+    add_task(two, apply, name="Apply")
+
+    code, _, _ = run_plan(tmp_path, [one, two])
+
+    assert code == 0
+    assert seen == ["one", "two"]
 
 
 def test_fail_fast_and_remaining_count(tmp_path):
     bundle = Bundle("base")
-    add_task(bundle, lambda ctx: None, name="First")
-    add_task(bundle, lambda ctx: (_ for _ in ()).throw(TaskFailed("boom")), name="Second")
-    add_task(bundle, lambda ctx: None, name="Third")
+
+    def first(ctx):
+        pass
+
+    def second(ctx):
+        raise TaskFailed("boom")
+
+    def third(ctx):
+        pass
+
+    add_task(bundle, first, name="First")
+    add_task(bundle, second, name="Second")
+    add_task(bundle, third, name="Third")
 
     code, text, _ = run_plan(tmp_path, [bundle])
 
@@ -273,9 +333,19 @@ def test_keyboard_interrupt_returns_130(tmp_path):
 def test_tag_filtering_and_skip_tags(tmp_path):
     calls = []
     bundle = Bundle("base")
-    add_task(bundle, lambda ctx: calls.append("packages"), tags={"packages"})
-    add_task(bundle, lambda ctx: calls.append("config"), tags={"config"})
-    add_task(bundle, lambda ctx: calls.append("both"), tags={"packages", "config"})
+
+    def packages(ctx):
+        calls.append("packages")
+
+    def config(ctx):
+        calls.append("config")
+
+    def both(ctx):
+        calls.append("both")
+
+    add_task(bundle, packages, tags={"packages"})
+    add_task(bundle, config, tags={"config"})
+    add_task(bundle, both, tags={"packages", "config"})
 
     code, text, _ = run_plan(tmp_path, [bundle], tags={"packages"}, skip_tags={"config"})
 
@@ -302,12 +372,16 @@ def test_sudo_is_requested_at_first_sudo_operation(tmp_path):
 def test_deferred_side_effect_runs_at_end_of_bundle_and_before_next_bundle(tmp_path):
     calls = []
     bundle = Bundle("base")
-    effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
+
+    def refresh(ctx):
+        calls.append("refresh")
+
+    effect = side_effect("Refresh")(refresh)
 
     def install(ctx):
         calls.append("install")
         ctx.changed(summary="+pkg")
-        ctx.register_side_effect(effect)
+        ctx.side_effect(effect)
 
     add_task(bundle, install, name="Install")
     add_task(bundle, lambda ctx: calls.append("last"), name="Last")
@@ -320,12 +394,16 @@ def test_deferred_side_effect_runs_at_end_of_bundle_and_before_next_bundle(tmp_p
     calls.clear()
     base = Bundle("base")
     other = Bundle("other", depends_on=[base])
-    effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
+
+    def refresh_again(ctx):
+        calls.append("refresh")
+
+    effect = side_effect("Refresh")(refresh_again)
 
     def install(ctx):
         calls.append("install")
         ctx.changed(summary="+pkg")
-        ctx.register_side_effect(effect)
+        ctx.side_effect(effect)
 
     add_task(base, install, name="Install")
     add_task(other, lambda ctx: calls.append("other"), name="Other")
@@ -350,7 +428,7 @@ def test_immediate_side_effect_runs_before_and_affects_next_task(tmp_path):
     def configure(ctx):
         calls.append("configure")
         ctx.changed(summary="+conf")
-        ctx.register_side_effect(effect)
+        ctx.side_effect(effect)
 
     def check(ctx):
         calls.append("next")
@@ -369,10 +447,14 @@ def test_unchanged_or_skipped_task_does_not_trigger_side_effect(tmp_path):
     for skip in (False, True):
         calls = []
         bundle = Bundle("base")
-        effect = side_effect("Refresh")(lambda ctx, calls=calls: calls.append("refresh"))
+
+        def refresh(ctx, calls=calls):
+            calls.append("refresh")
+
+        effect = side_effect("Refresh")(refresh)
 
         def install(ctx, skip=skip, effect=effect):
-            ctx.register_side_effect(effect)
+            ctx.side_effect(effect)
             if skip:
                 ctx.skip("nothing to do")
 
@@ -386,12 +468,19 @@ def test_failures_and_side_effects(tmp_path):
     # A task that fails before returning runs none of its side effects.
     calls = []
     bundle = Bundle("base")
-    immediate = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
-    deferred = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
+
+    def reload(ctx):
+        calls.append("reload")
+
+    def refresh(ctx):
+        calls.append("refresh")
+
+    immediate = side_effect("Reload", one_shot=False)(reload)
+    deferred = side_effect("Refresh")(refresh)
 
     def install(ctx):
-        ctx.register_side_effect(immediate)
-        ctx.register_side_effect(deferred)
+        ctx.side_effect(immediate)
+        ctx.side_effect(deferred)
         raise TaskFailed("boom")
 
     add_task(bundle, install, name="Install")
@@ -402,13 +491,20 @@ def test_failures_and_side_effects(tmp_path):
     # An immediate effect that already ran survives a later failure; deferred ones are discarded.
     calls = []
     bundle = Bundle("base")
-    immediate = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
-    deferred = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
+
+    def reload_again(ctx):
+        calls.append("reload")
+
+    def refresh_again(ctx):
+        calls.append("refresh")
+
+    immediate = side_effect("Reload", one_shot=False)(reload_again)
+    deferred = side_effect("Refresh")(refresh_again)
 
     def configure(ctx):
         ctx.changed(summary="+conf")
-        ctx.register_side_effect(immediate)
-        ctx.register_side_effect(deferred)
+        ctx.side_effect(immediate)
+        ctx.side_effect(deferred)
 
     add_task(bundle, configure, name="Configure")
     add_task(bundle, lambda ctx: (_ for _ in ()).throw(TaskFailed("boom")), name="Fail")
@@ -417,36 +513,19 @@ def test_failures_and_side_effects(tmp_path):
     assert calls == ["reload"]
 
 
-def test_one_shot_side_effect_across_bundles(tmp_path):
-    calls = []
-    base = Bundle("base")
-    other = Bundle("other", depends_on=[base])
-    effect = side_effect("Refresh")(lambda ctx: calls.append("refresh"))
-
-    def register(ctx):
-        ctx.changed(summary="+pkg")
-        ctx.register_side_effect(effect)
-
-    add_task(base, register, name="Base install")
-    add_task(other, register, name="Other install")
-
-    code, _, _ = run_plan(tmp_path, [other])
-    assert code == 0
-    assert calls == ["refresh"]
-
+def test_one_shot_side_effect_runs_once_per_bundle(tmp_path):
     calls = []
     base = Bundle("base")
     other = Bundle("other", depends_on=[base])
 
     def refresh(ctx):
         calls.append("refresh")
-        ctx.skip("not now")
 
     effect = side_effect("Refresh")(refresh)
 
     def register(ctx):
         ctx.changed(summary="+pkg")
-        ctx.register_side_effect(effect)
+        ctx.side_effect(effect)
 
     add_task(base, register, name="Base install")
     add_task(other, register, name="Other install")
@@ -456,15 +535,89 @@ def test_one_shot_side_effect_across_bundles(tmp_path):
     assert calls == ["refresh", "refresh"]
 
 
+def test_one_shot_side_effect_runs_once_per_bundle_registration(tmp_path):
+    calls = []
+    bundle = Bundle("base")
+
+    def refresh(ctx):
+        calls.append("refresh")
+
+    effect = side_effect("Refresh")(refresh)
+
+    def install(ctx):
+        ctx.changed(summary="+pkg")
+        ctx.side_effect(effect)
+        ctx.side_effect(effect)
+
+    add_task(bundle, install, name="Install")
+
+    code, _, _ = run_plan(tmp_path, [bundle])
+    assert code == 0
+    assert calls == ["refresh"]
+
+
+def test_skipped_one_shot_side_effect_can_run_again_in_the_same_bundle(tmp_path):
+    calls = []
+    bundle = Bundle("base")
+
+    def refresh(ctx):
+        calls.append("refresh")
+        if len(calls) == 1:
+            ctx.skip("not now")
+
+    effect = side_effect("Refresh")(refresh)
+
+    def first(ctx):
+        ctx.changed(summary="+first")
+        ctx.side_effect(effect)
+
+    def second(ctx):
+        ctx.changed(summary="+second")
+        ctx.side_effect(effect)
+
+    add_task(bundle, first, name="First")
+    add_task(bundle, second, name="Second")
+
+    code, _, _ = run_plan(tmp_path, [bundle])
+    assert code == 0
+    assert calls == ["refresh", "refresh"]
+
+
+def test_immediate_side_effect_runs_per_registration_across_bundles(tmp_path):
+    calls = []
+    base = Bundle("base")
+    other = Bundle("other", depends_on=[base])
+
+    def reload(ctx):
+        calls.append("reload")
+
+    effect = side_effect("Reload", one_shot=False)(reload)
+
+    def register(ctx):
+        ctx.changed(summary="+pkg")
+        ctx.side_effect(effect)
+
+    add_task(base, register, name="Base install")
+    add_task(other, register, name="Other install")
+
+    code, _, _ = run_plan(tmp_path, [other])
+    assert code == 0
+    assert calls == ["reload", "reload"]
+
+
 def test_immediate_side_effect_runs_for_every_registration(tmp_path):
     calls = []
     bundle = Bundle("base")
-    effect = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("reload"))
+
+    def reload(ctx):
+        calls.append("reload")
+
+    effect = side_effect("Reload", one_shot=False)(reload)
 
     def configure(ctx):
         ctx.changed(summary="+conf")
-        ctx.register_side_effect(effect)
-        ctx.register_side_effect(effect)
+        ctx.side_effect(effect)
+        ctx.side_effect(effect)
 
     add_task(bundle, configure, name="Configure")
 
@@ -486,7 +639,7 @@ def test_side_effect_failures_abort(tmp_path):
 
     def configure(ctx):
         ctx.changed(summary="+conf")
-        ctx.register_side_effect(effect)
+        ctx.side_effect(effect)
 
     add_task(bundle, configure, name="Configure")
     add_task(bundle, lambda ctx: calls.append("next"), name="Next")
@@ -509,7 +662,7 @@ def test_side_effect_failures_abort(tmp_path):
 
     def register(ctx):
         ctx.changed(summary="+pkg")
-        ctx.register_side_effect(effect)
+        ctx.side_effect(effect)
 
     add_task(base, register, name="Install")
     add_task(base, lambda ctx: calls.append("last"), name="Last")
@@ -536,8 +689,8 @@ def test_side_effects_run_in_dry_run_and_record_would_be_changes(tmp_path):
 
     def configure(ctx):
         ctx.changed(summary="+conf")
-        ctx.register_side_effect(immediate)
-        ctx.register_side_effect(deferred)
+        ctx.side_effect(immediate)
+        ctx.side_effect(deferred)
 
     add_task(bundle, configure, name="Configure")
 
@@ -551,16 +704,23 @@ def test_side_effects_run_in_dry_run_and_record_would_be_changes(tmp_path):
 def test_tag_filtering_selects_the_registering_task_and_its_side_effect(tmp_path):
     calls = []
     bundle = Bundle("base")
-    packages_effect = side_effect("Refresh")(lambda ctx: calls.append("packages"))
-    config_effect = side_effect("Reload", one_shot=False)(lambda ctx: calls.append("config"))
+
+    def refresh_packages(ctx):
+        calls.append("packages")
+
+    def reload_config(ctx):
+        calls.append("config")
+
+    packages_effect = side_effect("Refresh")(refresh_packages)
+    config_effect = side_effect("Reload", one_shot=False)(reload_config)
 
     def packages(ctx):
         ctx.changed(summary="+pkg")
-        ctx.register_side_effect(packages_effect)
+        ctx.side_effect(packages_effect)
 
     def configure(ctx):
         ctx.changed(summary="+conf")
-        ctx.register_side_effect(config_effect)
+        ctx.side_effect(config_effect)
 
     add_task(bundle, packages, name="Packages", tags={"packages"})
     add_task(bundle, configure, name="Configure", tags={"config"})
@@ -574,13 +734,15 @@ def test_tag_filtering_selects_the_registering_task_and_its_side_effect(tmp_path
 def test_side_effects_use_the_registering_bundle_context(tmp_path):
     seen = []
     bundle = Bundle("base", path=tmp_path)
-    effect = side_effect("Refresh")(
-        lambda ctx: seen.append((ctx.bundle.name, ctx.bundle_path, ctx.resolve_source("marker")))
-    )
+
+    def refresh(ctx):
+        seen.append((ctx.bundle.name, ctx.bundle_path, ctx.resolve_source("marker")))
+
+    effect = side_effect("Refresh")(refresh)
 
     def install(ctx):
         ctx.changed(summary="+pkg")
-        ctx.register_side_effect(effect)
+        ctx.side_effect(effect)
 
     add_task(bundle, install, name="Install")
 
@@ -588,6 +750,57 @@ def test_side_effects_use_the_registering_bundle_context(tmp_path):
 
     assert code == 0
     assert seen == [("base", tmp_path, tmp_path / "files" / "marker")]
+
+
+def test_bundle_vars_are_scoped_per_bundle(tmp_path):
+    seen = []
+    base = Bundle("base")
+    other = Bundle("other", depends_on=[base])
+
+    def show_base(ctx):
+        seen.append(("base", ctx.vars.VALUE, ctx.vars.get("BASE_ONLY")))
+
+    def show_other(ctx):
+        seen.append(("other", ctx.vars.VALUE, ctx.vars.get("BASE_ONLY")))
+
+    add_task(base, show_base, name="Show base")
+    add_task(other, show_other, name="Show other")
+
+    code, _, _ = run_plan(
+        tmp_path,
+        [other],
+        vars=Vars(VALUE="project"),
+        bundle_vars={base: Vars(VALUE="base", BASE_ONLY=1)},
+    )
+
+    assert code == 0
+    assert seen == [("base", "base", 1), ("other", "project", None)]
+
+
+def test_side_effects_use_bundle_scoped_vars(tmp_path):
+    seen = []
+    bundle = Bundle("base", path=tmp_path)
+
+    def refresh(ctx):
+        seen.append(ctx.vars.VALUE)
+
+    effect = side_effect("Refresh")(refresh)
+
+    def install(ctx):
+        ctx.changed(summary="+pkg")
+        ctx.side_effect(effect)
+
+    add_task(bundle, install, name="Install")
+
+    code, _, _ = run_plan(
+        tmp_path,
+        [bundle],
+        vars=Vars(VALUE="project"),
+        bundle_vars={bundle: Vars(VALUE="base")},
+    )
+
+    assert code == 0
+    assert seen == ["base"]
 
 
 def test_side_effect_results_are_accessible_and_stored(tmp_path):
@@ -605,7 +818,7 @@ def test_side_effect_results_are_accessible_and_stored(tmp_path):
 
     def install(ctx):
         ctx.changed(summary="+pkg")
-        ctx.register_side_effect(effect)
+        ctx.side_effect(effect)
 
     add_task(bundle, check, name="Check")
     add_task(bundle, install, name="Install")
@@ -613,7 +826,36 @@ def test_side_effect_results_are_accessible_and_stored(tmp_path):
     code, _, context = run_plan(tmp_path, [bundle])
     assert code == 0
     assert seen == ["release-1"]
-    assert context.result(effect.func).value == "done"
+    assert context._run_state.bundles["base"].results["base.refresh"].value == "done"
+
+
+def test_side_effect_results_are_bundle_local(tmp_path):
+    seen = []
+    base = Bundle("base")
+    other = Bundle("other", depends_on=[base])
+
+    def refresh(ctx):
+        return "base"
+
+    effect = side_effect("Refresh")(refresh)
+
+    def register(ctx):
+        ctx.changed(summary="+pkg")
+        ctx.side_effect(effect)
+
+    def check(ctx):
+        try:
+            ctx.result(refresh)
+        except TaskFailed as exc:
+            seen.append(str(exc))
+
+    add_task(base, register, name="Install")
+    add_task(other, check, name="Check")
+
+    code, _, _ = run_plan(tmp_path, [other])
+
+    assert code == 0
+    assert seen == ["no result for task: refresh"]
 
 
 def test_nested_side_effect_registration_fails(tmp_path):
@@ -621,13 +863,13 @@ def test_nested_side_effect_registration_fails(tmp_path):
     inner = side_effect("Inner")(lambda ctx: None)
 
     def outer(ctx):
-        ctx.register_side_effect(inner)
+        ctx.side_effect(inner)
 
     outer_effect = side_effect("Outer", one_shot=False)(outer)
 
     def install(ctx):
         ctx.changed(summary="+pkg")
-        ctx.register_side_effect(outer_effect)
+        ctx.side_effect(outer_effect)
 
     add_task(bundle, install, name="Install")
 

@@ -5,7 +5,7 @@ API.
 
 ```python
 from kitup.modules import github_release
-from kitup.registry import task
+from kitup import task
 ```
 
 The module only reads release metadata and selects assets by regular expression.
@@ -152,7 +152,7 @@ the checksum when GitHub provides one:
 from pathlib import Path
 
 from kitup.modules import decompress, download, github_release
-from kitup.registry import task
+from kitup import task
 
 
 @task("Install uv", tags={"packages"})

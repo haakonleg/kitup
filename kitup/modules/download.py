@@ -19,6 +19,7 @@ from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 from .._utils import file_ops
 from .._utils.file_helper import digest_path, replace_path
 from .._utils.http import open_url, read_response, validate_timeout
+from .._utils.paths import expand_path
 from .._utils.timing import timed
 from .._utils.validation import require_bool, require_mode, require_path
 from ..context import TaskContext
@@ -373,7 +374,7 @@ def _resolve_destination(
     parts: SplitResult,
 ) -> tuple[Path, file_ops.FileInfo | None]:
     require_path(dest, "download destination")
-    target = Path(dest)
+    target = expand_path(dest, error=TaskFailed)
     if isinstance(dest, str) and dest.endswith("/"):
         target = target / _url_filename(parts)
         return target, file_ops.stat_local(target)

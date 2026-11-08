@@ -9,12 +9,16 @@ class UsageError(KitupError):
     """Invalid invocation, configuration, or bundle setup (exit code 2)."""
 
 
-class ConfigError(UsageError):
-    """A configuration source could not be loaded."""
+class VarsError(UsageError):
+    """A variable source could not be loaded."""
 
 
-class ProfileError(UsageError):
-    """The profile is missing, malformed, or defines no run."""
+class ProjectError(UsageError):
+    """The project layout is missing, malformed, or defines no bundles."""
+
+
+class PresetError(UsageError):
+    """A preset file is missing, unreadable, or malformed."""
 
 
 class BundleError(UsageError):

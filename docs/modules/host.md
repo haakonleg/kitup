@@ -5,7 +5,7 @@ time zone, network time synchronization, RTC mode, and system locale.
 
 ```python
 from kitup.modules import host
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `hostname(ctx, name=None, *, pretty=None)`

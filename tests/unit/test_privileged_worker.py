@@ -43,7 +43,7 @@ def test_worker_rejects_oversized_request_before_start(ctx, monkeypatch):
 
     try:
         with pytest.raises(TaskFailed, match="too large"):
-            worker.request(Request("stat", {"path": str(ctx.config_dir)}))
+            worker.request(Request("stat", {"path": str(ctx.root)}))
         assert worker._process is None
     finally:
         worker.close()

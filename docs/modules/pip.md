@@ -4,7 +4,7 @@ Install and remove Python packages with pip — in the system Python by default,
 
 ```python
 from kitup.modules import pip
-from kitup.registry import task
+from kitup import task
 ```
 
 ## `packages(ctx, names, *, state="present", venv=None, python=None, extra_args=None, sudo=False)`

@@ -11,7 +11,7 @@ from .helpers import (
     argvs,
     call_data,
     completed,
-    config_context,
+    local_sudo_context,
     make_context,
     privileged_context,
     response,
@@ -22,7 +22,7 @@ UV = "/usr/bin/uv"
 
 @pytest.fixture(autouse=True)
 def uv_on_path(monkeypatch):
-    monkeypatch.setattr("kitup.modules.uv.shutil.which", lambda name: UV if name == "uv" else None)
+    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: UV if name == "uv" else None)
 
 
 def write_pyproject(project, body: str = "[]") -> None:
@@ -610,7 +610,7 @@ def test_tools_accepts_at_specifiers_but_dependencies_does_not(tmp_path):
 
 
 def test_missing_uv_is_reported(tmp_path, monkeypatch):
-    monkeypatch.setattr("kitup.modules.uv.shutil.which", lambda name: None)
+    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: None)
     ctx = make_context(tmp_path, command=FakeCommandRunner())
 
     with pytest.raises(TaskFailed, match="uv is required but was not found"):
@@ -1149,7 +1149,7 @@ def test_config_scope_system_defaults_to_sudo(tmp_path, monkeypatch):
 
 
 def test_config_scope_user_rejected_as_root(tmp_path):
-    ctx = config_context(tmp_path)  # is_root=True
+    ctx = local_sudo_context(tmp_path)  # is_root=True
 
     with pytest.raises(TaskFailed, match="user-scoped uv config cannot run as root"):
         uv.config(ctx, "native-tls", value=True, scope="user")

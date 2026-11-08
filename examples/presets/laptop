@@ -1,0 +1,3 @@
+# Example preset. Run it with: kitup apply examples --preset laptop
+# Each line is split like a shell command line; options only.
+--include-bundles base,workstation,dotfiles

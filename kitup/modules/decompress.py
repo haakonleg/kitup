@@ -24,6 +24,7 @@ from .._utils.file_helper import (
     replace_path,
     symlink_path,
 )
+from .._utils.paths import expand_path
 from .._utils.validation import normalize_strings, require_mode, require_path, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
@@ -81,10 +82,8 @@ def archive(
 ) -> CallResult:
     """Extract a tar or zip archive into ``dest``, replacing only differences.
 
-    ``src`` resolves like :func:`kitup.modules.files.copy`: a bare filename is
-    read from the bundle's ``files`` directory, other relative paths resolve
-    against the bundle directory, and absolute paths are used as-is. The format
-    is detected from the archive contents.
+    ``src`` resolves like :func:`kitup.modules.files.copy`. Absolute paths are
+    used as-is. The format is detected from the archive contents.
 
     ``creates`` is a path relative to ``dest`` (or an absolute path); when it
     exists the archive is not opened. ``strip_components`` removes leading path
@@ -99,14 +98,14 @@ def archive(
 
     source = ctx.resolve_source(src)
     _require_source(source, "archive source")
-    target = Path(dest)
+    target = expand_path(dest, error=TaskFailed)
     target_info = _lstat(target)
     if target_info is not None and not (stat.S_ISDIR(target_info.st_mode) and not stat.S_ISLNK(target_info.st_mode)):
         raise TaskFailed(f"archive destination is not a directory: {target}")
     if target_info is None:
         file_ops.require_parent_local(target)
     if creates is not None:
-        marker = Path(creates)
+        marker = expand_path(creates, error=TaskFailed)
         if not marker.is_absolute():
             marker = target / marker
         if _lstat(marker) is not None:
@@ -731,7 +730,7 @@ def _mkdir(path: Path, mode: int) -> None:
 
 
 def _single_destination(source: Path, dest: str | Path) -> Path:
-    target = Path(dest)
+    target = expand_path(dest, error=TaskFailed)
     if isinstance(dest, str) and dest.endswith("/"):
         return target / _decompressed_name(source)
     info = _lstat(target)
