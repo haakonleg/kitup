@@ -1,17 +1,16 @@
 """Command-line interface."""
 
-import argparse
 import sys
 import textwrap
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, override
+from typing import Any, Final
 
 from . import PACKAGE_NAME, __version__
 from ._utils.paths import expand_path
 from ._utils.security import disable_same_uid_ptrace
 from ._utils.validation import split_tags
+from .args import Args, Command, Option, Parser
 from .commands import CommandRunner
 from .context import TaskContext
 from .errors import KitupError, PrivilegeError, ProjectError, UsageError
@@ -26,173 +25,143 @@ from .runner import Runner
 from .vars import Vars, filter_var_paths, load_bundle_vars, load_vars
 
 _NO_DEFAULT: Final = object()
+_VERSION: Final = f"{PACKAGE_NAME} {__version__}"
 
 
-@dataclass(frozen=True, slots=True)
-class _Option:
-    """One CLI option, shared by the parser and the defaults table."""
-
-    flags: tuple[str, ...]
-    dest: str
-    default: Any
-    action: str = "store"
-    metavar: str | None = None
-    help: str | None = None
-    nargs: str | None = None
-    version: str | None = None
-
-
-class _StrictParser(argparse.ArgumentParser):
-    """An argument parser that only accepts exact option strings.
-
-    Abbreviations such as ``--inc`` and clustered short options such as
-    ``-nm`` are rejected. Subparsers inherit this class, so every command uses
-    the same strict matching.
-    """
-
-    @override
-    def _get_option_tuples(self, option_string: str) -> list[tuple[argparse.Action, str, str | None]]:
-        return []
-
-
-def _version() -> str:
-    return f"{PACKAGE_NAME} {__version__}"
-
-
-_PROJECT_OPTION: Final = _Option(
+_PROJECT_OPTION: Final = Option(
     flags=("project_dir",),
     dest="project_dir",
     default=None,
-    nargs="?",
     metavar="PROJECT_DIR",
     help="project directory (default: current directory)",
+    positional=True,
 )
-_PRESET_OPTION: Final = _Option(
+_PRESET_OPTION: Final = Option(
     flags=("-p", "--preset"),
     dest="preset",
     default=_NO_DEFAULT,
-    action="append",
+    kind="append",
     metavar="PRESET",
     help="read options from a preset file (relative to presets/, repeatable)",
 )
-_BUNDLE_PATH_OPTION: Final = _Option(
+_BUNDLE_PATH_OPTION: Final = Option(
     flags=("--bundle-path",),
     dest="bundle_path",
     default=(),
-    action="append",
+    kind="append",
     metavar="DIR",
     help="load bundles from an extra directory (repeatable)",
 )
-_VAR_FILE_OPTION: Final = _Option(
+_VAR_FILE_OPTION: Final = Option(
     flags=("--var-file",),
     dest="var_file",
     default=(),
-    action="append",
+    kind="append",
     metavar="PATH",
     help="load an extra var file (repeatable)",
 )
 _SELECTION_OPTIONS: Final = (
-    _Option(
+    Option(
         flags=("-b", "--include-bundles"),
         dest="include_bundles",
         default=(),
-        action="append",
+        kind="append",
         metavar="LIST",
         help="only include these bundles and their dependencies",
     ),
-    _Option(
+    Option(
         flags=("-B", "--exclude-bundles"),
         dest="exclude_bundles",
         default=(),
-        action="append",
+        kind="append",
         metavar="LIST",
         help="exclude these bundles",
     ),
-    _Option(
+    Option(
         flags=("-i", "--include-vars"),
         dest="include_vars",
         default=(),
-        action="append",
+        kind="append",
         metavar="LIST",
         help="only include these vars",
     ),
-    _Option(
+    Option(
         flags=("-E", "--exclude-vars"),
         dest="exclude_vars",
         default=(),
-        action="append",
+        kind="append",
         metavar="LIST",
         help="exclude these vars",
     ),
 )
 _RUN_OPTIONS: Final = (
-    _Option(
+    Option(
         flags=("-n", "--dry-run"),
         dest="dry_run",
         default=False,
-        action="store_true",
+        kind="flag",
         help="report without mutating",
     ),
-    _Option(
+    Option(
         flags=("-d", "--diff"),
         dest="diff",
         default=False,
-        action="store_true",
+        kind="flag",
         help="show unified diffs",
     ),
-    _Option(
+    Option(
         flags=("-s", "--sudo"),
         dest="sudo",
         default=False,
-        action="store_true",
+        kind="flag",
         help="validate sudo credentials up front",
     ),
-    _Option(
+    Option(
         flags=("-t", "--tags"),
         dest="tags",
         default=(),
-        action="append",
+        kind="append",
         metavar="TAGS",
         help="only matching tags",
     ),
-    _Option(
+    Option(
         flags=("-x", "--skip-tags"),
         dest="skip_tags",
         default=(),
-        action="append",
+        kind="append",
         metavar="TAGS",
         help="skip matching tags",
     ),
 )
-_VERSION_OPTION: Final = _Option(
+_VERSION_OPTION: Final = Option(
     flags=("-V", "--version"),
     dest="version",
     default=_NO_DEFAULT,
-    action="version",
-    version=_version(),
+    kind="version",
+    version=_VERSION,
 )
 _COMMON_OPTIONS: Final = (
-    _Option(
+    Option(
         flags=("-v", "--verbose"),
         dest="verbose",
         default=False,
-        action="store_true",
+        kind="flag",
         help="verbose output",
     ),
-    _Option(
+    Option(
         flags=("-c", "--no-color"),
         dest="no_color",
         default=False,
-        action="store_true",
+        kind="flag",
         help="disable colors",
     ),
     _VERSION_OPTION,
 )
-_FORCE_OPTION: Final = _Option(
+_FORCE_OPTION: Final = Option(
     flags=("--force",),
     dest="force",
     default=False,
-    action="store_true",
+    kind="flag",
     help="overwrite existing project files",
 )
 
@@ -215,88 +184,55 @@ _LIST_OPTIONS: Final = (
 )
 _CHECK_OPTIONS: Final = _LIST_OPTIONS
 _INIT_OPTIONS: Final = (_PROJECT_OPTION, _FORCE_OPTION, *_COMMON_OPTIONS)
-_ALL_OPTIONS: Final = (*_APPLY_OPTIONS, *_LIST_OPTIONS, *_CHECK_OPTIONS, *_INIT_OPTIONS)
+_ALL_OPTIONS: Final = (*_APPLY_OPTIONS, *_LIST_OPTIONS, *_INIT_OPTIONS)
 
 _DEFAULTS: Final[dict[str, Any]] = {
     option.dest: option.default for option in _ALL_OPTIONS if option.default is not _NO_DEFAULT
 }
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser() -> Parser:
     """Build the command-line argument parser.
 
     Defaults are suppressed so preset merging can distinguish an option
     that was supplied from one that was absent. ``_apply_defaults`` fills the
     final values from the option table.
     """
-    parser = _StrictParser(
+    return Parser(
         prog=PACKAGE_NAME,
         description="The simple python-driven system configuration tool.",
+        commands=(
+            Command(
+                name="apply",
+                help="apply a project",
+                options=_APPLY_OPTIONS,
+                epilog=_examples("kitup apply . --preset laptop", "kitup apply -b base,workstation -n"),
+            ),
+            Command(
+                name="list",
+                help="list bundles and tasks",
+                options=_LIST_OPTIONS,
+                epilog=_examples("kitup list", "kitup list my-machine -v"),
+            ),
+            Command(
+                name="check",
+                help="discover, resolve, and parse without running",
+                options=_CHECK_OPTIONS,
+                epilog=_examples("kitup check", "kitup check . --preset laptop"),
+            ),
+            Command(
+                name="init",
+                help="scaffold a new project",
+                options=_INIT_OPTIONS,
+                epilog=_examples("kitup init", "kitup init my-machine --force"),
+            ),
+        ),
+        top_options=(_VERSION_OPTION,),
     )
-    _add_options(parser, (_VERSION_OPTION,))
-    subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
-
-    apply_parser = subparsers.add_parser(
-        "apply",
-        help="apply a project",
-        epilog=_examples("kitup apply . --preset laptop", "kitup apply -b base,workstation -n"),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    _add_options(apply_parser, _APPLY_OPTIONS)
-
-    list_parser = subparsers.add_parser(
-        "list",
-        help="list bundles and tasks",
-        epilog=_examples("kitup list", "kitup list my-machine -v"),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    _add_options(list_parser, _LIST_OPTIONS)
-
-    check_parser = subparsers.add_parser(
-        "check",
-        help="discover, resolve, and parse without running",
-        epilog=_examples("kitup check", "kitup check . --preset laptop"),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    _add_options(check_parser, _CHECK_OPTIONS)
-
-    init_parser = subparsers.add_parser(
-        "init",
-        help="scaffold a new project",
-        epilog=_examples("kitup init", "kitup init my-machine --force"),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    _add_options(init_parser, _INIT_OPTIONS)
-
-    return parser
 
 
 def _examples(*lines: str) -> str:
     return "examples:\n" + "\n".join(f"  {line}" for line in lines)
-
-
-def _add_option(parser: argparse.ArgumentParser, option: _Option) -> None:
-    """Add one option table entry to a parser."""
-    kwargs: dict[str, Any] = {
-        "action": option.action,
-        "default": argparse.SUPPRESS,
-        "help": option.help,
-    }
-    if option.metavar is not None:
-        kwargs["metavar"] = option.metavar
-    if option.nargs is not None:
-        kwargs["nargs"] = option.nargs
-    if option.version is not None:
-        kwargs["version"] = option.version
-    if option.flags[0].startswith("-"):
-        kwargs["dest"] = option.dest
-    parser.add_argument(*option.flags, **kwargs)
-
-
-def _add_options(parser: argparse.ArgumentParser, options: Sequence[_Option]) -> None:
-    """Add a sequence of option table entries to a parser."""
-    for option in options:
-        _add_option(parser, option)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -327,7 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 130
 
 
-def _apply_defaults(args: argparse.Namespace) -> None:
+def _apply_defaults(args: Args) -> None:
     for key, value in _DEFAULTS.items():
         if not hasattr(args, key):
             setattr(args, key, value)
@@ -337,7 +273,7 @@ def _project_root(value: str | Path | None) -> Path:
     return expand_path(value or ".", error=ProjectError, resolve=True)
 
 
-def _run_project(args: argparse.Namespace, project: Project, output: Output) -> int:
+def _run_project(args: Args, project: Project, output: Output) -> int:
     if not project.bundles and args.command in {"apply", "check"}:
         raise ProjectError(_missing_bundles_message(project))
 
@@ -377,7 +313,7 @@ def _run_project(args: argparse.Namespace, project: Project, output: Output) -> 
 
 
 def _apply(
-    args: argparse.Namespace,
+    args: Args,
     project: Project,
     plan: BundlePlan,
     values: Vars,
@@ -503,7 +439,7 @@ def _value_filter(values: Sequence[str]) -> frozenset[str] | None:
     return frozenset(split_tags(values))
 
 
-def _init(args: argparse.Namespace, output: Output) -> int:
+def _init(args: Args, output: Output) -> int:
     root = _project_root(args.project_dir)
     files = _init_files(root)
     existing = [path for path in files if path.exists()]

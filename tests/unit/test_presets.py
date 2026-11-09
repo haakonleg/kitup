@@ -216,6 +216,13 @@ def test_invalid_quoting_is_an_error(tmp_path):
         parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
 
 
+def test_missing_option_value_in_preset_is_an_error(tmp_path):
+    make_project(tmp_path, preset={"laptop": "--include-bundles\n"})
+
+    with pytest.raises(PresetError, match="expected one argument"):
+        parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
+
+
 def test_blank_and_comment_only_preset_is_empty(tmp_path):
     write(tmp_path / "laptop", "# nothing here\n\n")
 

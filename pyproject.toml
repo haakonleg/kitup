@@ -78,6 +78,7 @@ convention = "pep257"
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D", "ARG", "T20"]
 "examples/**" = ["D", "ARG", "T20"]
+"kitup/args.py" = ["T20"]
 "kitup/cli.py" = ["T20"]
 "kitup/privileges.py" = ["T20"]
 "kitup/output/**" = ["T20"]

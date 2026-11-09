@@ -843,15 +843,7 @@ def test_cli_accepts_exact_option_forms():
 
 
 def test_defaults_cover_every_parser_option():
-    parser = cli.build_parser()
-    dests: set[str] = set()
-    for action in parser._actions:
-        for subparser in (getattr(action, "choices", None) or {}).values():
-            dests.update(
-                candidate.dest
-                for candidate in subparser._actions
-                if candidate.dest not in {"help", "version", "preset"}
-            )
+    dests = {option.dest for option in cli._ALL_OPTIONS if option.default is not cli._NO_DEFAULT}
 
     assert dests == set(cli._DEFAULTS)
     assert cli._DEFAULTS["include_bundles"] == ()

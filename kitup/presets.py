@@ -1,14 +1,12 @@
 """Read plain-text preset files from the project and merge them into CLI arguments."""
 
-import argparse
-import contextlib
-import io
 import shlex
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 
 from ._utils.paths import expand_path
+from .args import Args, ParseError, Parser
 from .errors import PresetError
 from .project import resolve_preset
 
@@ -40,11 +38,11 @@ def read_preset_tokens(path: Path) -> list[str]:
 
 
 def parse_with_presets(
-    parser: argparse.ArgumentParser,
+    parser: Parser,
     argv: Sequence[str],
     *,
     root: Path | None = None,
-) -> tuple[argparse.Namespace, tuple[Path, ...]]:
+) -> tuple[Args, tuple[Path, ...]]:
     """Parse ``argv`` and overlay any ``--preset`` files before the real CLI.
 
     Relative preset names resolve under the project's ``presets/`` directory;
@@ -63,7 +61,7 @@ def parse_with_presets(
         root = expand_path(root, error=PresetError, resolve=True)
 
     preset_paths = tuple(resolve_preset(root, value) for value in getattr(real, "preset", ()))
-    merged = argparse.Namespace()
+    merged = Args()
     for path in preset_paths:
         tokens = read_preset_tokens(path)
         namespace = _parse_preset_tokens(parser, command, tokens, path)
@@ -73,20 +71,16 @@ def parse_with_presets(
 
 
 def _parse_preset_tokens(
-    parser: argparse.ArgumentParser,
+    parser: Parser,
     command: str,
     tokens: Sequence[str],
     path: Path,
-) -> argparse.Namespace:
+) -> Args:
     filtered = _filter_preset_tokens(tokens)
-    stderr = io.StringIO()
-    stdout = io.StringIO()
     try:
-        with contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(stdout):
-            namespace, _ = parser.parse_known_args([command, *filtered])
-    except SystemExit as exc:
-        message = stderr.getvalue().strip() or f"invalid options in {path}"
-        raise PresetError(f"invalid preset {path}: {message}") from exc
+        namespace, _ = parser.parse_known_args([command, *filtered])
+    except ParseError as exc:
+        raise PresetError(f"invalid preset {path}: {exc}") from exc
 
     for key in ("command", "project_dir", "preset"):
         if hasattr(namespace, key):
@@ -114,6 +108,5 @@ def _filter_preset_tokens(tokens: Sequence[str]) -> list[str]:
     return filtered
 
 
-def _overlay(target: argparse.Namespace, source: argparse.Namespace) -> None:
-    for key, value in vars(source).items():
-        setattr(target, key, value)
+def _overlay(target: Args, source: Args) -> None:
+    target.__dict__.update(vars(source))
