@@ -4,10 +4,10 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
-from .._utils import file_ops
+from .._utils import file_actions
 from .._utils import ini as ini_ops
 from .._utils import toml as toml_ops
-from .._utils.file_helper import move_path, symlink_path
+from .._utils.file_primitives import move_path, symlink_path
 from .._utils.paths import expand_path
 from .._utils.validation import (
     State,
@@ -16,6 +16,7 @@ from .._utils.validation import (
     require_mode,
     require_path,
     require_regex,
+    require_single_line,
     require_state,
     require_text,
 )
@@ -43,14 +44,15 @@ def file(
     require_path(path, "file path")
     require_metadata(owner, group)
     require_mode(mode)
+    require_bool(sudo, "file sudo")
 
     target = expand_path(path, error=TaskFailed)
     if state == "absent":
-        info = file_ops.stat(ctx, target, sudo=sudo)
+        info = file_actions.stat(ctx, target, sudo=sudo)
         if info is not None and info.is_dir and not info.is_symlink:
             raise TaskFailed(f"path is a directory: {target}")
         return ctx.changed(
-            file_ops.remove(
+            file_actions.remove(
                 ctx,
                 target,
                 info,
@@ -61,7 +63,7 @@ def file(
             )
         )
 
-    info = file_ops.stat(ctx, target, sudo=sudo)
+    info = file_actions.stat(ctx, target, sudo=sudo)
     if content is None:
         if info is not None and info.is_symlink:
             raise TaskFailed(f"refusing to manage symlink as file: {target}")
@@ -69,15 +71,15 @@ def file(
             raise TaskFailed(f"path is a directory: {target}")
         if info is not None and not info.is_file:
             raise TaskFailed(f"path is not a regular file: {target}")
-        data = file_ops.read_bytes(ctx, target, info, sudo=sudo) if info is not None else b""
+        data = file_actions.read_bytes(ctx, target, info, sudo=sudo) if info is not None else b""
         summary = f"create {target}" if info is None else f"update metadata for {target}"
     else:
         data = content.encode()
         summary = f"write {target}"
 
-    file_ops.require_parent(ctx, target, sudo=sudo)
+    file_actions.require_parent(ctx, target, sudo=sudo)
     return ctx.changed(
-        file_ops.apply_bytes(
+        file_actions.apply_bytes(
             ctx,
             target,
             data,
@@ -113,23 +115,24 @@ def copy(
     require_path(dest, "copy destination")
     require_metadata(owner, group)
     require_mode(mode)
+    require_bool(sudo, "copy sudo")
     source = ctx.resolve_source(src)
     target = expand_path(dest, error=TaskFailed)
     if str(dest).endswith("/"):
         target /= source.name
-    source_info = file_ops.stat(ctx, source, sudo=sudo)
+    source_info = file_actions.stat(ctx, source, sudo=sudo)
     if source_info is None or source_info.is_symlink or not source_info.is_file:
         raise TaskFailed(f"copy source is not a regular file: {source}")
-    target_info = file_ops.stat(ctx, target, sudo=sudo)
+    target_info = file_actions.stat(ctx, target, sudo=sudo)
     if target_info is not None and target_info.is_dir:
         raise TaskFailed(f"destination is a directory: {target}")
 
-    file_ops.require_parent(ctx, target, sudo=sudo)
+    file_actions.require_parent(ctx, target, sudo=sudo)
     return ctx.changed(
-        file_ops.apply_bytes(
+        file_actions.apply_bytes(
             ctx,
             target,
-            file_ops.read_bytes(ctx, source, source_info, sudo=sudo),
+            file_actions.read_bytes(ctx, source, source_info, sudo=sudo),
             action="files.copy",
             mode=source_info.mode if mode is None else mode,
             owner=owner,
@@ -164,13 +167,14 @@ def move(
     require_path(dest, "move destination")
     require_metadata(owner, group)
     require_mode(mode)
+    require_bool(sudo, "move sudo")
     source = expand_path(src, error=TaskFailed)
     target = expand_path(dest, error=TaskFailed)
     if str(dest).endswith("/"):
         target /= source.name
 
-    source_info = file_ops.stat(ctx, source, sudo=sudo)
-    target_info = file_ops.stat(ctx, target, sudo=sudo)
+    source_info = file_actions.stat(ctx, source, sudo=sudo)
+    target_info = file_actions.stat(ctx, target, sudo=sudo)
 
     def reconcile(*, unchanged_summary: str | None = None) -> CallResult:
         return _reconcile_metadata(
@@ -199,7 +203,7 @@ def move(
     if source.absolute() == target.absolute():
         return ctx.changed(reconcile())
 
-    file_ops.require_parent(ctx, target, sudo=sudo)
+    file_actions.require_parent(ctx, target, sudo=sudo)
     move_summary = f"move {source} -> {target}"
     metadata_requested = mode is not None or owner is not None or group is not None
 
@@ -215,19 +219,19 @@ def move(
 
     if ctx.dry_run:
         if metadata_requested:
-            file_ops.resolve_metadata(owner, group)
+            file_actions.resolve_metadata(owner, group)
             return ctx.changed(result(metadata=True))
         return ctx.changed(result(metadata=False))
 
     _move(ctx, source, target, sudo=sudo)
     if not metadata_requested:
         return ctx.changed(result(metadata=False))
-    moved_info = file_ops.stat(ctx, target, sudo=sudo)
+    moved_info = file_actions.stat(ctx, target, sudo=sudo)
     if moved_info is None:
         raise TaskFailed(f"move destination is missing after moving: {target}")
     resolved_mode = moved_info.mode if mode is None else mode
-    if file_ops.metadata_differs(moved_info, resolved_mode, owner, group):
-        file_ops.apply_metadata_ctx(
+    if file_actions.metadata_differs(moved_info, resolved_mode, owner, group):
+        file_actions.apply_metadata_ctx(
             ctx,
             target,
             resolved_mode,
@@ -251,16 +255,19 @@ def line(
     """Add, replace, or remove a line selected by an exact value or regex."""
     require_state(state, "line")
     require_path(path, "line path")
+    require_single_line(line, "line")
+    require_bool(sudo, "line sudo")
+    pattern: re.Pattern[str] | None = None
     if match is not None:
-        require_regex(match, "line match")
+        pattern = require_regex(match, "line match")
 
     target = expand_path(path, error=TaskFailed)
-    text = file_ops.read_text(ctx, target, sudo=sudo)
+    text = file_actions.read_text(ctx, target, sudo=sudo)
     lines = text.splitlines(keepends=True)
-    desired = line.rstrip("\n")
+    desired = line
 
     if state == "present":
-        index = _matching_line(lines, desired, match)
+        index = _matching_line(lines, desired, pattern)
         rendered = desired + "\n"
         if index is None:
             if lines and not lines[-1].endswith("\n"):
@@ -274,13 +281,13 @@ def line(
         summary = f"{'replace' if index is not None else 'append'} line in {target}"
         unchanged_summary = f"ensure line in {target}"
     else:
-        new_lines = [existing for existing in lines if not _line_matches(existing, desired, match)]
+        new_lines = [existing for existing in lines if not _line_matches(existing, desired, pattern)]
         summary = f"remove line from {target}"
         unchanged_summary = f"ensure line is absent from {target}"
 
     new_text = "".join(new_lines)
     return ctx.changed(
-        file_ops.apply_text(
+        file_actions.apply_text(
             ctx,
             target,
             text,
@@ -307,9 +314,11 @@ def block(
     require_state(state, "block")
     require_path(path, "block path")
     require_text(marker, "block marker")
+    require_single_line(marker, "block marker")
+    require_bool(sudo, "block sudo")
 
     target = expand_path(path, error=TaskFailed)
-    text = file_ops.read_text(ctx, target, sudo=sudo)
+    text = file_actions.read_text(ctx, target, sudo=sudo)
     lines = text.splitlines(keepends=True)
     begin = f"# BEGIN {marker}\n"
     end = f"# END {marker}\n"
@@ -343,7 +352,7 @@ def block(
 
     new_text = "".join(new_lines)
     return ctx.changed(
-        file_ops.apply_text(
+        file_actions.apply_text(
             ctx,
             target,
             text,
@@ -379,6 +388,7 @@ def ini(
     require_state(state, "ini")
     require_path(path, "ini path")
     require_bool(create, "ini create")
+    require_bool(sudo, "ini sudo")
     if section is not None:
         section = ini_ops.require_ini_section(section)
     if option is not None:
@@ -397,14 +407,16 @@ def ini(
         set_value = ini_ops.require_ini_value(value)
     elif section is None and option is None:
         raise TaskFailed("ini state 'absent' requires a section or an option")
+    elif value is not None:
+        raise TaskFailed("ini state 'absent' does not take a value")
 
     return ctx.changed(
-        file_ops.apply_ini(
+        file_actions.apply_ini(
             ctx,
             expand_path(path, error=TaskFailed),
             section=section,
             option=option,
-            value=set_value if state == "present" else value,
+            value=set_value,
             match=match,
             create=create,
             action="files.ini",
@@ -446,6 +458,7 @@ def toml(
     require_state(state, "toml")
     require_path(path, "toml path")
     require_bool(create, "toml create")
+    require_bool(sudo, "toml sudo")
     if table is not None:
         table = toml_ops.require_toml_key(table, "toml table")
     if key is not None:
@@ -478,6 +491,16 @@ def toml(
     )
 
 
+def _directory_result(ctx: TaskContext, target: Path, summary: str, *, changed: bool = True) -> CallResult:
+    """Record a ``files.directory`` result for ``target``."""
+    return ctx.changed(
+        action="files.directory",
+        changed=changed,
+        summary=summary,
+        path=str(target),
+    )
+
+
 def directory(
     ctx: TaskContext,
     path: str | Path,
@@ -494,21 +517,23 @@ def directory(
     require_path(path, "directory path")
     require_metadata(owner, group)
     require_mode(mode)
+    require_bool(force, "directory force")
+    require_bool(sudo, "directory sudo")
 
     target = expand_path(path, error=TaskFailed)
     if state == "absent":
-        info = file_ops.stat(ctx, target, sudo=sudo)
+        info = file_actions.stat(ctx, target, sudo=sudo)
         if info is None:
-            return ctx.changed(
-                action="files.directory",
+            return _directory_result(
+                ctx,
+                target,
+                f"ensure directory {target} is absent",
                 changed=False,
-                summary=f"ensure directory {target} is absent",
-                path=str(target),
             )
         if info.is_symlink or not info.is_dir:
             raise TaskFailed(f"path is not a directory: {target}")
         return ctx.changed(
-            file_ops.remove(
+            file_actions.remove(
                 ctx,
                 target,
                 info,
@@ -519,22 +544,18 @@ def directory(
             )
         )
 
-    info = file_ops.stat(ctx, target, sudo=sudo)
+    info = file_actions.stat(ctx, target, sudo=sudo)
     if info is not None and info.is_symlink:
         raise TaskFailed(f"refusing to manage symlink as directory: {target}")
     if info is not None and not info.is_dir:
         raise TaskFailed(f"path exists and is not a directory: {target}")
 
     if info is None:
-        file_ops.require_parent(ctx, target, sudo=sudo)
+        file_actions.require_parent(ctx, target, sudo=sudo)
         if ctx.dry_run:
-            file_ops.resolve_metadata(owner, group)
-            return ctx.changed(
-                action="files.directory",
-                summary=f"mkdir {target}",
-                path=str(target),
-            )
-        file_ops.make_directory(
+            file_actions.resolve_metadata(owner, group)
+            return _directory_result(ctx, target, f"mkdir {target}")
+        file_actions.make_directory(
             ctx,
             target,
             mode=0o755 if mode is None else mode,
@@ -542,33 +563,16 @@ def directory(
             group=group,
             sudo=sudo,
         )
-        return ctx.changed(
-            action="files.directory",
-            summary=f"mkdir {target}",
-            path=str(target),
-        )
+        return _directory_result(ctx, target, f"mkdir {target}")
 
     resolved = info.mode if mode is None else mode
-    if file_ops.metadata_differs(info, resolved, owner, group):
+    if file_actions.metadata_differs(info, resolved, owner, group):
         if ctx.dry_run:
-            file_ops.resolve_metadata(owner, group)
-            return ctx.changed(
-                action="files.directory",
-                summary=f"chmod {target}",
-                path=str(target),
-            )
-        file_ops.apply_metadata_ctx(ctx, target, resolved, owner, group, sudo=sudo)
-        return ctx.changed(
-            action="files.directory",
-            summary=f"chmod {target}",
-            path=str(target),
-        )
-    return ctx.changed(
-        action="files.directory",
-        changed=False,
-        summary=f"ensure directory {target}",
-        path=str(target),
-    )
+            file_actions.resolve_metadata(owner, group)
+            return _directory_result(ctx, target, f"chmod {target}")
+        file_actions.apply_metadata_ctx(ctx, target, resolved, owner, group, sudo=sudo)
+        return _directory_result(ctx, target, f"chmod {target}")
+    return _directory_result(ctx, target, f"ensure directory {target}", changed=False)
 
 
 def symlink(
@@ -581,9 +585,10 @@ def symlink(
     """Create a symlink, replacing an existing file or symlink."""
     require_text(str(target), "symlink target")
     require_path(path, "symlink path")
+    require_bool(sudo, "symlink sudo")
     link = expand_path(path, error=TaskFailed)
     desired = str(expand_path(target, error=TaskFailed))
-    info = file_ops.stat(ctx, link, sudo=sudo)
+    info = file_actions.stat(ctx, link, sudo=sudo)
     if info is not None and info.is_symlink and info.link == desired:
         return ctx.changed(
             action="files.symlink",
@@ -595,7 +600,7 @@ def symlink(
     if info is not None and info.is_dir and not info.is_symlink:
         raise TaskFailed(f"refusing to replace a directory with a symlink: {link}")
 
-    file_ops.require_parent(ctx, link, sudo=sudo)
+    file_actions.require_parent(ctx, link, sudo=sudo)
     result = CallResult(
         action="files.symlink",
         changed=True,
@@ -605,8 +610,8 @@ def symlink(
     )
     if ctx.dry_run:
         return ctx.changed(result)
-    if file_ops.privileged(ctx, sudo=sudo):
-        file_ops.worker_request(ctx, "symlink", path=str(link), target=desired)
+    if file_actions.privileged(ctx, sudo=sudo):
+        file_actions.worker_request(ctx, "symlink", path=str(link), target=desired)
         return ctx.changed(result)
     try:
         symlink_path(desired, link)
@@ -616,8 +621,8 @@ def symlink(
 
 
 def _move(ctx: TaskContext, source: Path, target: Path, *, sudo: bool) -> None:
-    if file_ops.privileged(ctx, sudo=sudo):
-        file_ops.worker_request(ctx, "move", source=str(source), path=str(target))
+    if file_actions.privileged(ctx, sudo=sudo):
+        file_actions.worker_request(ctx, "move", source=str(source), path=str(target))
         return
     try:
         move_path(source, target)
@@ -630,7 +635,7 @@ def _move(ctx: TaskContext, source: Path, target: Path, *, sudo: bool) -> None:
 def _reconcile_metadata(
     ctx: TaskContext,
     target: Path,
-    info: file_ops.FileInfo | None,
+    info: file_actions.FileInfo | None,
     *,
     action: str,
     src: Path,
@@ -649,7 +654,7 @@ def _reconcile_metadata(
             **data,
         )
     resolved_mode = info.mode if mode is None else mode
-    if not file_ops.metadata_differs(info, resolved_mode, owner, group):
+    if not file_actions.metadata_differs(info, resolved_mode, owner, group):
         return CallResult(
             action=action,
             changed=False,
@@ -657,24 +662,24 @@ def _reconcile_metadata(
             **data,
         )
     if ctx.dry_run:
-        file_ops.resolve_metadata(owner, group)
+        file_actions.resolve_metadata(owner, group)
         return CallResult(action=action, changed=True, summary=f"update metadata for {target}", **data)
-    file_ops.apply_metadata_ctx(ctx, target, resolved_mode, owner, group, sudo=sudo)
+    file_actions.apply_metadata_ctx(ctx, target, resolved_mode, owner, group, sudo=sudo)
     return CallResult(action=action, changed=True, summary=f"update metadata for {target}", **data)
 
 
-def _matching_line(lines: list[str], desired: str, match: str | None) -> int | None:
+def _matching_line(lines: list[str], desired: str, match: re.Pattern[str] | None) -> int | None:
     for index, existing in enumerate(lines):
         if _line_matches(existing, desired, match):
             return index
     return None
 
 
-def _line_matches(existing: str, desired: str, match: str | None) -> bool:
+def _line_matches(existing: str, desired: str, match: re.Pattern[str] | None) -> bool:
     candidate = existing.rstrip("\n")
     if match is None:
         return candidate == desired
-    return re.search(match, candidate) is not None
+    return match.search(candidate) is not None
 
 
 def _block_bounds(lines: list[str], marker: str) -> tuple[int, int] | None:

@@ -119,6 +119,15 @@ def test_file_rejects_undefined_var_field(tmp_path):
     assert not dest.exists()
 
 
+def test_file_wraps_runtime_rendering_errors(tmp_path):
+    source = tmp_path / "template.j2"
+    write_source(source, "{{ 1 / 0 }}\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="template rendering error"):
+        template.file(ctx, source, tmp_path / "rendered.conf")
+
+
 def test_file_reports_syntax_error_location(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "{% if %}\n")
@@ -149,6 +158,15 @@ def test_file_rejects_invalid_variables(tmp_path, variables, message):
 
     with pytest.raises(TaskFailed, match=message):
         template.file(ctx, source, tmp_path / "rendered.conf", variables=variables)
+
+
+def test_file_rejects_non_boolean_sudo(tmp_path):
+    source = tmp_path / "template.j2"
+    write_source(source, "value\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="template sudo must be a boolean"):
+        template.file(ctx, source, tmp_path / "rendered.conf", sudo="yes")
 
 
 def test_file_resolves_sources_relative_to_the_bundle(tmp_path):

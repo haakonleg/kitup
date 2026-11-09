@@ -34,7 +34,7 @@ def make_project(
         for name, value in bundles.items():
             folder = root / "bundles" / name
             if isinstance(value, str):
-                write(folder / "__init__.py", "from kitup import Bundle\n\nBundle()\n")
+                write(folder / "__init__.py", "from kitup import bundle\n\nbundle()\n")
                 write(folder / "tasks.py", value)
             else:
                 for relative, text in value.items():

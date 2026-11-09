@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from kitup.errors import PresetError, ProjectError
+from kitup.errors import BundleError, PresetError, ProjectError
 from kitup.project import (
     discover_bundle_dirs,
     discover_var_paths,
@@ -53,11 +53,11 @@ def test_discovers_bundles_by_folder_id(tmp_path):
         tmp_path,
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base system', 'Core packages')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base system', 'Core packages')\n",
                 "tasks.py": task_source("install"),
             },
             "workstation": {
-                "__init__.py": "from kitup import Bundle\n\nBundle(depends_on=['base'])\n",
+                "__init__.py": "from kitup import bundle\n\nbundle(depends_on=['base'])\n",
                 "tasks.py": task_source("desktop"),
             },
         },
@@ -73,6 +73,29 @@ def test_discovers_bundles_by_folder_id(tmp_path):
     assert workstation.name == "workstation"
     assert workstation.depends_on == ("base",)
     assert [task.name for task in base.tasks] == ["Install"]
+
+
+def test_discovered_bundles_are_immutable(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={"base": {"__init__.py": "from kitup import bundle\n\nbundle('Base')\n"}},
+    )
+
+    (bundle,) = load_project(tmp_path).bundles
+
+    assert isinstance(bundle.tasks, tuple)
+    for attribute, value in (
+        ("id", "other"),
+        ("name", "Other"),
+        ("description", "other"),
+        ("path", tmp_path),
+        ("var_paths", (tmp_path / "vars.py",)),
+    ):
+        with pytest.raises(AttributeError, match="immutable after discovery"):
+            setattr(bundle, attribute, value)
+
+    with pytest.raises(BundleError, match="immutable after discovery"):
+        bundle.task(lambda ctx: None)
 
 
 def test_synthesizes_a_bundle_when_the_folder_has_no_init(tmp_path):
@@ -112,7 +135,7 @@ def test_auto_discovery_is_sorted_and_skips_private_modules(tmp_path):
         tmp_path,
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle()\n",
+                "__init__.py": "from kitup import bundle\n\nbundle()\n",
                 "02_second.py": task_source("second"),
                 "01_first.py": task_source("first"),
                 "_helper.py": "VALUE = 1\n",
@@ -127,14 +150,14 @@ def test_auto_discovery_is_sorted_and_skips_private_modules(tmp_path):
 
 
 def test_invalid_bundle_folder_name_is_an_error(tmp_path):
-    write(tmp_path / "bundles" / "bad-name" / "__init__.py", "from kitup import Bundle\n\nBundle()\n")
+    write(tmp_path / "bundles" / "bad-name" / "__init__.py", "from kitup import bundle\n\nbundle()\n")
 
     with pytest.raises(ProjectError, match="invalid bundle name 'bad-name'"):
         load_project(tmp_path)
 
 
 def test_keyword_bundle_folder_name_is_an_error(tmp_path):
-    write(tmp_path / "bundles" / "class" / "__init__.py", "from kitup import Bundle\n\nBundle()\n")
+    write(tmp_path / "bundles" / "class" / "__init__.py", "from kitup import bundle\n\nbundle()\n")
 
     with pytest.raises(ProjectError, match="invalid bundle name 'class'"):
         load_project(tmp_path)
@@ -233,7 +256,7 @@ def test_bundle_vars_follow_an_explicit_bundle_path(tmp_path):
     write(resources / "vars" / "defaults.py", "VALUE = 1\n")
     write(
         tmp_path / "bundles" / "base" / "__init__.py",
-        f"from kitup import Bundle\n\nBundle(path={str(resources)!r})\n",
+        f"from kitup import bundle\n\nbundle(path={str(resources)!r})\n",
     )
     write(tmp_path / "bundles" / "base" / "tasks.py", task_source("run"))
 
@@ -275,7 +298,7 @@ def test_load_project_resolves_relative_preset_paths(tmp_path):
 
 
 def test_load_project_restores_sys_path(tmp_path):
-    make_project(tmp_path, bundles={"base": {"__init__.py": "from kitup import Bundle\n\nBundle()\n"}})
+    make_project(tmp_path, bundles={"base": {"__init__.py": "from kitup import bundle\n\nbundle()\n"}})
     before = list(sys.path)
 
     load_project(tmp_path)
@@ -296,7 +319,7 @@ def test_load_project_can_run_repeatedly_on_the_same_project(tmp_path):
 def test_load_project_isolates_projects_with_the_same_bundle_names(tmp_path):
     def bundle_files(marker):
         return {
-            "__init__.py": "from kitup import Bundle\n\nBundle('Same')\n",
+            "__init__.py": "from kitup import bundle\n\nbundle('Same')\n",
             "tasks.py": f"from kitup import task\n\n@task\ndef mark(ctx):\n    return {marker!r}\n",
         }
 
@@ -334,7 +357,7 @@ def external_bundle(root, name, *, init=True, depends_on=()):
     if init:
         write(
             folder / "__init__.py",
-            f"from kitup import Bundle\n\nBundle({name!r}, depends_on={list(depends_on)!r})\n",
+            f"from kitup import bundle\n\nbundle({name!r}, depends_on={list(depends_on)!r})\n",
         )
     write(
         folder / "tasks.py",
@@ -382,7 +405,7 @@ def test_relative_imports_inside_an_external_bundle(tmp_path):
     write(folder / "_helper.py", "VALUE = 'from helper'\n")
     write(
         folder / "__init__.py",
-        "from kitup import Bundle\n\nBundle('Extra')\n",
+        "from kitup import bundle\n\nbundle('Extra')\n",
     )
     write(
         folder / "tasks.py",

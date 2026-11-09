@@ -59,7 +59,10 @@ Options can share a line:
 
 The option names are the same as on the command line. They must be written
 exactly as documented; abbreviated long options and combined short options such
-as `-nm` are not recognized.
+as `-nm` are not recognized. An option that no command recognizes is ignored
+with a warning naming the preset and the option, so typos do not pass silently.
+Options that are valid for another command are ignored without a warning, which
+lets a preset be shared between `apply`, `list`, and `check`.
 
 Presets can set the same options as the command line, including
 `--bundle-path` and `--var-file`:

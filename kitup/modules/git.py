@@ -6,7 +6,7 @@ from typing import Final
 
 from .._utils.executables import require_command
 from .._utils.paths import expand_path
-from .._utils.validation import require_path, require_success, require_text
+from .._utils.validation import require_bool, require_path, require_success, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
@@ -36,6 +36,9 @@ def repo(
     require_text(url, "git repository URL")
     require_path(dest, "git destination path")
     require_text(version, "git version")
+    require_bool(single_branch, "git single_branch")
+    require_bool(update, "git update")
+    require_bool(force, "git force")
     if url.startswith("-"):
         raise TaskFailed("git repository URL must not start with '-'")
     if version.startswith("-"):
@@ -121,6 +124,11 @@ def _reconcile(
             summary=f"ensure {dest} at {version}",
             **data,
         )
+
+    if url_changed and ctx.dry_run:
+        # The new URL is not applied in dry-run, so fetching would contact the
+        # old remote and resolve the version against the wrong refs.
+        return CallResult(action="git.repo", changed=True, summary="; ".join(summaries), **data)
 
     _fetch(ctx, git, dest)
     desired = _resolve_version(ctx, git, dest, version)

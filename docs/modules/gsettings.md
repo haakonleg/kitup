@@ -15,7 +15,8 @@ Set a key, or reset it to its schema default.
 
 - `schema` — schema name, such as `org.gnome.desktop.interface`.
 - `key` — key name within the schema.
-- `value` — desired value. Required when `state="present"`.
+- `value` — desired value. Required when `state="present"` and rejected when
+  `state="absent"`.
 - `state="present"` requires `value` and sets the key only when it differs.
 - `state="absent"` resets the key to its schema default when it differs.
 

@@ -236,9 +236,9 @@ def test_require_ini_match_validates_regex_keys_and_values():
         ini.require_ini_match({"": "1"})
     with pytest.raises(TaskFailed, match="ini match value"):
         ini.require_ini_match({"a": ""})
-    with pytest.raises(TaskFailed, match="invalid ini match regex"):
+    with pytest.raises(TaskFailed, match="invalid ini match value"):
         ini.require_ini_match({"a": "["})
-    with pytest.raises(TaskFailed, match="invalid ini match regex"):
+    with pytest.raises(TaskFailed, match="invalid ini match key"):
         ini.require_ini_match({"[": "1"})
     with pytest.raises(TaskFailed, match="must be strings"):
         ini.require_ini_match({"a": 1})

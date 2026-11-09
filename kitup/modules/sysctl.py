@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from .._utils import file_ops, ini
+from .._utils import file_actions, ini
 from .._utils.paths import expand_path
 from .._utils.validation import State, require_state, require_text
 from ..context import TaskContext
@@ -17,7 +17,7 @@ _KEY_PATTERN: Final = r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*"
 def key(
     ctx: TaskContext,
     name: str,
-    value: str | float | None = None,
+    value: str | float | bool | None = None,  # noqa: FBT001 - positional value matches the module API
     *,
     state: State = "present",
     file: str | Path | None = None,
@@ -32,6 +32,8 @@ def key(
     """
     require_state(state, "sysctl")
     key_name = _normalize_name(name)
+    if state == "absent" and value is not None:
+        raise TaskFailed("sysctl state 'absent' does not take a value")
     target = _resolve_file(file)
 
     if state == "absent":
@@ -113,7 +115,7 @@ def _normalize_ws(value: str) -> str:
 
 def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> CallResult:
     pattern = ini.option_re(name)
-    text = file_ops.read_text(ctx, target, sudo=True)
+    text = file_actions.read_text(ctx, target, sudo=True)
     lines = text.splitlines(keepends=True)
     matches = [line for line in lines if pattern.match(line) is not None]
     if len(matches) == 1 and _entry_value(matches[0]) == _normalize_ws(desired):
@@ -129,7 +131,7 @@ def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> Cal
     if remaining and not remaining[-1].endswith("\n"):
         remaining[-1] += "\n"
     remaining.append(ini.render_option(name, desired))
-    return file_ops.apply_text(
+    return file_actions.apply_text(
         ctx,
         target,
         text,
@@ -151,9 +153,9 @@ def _entry_value(line: str) -> str:
 
 def _remove_entry(ctx: TaskContext, target: Path, name: str) -> CallResult:
     pattern = ini.option_re(name)
-    text = file_ops.read_text(ctx, target, sudo=True)
+    text = file_actions.read_text(ctx, target, sudo=True)
     new_text = "".join(line for line in text.splitlines(keepends=True) if pattern.match(line) is None)
-    return file_ops.apply_text(
+    return file_actions.apply_text(
         ctx,
         target,
         text,

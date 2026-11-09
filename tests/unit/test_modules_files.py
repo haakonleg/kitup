@@ -4,7 +4,7 @@ import stat
 
 import pytest
 
-from kitup._utils.file_helper import stat_path
+from kitup._utils.file_primitives import stat_path
 from kitup.errors import TaskFailed
 from kitup.modules import files
 from kitup.registry import Bundle
@@ -282,6 +282,30 @@ def test_privileged_read_failure_does_not_rewrite_file(tmp_path):
     assert path.read_text() == "keep me\n"
 
 
+class RemoveFailureWorker:
+    """Simulate a privileged worker whose remove action fails."""
+
+    def request(self, request):
+        if request.action == "stat":
+            return stat_path(request.params["path"]) or {"exists": False}
+        if request.action == "remove":
+            raise TaskFailed("privileged worker remove failed: directory not empty")
+        return {}
+
+
+def test_privileged_remove_reports_a_friendly_error(tmp_path):
+    path = tmp_path / "dir"
+    path.mkdir()
+    (path / "file").write_text("keep\n")
+    ctx = make_context(tmp_path, sudo=FakeSudo())
+    ctx.privileged_worker = RemoveFailureWorker()  # type: ignore[assignment]
+
+    with pytest.raises(TaskFailed, match="directory is not empty"):
+        files.directory(ctx, path, state="absent", sudo=True)
+
+    assert (path / "file").read_text() == "keep\n"
+
+
 def test_unknown_owner_is_a_task_failure(tmp_path):
     path = tmp_path / "example"
 
@@ -355,6 +379,17 @@ def test_invalid_arguments_are_rejected(tmp_path):
         files.directory(ctx, "")
     with pytest.raises(TaskFailed, match="symlink target must not be empty"):
         files.symlink(ctx, "", tmp_path / "link")
+    with pytest.raises(TaskFailed, match="line must not contain line breaks"):
+        files.line(ctx, tmp_path / "file", "one\ntwo")
+    with pytest.raises(TaskFailed, match="block marker must not contain line breaks"):
+        files.block(ctx, tmp_path / "file", "bad\nmarker", "content")
+
+    for keyword, value in (
+        ("sudo", 1),
+        ("force", "yes"),
+    ):
+        with pytest.raises(TaskFailed, match="must be a boolean"):
+            files.directory(ctx, tmp_path / "dir", **{keyword: value})
 
     for mode in (True, -1, 0o10000):
         with pytest.raises(TaskFailed, match="mode"):
@@ -388,6 +423,18 @@ def test_line_add_replace_and_remove(tmp_path):
     files.line(ctx, path, "TWO", match=r"^TWO$")
     assert len(ctx.changes) == count
     assert ctx.calls[-1].summary == f"ensure line in {path}"
+
+
+def test_line_rejects_invalid_match_regex(tmp_path):
+    path = tmp_path / "lines"
+    path.write_text("one\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="invalid line match"):
+        files.line(ctx, path, "one", match="[")
+
+    assert path.read_text() == "one\n"
+    assert ctx.changes == []
 
 
 def test_line_appends_after_missing_final_newline(tmp_path):
@@ -1061,13 +1108,17 @@ def test_ini_invalid_arguments_are_rejected(tmp_path):
         files.ini(ctx, path, section="s", option="a")
     with pytest.raises(TaskFailed, match="requires a section or an option"):
         files.ini(ctx, path, state="absent")
+    with pytest.raises(TaskFailed, match="state 'absent' does not take a value"):
+        files.ini(ctx, path, section="s", option="a", value="2", state="absent")
+    with pytest.raises(TaskFailed, match="state 'absent' does not take a value"):
+        files.ini(ctx, path, section="s", value="2", state="absent")
     with pytest.raises(TaskFailed, match="ini match requires a section"):
         files.ini(ctx, path, option="a", value="1", match={"b": "2"})
     with pytest.raises(TaskFailed, match="ini match must not be empty"):
         files.ini(ctx, path, section="s", option="a", value="1", match={})
-    with pytest.raises(TaskFailed, match="invalid ini match regex"):
+    with pytest.raises(TaskFailed, match="invalid ini match value"):
         files.ini(ctx, path, section="s", option="a", value="1", match={"a": "["})
-    with pytest.raises(TaskFailed, match="invalid ini match regex"):
+    with pytest.raises(TaskFailed, match="invalid ini match key"):
         files.ini(ctx, path, section="s", option="a", value="1", match={"[": "1"})
     with pytest.raises(TaskFailed, match="must be a boolean"):
         files.ini(ctx, path, section="s", option="a", value="1", create="yes")

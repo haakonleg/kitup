@@ -2,8 +2,9 @@
 
 from typing import Final, Literal
 
-from .._utils.validation import require_scope, require_state, require_text
+from .._utils.validation import require_bool, require_scope, require_state, require_text
 from ..context import TaskContext
+from ..errors import TaskFailed
 from ..results import CallResult
 
 type SystemdState = Literal["started", "stopped"]
@@ -35,6 +36,10 @@ def unit(
 ) -> CallResult:
     """Ensure a unit's enabled and active state."""
     require_text(unit, "systemd unit")
+    if enabled is None and state is None:
+        raise TaskFailed("systemd unit requires enabled or state")
+    if enabled is not None:
+        require_bool(enabled, "systemd enabled")
     base = _command(ctx, scope)
     desired = None if state is None else _desired_active(state)
 

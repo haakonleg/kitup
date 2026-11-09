@@ -9,6 +9,7 @@ import kitup
 from kitup.context import TaskContext
 from kitup.errors import BundleError
 from kitup.registry import Bundle, SideEffect, bundle_of, side_effect, task
+from kitup.registry import bundle as define_bundle
 
 from ..helpers import write
 
@@ -31,7 +32,7 @@ def test_bundle_name_is_optional_and_validated():
 
     assert bundle.name == ""
     assert bundle.id == ""
-    assert bundle.tasks == []
+    assert bundle.tasks == ()
 
     with pytest.raises(BundleError, match="bundle name must not be empty"):
         Bundle("")
@@ -41,6 +42,7 @@ def test_bundle_name_is_optional_and_validated():
 
 def test_package_reexports_the_authoring_api():
     assert kitup.Bundle is Bundle
+    assert kitup.bundle is define_bundle
     assert kitup.bundle_of is bundle_of
     assert kitup.side_effect is side_effect
     assert kitup.task is task
@@ -50,15 +52,46 @@ def test_package_reexports_the_authoring_api():
 def test_bundle_defaults_to_no_tasks_outside_a_package(tmp_path):
     bundle = Bundle("Base")
 
-    assert bundle.tasks == []
+    assert bundle.tasks == ()
     assert bundle.id == "Base"
+
+
+def test_bundle_factory_outside_a_package_builds_without_registering():
+    created = define_bundle("Base")
+
+    assert created.tasks == ()
+    assert created.id == "Base"
+    assert not hasattr(sys.modules[__name__], "__kitup_bundle__")
+
+
+def test_bundle_class_does_not_register_itself(tmp_path):
+    _, module = import_package(
+        tmp_path,
+        {"__init__.py": "from kitup import Bundle\n\nBundle('Ignored')\n"},
+    )
+
+    assert getattr(module, "__kitup_bundle__", None) is None
+
+
+def test_bundle_factory_supports_assignment(tmp_path):
+    _, module = import_package(
+        tmp_path,
+        {
+            "__init__.py": "from kitup import bundle\n\ncreated = bundle('Base')\n",
+            "tasks.py": "from kitup import task\n\n@task\ndef install(ctx):\n    pass\n",
+        },
+    )
+
+    created = bundle_of(module)  # type: ignore[arg-type]
+    assert created is module.created  # type: ignore[attr-defined]
+    assert [registered.func.__name__ for registered in created.tasks] == ["install"]
 
 
 def test_modules_none_auto_discovers_sibling_task_modules(tmp_path):
     _, module = import_package(
         tmp_path,
         {
-            "__init__.py": "from kitup import Bundle\n\nBundle('Base')\n",
+            "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
             "02_second.py": "from kitup import task\n\n@task\ndef second(ctx):\n    pass\n",
             "01_first.py": "from kitup import task\n\n@task\ndef first(ctx):\n    pass\n",
             "_helper.py": "VALUE = 1\n",
@@ -74,7 +107,7 @@ def test_explicit_modules_define_order(tmp_path):
         tmp_path,
         {
             "__init__.py": (
-                "from kitup import Bundle\nfrom . import first, second\nBundle('Base', modules=[second, first])\n"
+                "from kitup import bundle\nfrom . import first, second\nbundle('Base', modules=[second, first])\n"
             ),
             "first.py": "from kitup import task\n\n@task\ndef first(ctx):\n    pass\n",
             "second.py": "from kitup import task\n\n@task\ndef second(ctx):\n    pass\n",
@@ -89,12 +122,12 @@ def test_empty_modules_disables_auto_discovery(tmp_path):
     _, module = import_package(
         tmp_path,
         {
-            "__init__.py": "from kitup import Bundle\n\nBundle('Base', modules=[])\n",
+            "__init__.py": "from kitup import bundle\n\nbundle('Base', modules=[])\n",
             "tasks.py": "from kitup import task\n\n@task\ndef first(ctx):\n    pass\n",
         },
     )
 
-    assert bundle_of(module).tasks == []  # type: ignore[arg-type]
+    assert bundle_of(module).tasks == ()  # type: ignore[arg-type]
 
 
 def test_modules_reject_a_single_module_a_path_and_non_modules(tmp_path):
@@ -201,7 +234,7 @@ def test_discovered_module_without_tasks_is_an_error(tmp_path):
         import_package(
             tmp_path,
             {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "helpers.py": "VALUE = 1\n",
             },
         )
@@ -213,8 +246,8 @@ def test_task_module_can_be_shared_between_bundles(tmp_path):
         {
             "__init__.py": "from . import tasks, one, two\n",
             "tasks.py": "from kitup import task\n\n@task\ndef shared(ctx):\n    pass\n",
-            "one/__init__.py": "from kitup import Bundle\nfrom .. import tasks\n\nBundle('One', modules=[tasks])\n",
-            "two/__init__.py": "from kitup import Bundle\nfrom .. import tasks\n\nBundle('Two', modules=[tasks])\n",
+            "one/__init__.py": "from kitup import bundle\nfrom .. import tasks\n\nbundle('One', modules=[tasks])\n",
+            "two/__init__.py": "from kitup import bundle\nfrom .. import tasks\n\nbundle('Two', modules=[tasks])\n",
         },
     )
 
@@ -232,7 +265,7 @@ def test_reexported_task_is_not_claimed_by_the_importing_module(tmp_path):
         tmp_path,
         {
             "__init__.py": (
-                "from kitup import Bundle\nfrom . import first, second\nBundle('Base', modules=[first, second])\n"
+                "from kitup import bundle\nfrom . import first, second\nbundle('Base', modules=[first, second])\n"
             ),
             "first.py": "from kitup import task\n\n@task\ndef shared(ctx):\n    pass\n",
             "second.py": ("from kitup import task\nfrom .first import shared\n\n@task\ndef other(ctx):\n    pass\n"),
@@ -246,14 +279,14 @@ def test_reexported_task_is_not_claimed_by_the_importing_module(tmp_path):
 def test_depends_on_accepts_ids_and_bundle_objects(tmp_path):
     _, base_module = import_package(
         tmp_path,
-        {"__init__.py": "from kitup import Bundle\n\nBundle('Base')\n"},
+        {"__init__.py": "from kitup import bundle\n\nbundle('Base')\n"},
     )
     _, desktop_module = import_package(
         tmp_path,
         {
             "__init__.py": (
-                f"from kitup import Bundle, bundle_of\nimport {base_module.__name__}\n"
-                f"Bundle('Desktop', depends_on=['base', bundle_of({base_module.__name__})])\n"
+                f"from kitup import bundle, bundle_of\nimport {base_module.__name__}\n"
+                f"bundle('Desktop', depends_on=['base', bundle_of({base_module.__name__})])\n"
             )
         },
     )
@@ -277,7 +310,7 @@ def test_module_task_decorator_forms(tmp_path):
     _, module = import_package(
         tmp_path,
         {
-            "__init__.py": "from kitup import Bundle\nfrom . import tasks\n\nBundle('Base', modules=[tasks])\n",
+            "__init__.py": "from kitup import bundle\nfrom . import tasks\n\nbundle('Base', modules=[tasks])\n",
             "tasks.py": (
                 "from kitup import task\n"
                 "\n"
@@ -419,7 +452,7 @@ def test_duplicate_task_ids_across_modules_are_rejected(tmp_path):
         import_package(
             tmp_path,
             {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "first.py": "from kitup import task\n\n@task\ndef install(ctx):\n    pass\n",
                 "second.py": "from kitup import task\n\n@task\ndef install(ctx):\n    pass\n",
             },

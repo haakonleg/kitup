@@ -24,6 +24,8 @@ def key(
         raise TaskFailed("gsettings must run as the target user, not root")
 
     if state == "absent":
+        if value is not None:
+            raise TaskFailed("gsettings state 'absent' does not take a value")
         return ctx.changed(_reset(ctx, schema, key))
     if value is None:
         raise TaskFailed("value is required when state is present")

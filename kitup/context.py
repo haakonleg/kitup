@@ -88,6 +88,11 @@ class TaskContext:
         return list(self._notes)
 
     @property
+    def run_state(self) -> RunState:
+        """Return the run-scoped state shared with the runner."""
+        return self._run_state
+
+    @property
     def results(self) -> dict[str, TaskResult]:
         """Return a snapshot of the current bundle's results keyed by task id."""
         state = self._run_state.current
@@ -178,7 +183,7 @@ class TaskContext:
         if existing is not None and existing is not side_effect:
             raise TaskFailed(f"duplicate side effect function name in bundle {state.bundle.id!r}: {func_name}")
 
-    def _take_side_effects(self) -> list[SideEffect]:
+    def take_side_effects(self) -> list[SideEffect]:
         """Return and clear the side effects registered by the current task."""
         state = self._run_state.current
         if state is None:
@@ -187,10 +192,14 @@ class TaskContext:
         state.pending_effects.clear()
         return effects
 
-    def _store_result(self, task: Task, result: TaskResult) -> None:
+    def store_result(self, task: Task, result: TaskResult) -> None:
         """Store a task result in its bundle's runtime state."""
         state = self._run_state.for_bundle(task.bundle)
         state.results[task.id] = result
+
+    def finish_run(self) -> None:
+        """Leave the current bundle when the run ends."""
+        self._run_state.current = None
 
     def ensure_sudo(self, reason: str | None = None) -> None:
         """Revalidate sudo, prompting only when cached credentials expired."""

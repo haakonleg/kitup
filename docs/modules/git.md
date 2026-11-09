@@ -29,8 +29,9 @@ Ensure the repository `url` is checked out at `dest`.
 - `update` — when the checkout already exists, verify it against the remote
   and move it to `version` when it differs. With `update=False` the remote is
   not contacted — no fetch, no comparison — except when the origin URL
-  changed, which always triggers a fetch and update. A `--dry-run` with
-  `update=False` makes no network requests.
+  changed, which triggers a fetch and update in a real run. A `--dry-run`
+  with `update=False` makes no network requests, and a URL change is reported
+  without fetching the old remote.
 - `force` — discard local modifications to tracked files when updating.
   Without it, a modified worktree fails the task. Untracked files are never
   removed and do not block an update.
@@ -92,6 +93,7 @@ def clone_single_branch(ctx):
   fast instead of hanging.
 - The fetch during an update only adds objects under `.git`; it never changes
   `HEAD` or the worktree, so it also runs during `--dry-run` to report
-  accurately.
+  accurately. When the origin URL changes, a dry run skips the fetch because
+  the new URL has not been applied.
 - Submodules, archives, bare repositories, separate git directories,
   refspecs, SSH options, and GPG commit verification are out of scope.

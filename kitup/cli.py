@@ -235,13 +235,18 @@ def _examples(*lines: str) -> str:
     return "examples:\n" + "\n".join(f"  {line}" for line in lines)
 
 
+def _print_preset_warning(message: str) -> None:
+    """Write a preset warning to stderr."""
+    print(f"warning: {message}", file=sys.stderr)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface and return an exit code."""
     disable_same_uid_ptrace()
     arguments = list(sys.argv[1:] if argv is None else argv)
 
     try:
-        args, preset_paths = parse_with_presets(build_parser(), arguments)
+        args, preset_paths = parse_with_presets(build_parser(), arguments, on_warning=_print_preset_warning)
         _apply_defaults(args)
         output = Output(no_color=args.no_color, verbose=args.verbose)
         if args.command == "init":

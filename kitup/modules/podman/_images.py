@@ -13,6 +13,7 @@ from ..._utils.validation import (
     require_state,
     require_text,
     require_texts,
+    require_timeout,
     unique_strings,
 )
 from ...context import TaskContext
@@ -57,6 +58,8 @@ def image(
     require_state(state, "image")
     require_choice(pull, PULL_POLICIES, "image pull policy")
     require_bool(force, "image force")
+    require_bool(sudo, "image sudo")
+    require_timeout(timeout)
     if platform is not None:
         require_text(platform, "image platform")
     if is_transport_reference(name):
@@ -147,6 +150,8 @@ def build(
     require_bool(pull, "build pull")
     require_bool(force, "build force")
     require_bool(no_cache, "build no_cache")
+    require_bool(sudo, "build sudo")
+    require_timeout(timeout)
 
     context_path = ctx.resolve_source(context)
     if not context_path.is_dir():
@@ -205,6 +210,7 @@ def tag(
     wanted = unique_strings(normalize_strings(targets))
     require_collection(wanted, "image targets")
     require_texts(wanted, "image target")
+    require_bool(sudo, "tag sudo")
 
     podman_command = podman(ctx)
     source_id = image_id(ctx, podman_command, image, sudo=sudo)

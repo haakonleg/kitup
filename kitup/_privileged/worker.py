@@ -1,6 +1,6 @@
 """Privileged worker server.
 
-This module is embedded with ``protocol.py`` and ``_utils/file_helper.py`` into a
+This module is embedded with ``protocol.py`` and ``_utils/file_primitives.py`` into a
 single ``python -c`` script. Keep it standard-library-only, free of runtime
 package imports, and without a ``__main__`` guard.
 """
@@ -13,7 +13,7 @@ import sys
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
-    from .._utils.file_helper import (
+    from .._utils.file_primitives import (
         apply_metadata,
         mkdir_path,
         move_path,

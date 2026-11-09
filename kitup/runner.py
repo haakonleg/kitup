@@ -2,6 +2,7 @@
 
 import time
 import traceback
+from collections.abc import Sequence
 from typing import Any
 
 from .context import TaskContext
@@ -45,7 +46,7 @@ class Runner:
                 if not tasks:
                     continue
                 self.output.bundle_header(bundle_label(bundle))
-                state = self.context._run_state.for_bundle(bundle)
+                state = self.context.run_state.for_bundle(bundle)
 
                 for task in tasks:
                     self.output.task_start(task.name)
@@ -57,7 +58,7 @@ class Runner:
                     self._summary.add(result.status)
                     self.output.task(result)
 
-                    pending = self.context._take_side_effects()
+                    pending = self.context.take_side_effects()
                     if result.status is Status.CHANGED:
                         immediate = [effect for effect in pending if not effect.one_shot]
                         if immediate:
@@ -93,7 +94,7 @@ class Runner:
             self.output.interrupted(not_run)
             return 130
         finally:
-            self.context._run_state.current = None
+            self.context.finish_run()
 
         self._finish(start)
         return 0
@@ -109,7 +110,7 @@ class Runner:
         self.output.aborted(name, not_run)
         return 1
 
-    def _select(self, tasks: list[Task]) -> list[Task]:
+    def _select(self, tasks: Sequence[Task]) -> list[Task]:
         selected: list[Task] = []
         for task in tasks:
             if self.tags is not None and not (task.tags & self.tags):
@@ -193,7 +194,7 @@ class Runner:
             error=error,
             value=value,
         )
-        self.context._store_result(task, result)
+        self.context.store_result(task, result)
         return result
 
 

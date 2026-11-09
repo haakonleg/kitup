@@ -86,16 +86,18 @@ class Bundle:
     """A bundle and the tasks it owns.
 
     A bundle is identified by its ``id``, which discovery sets from the bundle
-    folder name. Constructing one in a package's ``__init__.py`` attaches it
-    privately to that module as ``__kitup_bundle__``. The optional ``name`` is
-    the display name; it defaults to the id during discovery.
+    folder name. Use :func:`bundle` from a package's ``__init__.py`` to create
+    and register one; the optional ``name`` is the display name and defaults to
+    the id during discovery.
 
-    Task modules are auto-discovered from sibling ``*.py`` files when
-    ``modules`` is left as ``None`` inside a bundle package. Pass an explicit
-    sequence to control order, or ``modules=[]`` to disable discovery. Entries
-    may be module objects or filesystem paths; string and ``Path`` values are
-    always treated as paths, never import names. ``var_paths`` is populated by
-    project discovery with the bundle's optional ``vars/*.py`` files.
+    A directly constructed ``Bundle`` does not auto-discover task modules; pass
+    ``modules`` to adopt them. :func:`bundle` auto-discovers sibling ``*.py``
+    task modules when ``modules`` is omitted inside a bundle package; pass an
+    explicit sequence to control order, or ``modules=[]`` to disable discovery.
+    Entries may be module objects or filesystem paths; string and ``Path``
+    values are always treated as paths, never import names. ``var_paths`` is
+    populated by project discovery with the bundle's optional ``vars/*.py``
+    files.
     """
 
     def __init__(
@@ -116,32 +118,40 @@ class Bundle:
         if not isinstance(description, str):
             raise BundleError("bundle description must be a string")
 
-        caller = sys._getframe(1).f_globals
-        caller_file = caller.get("__file__")
-        is_package = bool(caller_file and Path(caller_file).name == "__init__.py")
-
+        self._frozen = False
+        self._tasks: list[Task] = []
         self.id = name or ""
         self.name = name or ""
         self.description = description
-        self.path = _resolve_path(Path(path)) if path is not None else _caller_dir(caller_file)
+        self.path = _resolve_path(Path(path)) if path is not None else None
         self.var_paths: tuple[Path, ...] = ()
-        self.tasks: list[Task] = []
-        task_modules = self._normalize_modules(modules)
-        if modules is None and is_package:
-            package = caller.get("__package__") or caller.get("__name__")
-            if not package:
-                raise BundleError("cannot auto-discover task modules outside a package")
-            task_modules = discover_task_modules(package, Path(str(caller_file)).parent)
         self.depends_on = self._normalize_dependencies(depends_on)
 
-        if is_package:
-            caller["__kitup_bundle__"] = self
-
-        self._adopt_modules(task_modules)
+        self._adopt_modules(self._normalize_modules(modules))
 
     @override
     def __repr__(self) -> str:
         return f"Bundle({self.name!r}, tasks={len(self.tasks)})"
+
+    @override
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(f"bundle {self.id!r} is immutable after discovery")
+        super().__setattr__(name, value)
+
+    @property
+    def tasks(self) -> tuple[Task, ...]:
+        """Tasks owned by this bundle, in declaration order."""
+        return tuple(self._tasks)
+
+    def _finalize(self, *, id: str, name: str, var_paths: tuple[Path, ...]) -> None:
+        """Apply discovery-owned metadata once and freeze the bundle."""
+        if self._frozen:
+            raise BundleError(f"bundle {id!r} is already finalized")
+        self.id = id
+        self.name = name
+        self.var_paths = var_paths
+        self._frozen = True
 
     def _normalize_modules(
         self,
@@ -211,10 +221,12 @@ class Bundle:
                 self._add_task(spec)
 
     def _add_task(self, spec: TaskSpec) -> None:
+        if self._frozen:
+            raise BundleError(f"bundle {self.id!r} is immutable after discovery")
         task = Task(spec=spec, bundle=self, bundle_path=self.path)
         if any(existing.id == task.id for existing in self.tasks):
             raise BundleError(f"duplicate task id {task.id!r}")
-        self.tasks.append(task)
+        self._tasks.append(task)
 
     def _normalize_dependencies(self, depends_on: Sequence[str | Bundle]) -> tuple[str | Bundle, ...]:
         if isinstance(depends_on, (str, Bundle)):
@@ -289,6 +301,42 @@ class Bundle:
     def read_resource(self, *parts: str) -> str:
         """Read a UTF-8 resource file below the bundle folder."""
         return self.resource_path(*parts).read_text(encoding="utf-8")
+
+
+def bundle(
+    name: str | None = None,
+    description: str = "",
+    *,
+    modules: Sequence[ModuleType | str | Path] | None = None,
+    depends_on: Sequence[str | Bundle] = (),
+    path: str | Path | None = None,
+) -> Bundle:
+    """Create a bundle and register it on the calling package.
+
+    Call this from a bundle package's ``__init__.py``. The return value may be
+    assigned but does not need to be: when the caller is a package
+    ``__init__.py``, the new bundle is attached to it as ``__kitup_bundle__``
+    for discovery. Outside a package it simply constructs a bundle.
+
+    When ``modules`` is omitted inside a package, sibling ``*.py`` task modules
+    are discovered automatically; elsewhere the bundle starts with no tasks.
+    """
+    caller = sys._getframe(1).f_globals
+    caller_file = caller.get("__file__")
+    is_package = bool(caller_file and Path(caller_file).name == "__init__.py")
+
+    if path is None:
+        path = _caller_dir(caller_file)
+    if modules is None and is_package:
+        package = caller.get("__package__") or caller.get("__name__")
+        if not package:
+            raise BundleError("cannot auto-discover task modules outside a package")
+        modules = discover_task_modules(package, Path(str(caller_file)).parent)
+
+    created = Bundle(name, description, modules=modules, depends_on=depends_on, path=path)
+    if is_package:
+        caller["__kitup_bundle__"] = created
+    return created
 
 
 def discover_task_modules(package: str, folder: Path) -> tuple[ModuleType, ...]:

@@ -7,8 +7,9 @@ from kitup.presets import parse_with_presets, read_preset_tokens
 from ..helpers import make_project, write
 
 
-def parse(tmp_path, argv):
-    args, _ = parse_with_presets(cli.build_parser(), argv, root=tmp_path)
+def parse(tmp_path, argv, *, warned=None):
+    on_warning = warned.append if warned is not None else None
+    args, _ = parse_with_presets(cli.build_parser(), argv, root=tmp_path, on_warning=on_warning)
     return args
 
 
@@ -163,13 +164,17 @@ def test_directory_preset_is_an_error(tmp_path):
         parse(tmp_path, ["apply", str(tmp_path), "--preset", "."])
 
 
-def test_disallowed_options_in_preset_are_ignored(tmp_path):
+def test_disallowed_options_in_preset_warn_and_are_ignored(tmp_path):
     make_project(tmp_path, preset={"laptop": "--nope value\n--include-bundles base\n"})
 
-    args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
+    warned = []
+    args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"], warned=warned)
 
     assert args.include_bundles == ["base"]
     assert args.project_dir == str(tmp_path)
+    assert len(warned) == 1
+    assert str(tmp_path / "presets" / "laptop") in warned[0]
+    assert "--nope" in warned[0]
 
 
 def test_positional_tokens_in_preset_are_ignored(tmp_path):
@@ -192,10 +197,22 @@ def test_nested_preset_options_in_preset_are_ignored(tmp_path, line):
 
 
 @pytest.mark.parametrize("line", ["--c other", "--cm other", "-nm other", "--include-bundl base"])
-def test_unknown_option_forms_in_preset_are_ignored(tmp_path, line):
+def test_unknown_option_forms_in_preset_warn_and_are_ignored(tmp_path, line):
     make_project(tmp_path, preset={"laptop": f"{line}\n--include-bundles base\n"})
 
-    args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
+    warned = []
+    args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"], warned=warned)
+
+    assert args.include_bundles == ["base"]
+    assert len(warned) == 1
+    assert line.split()[0] in warned[0]
+
+
+def test_unknown_options_warn_by_default(tmp_path):
+    make_project(tmp_path, preset={"laptop": "--dry-runn\n--include-bundles base\n"})
+
+    with pytest.warns(UserWarning, match="ignoring unknown option '--dry-runn'"):
+        args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
 
     assert args.include_bundles == ["base"]
 
@@ -203,10 +220,12 @@ def test_unknown_option_forms_in_preset_are_ignored(tmp_path, line):
 def test_options_from_another_command_are_ignored(tmp_path):
     make_project(tmp_path, preset={"laptop": "--dry-run\n--include-bundles base\n"})
 
-    args = parse(tmp_path, ["list", str(tmp_path), "--preset", "laptop"])
+    warned = []
+    args = parse(tmp_path, ["list", str(tmp_path), "--preset", "laptop"], warned=warned)
 
     assert args.include_bundles == ["base"]
     assert not hasattr(args, "dry_run")
+    assert warned == []
 
 
 def test_invalid_quoting_is_an_error(tmp_path):

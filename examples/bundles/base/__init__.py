@@ -1,8 +1,8 @@
-from kitup import Bundle
+from kitup import bundle
 
 from . import packages, security, services
 
-Bundle(
+bundle(
     "Base system",
     "Core packages, services, and SSH hardening",
     modules=[packages, security, services],

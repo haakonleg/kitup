@@ -188,9 +188,11 @@ When changing packaging or the zipapp builder:
   `require_collection`, `normalize_strings`, and friends).
 - DO use `pathlib.Path` internally. Accept `str | Path` at public boundaries
   and convert immediately.
-- DO resolve relative source paths with `ctx.resolve_source`: a bare name maps
-  to the bundle's `files/` directory, other relative paths to the bundle
-  directory. Do not add module-specific path resolvers.
+- DO resolve relative source paths with `ctx.resolve_source`: check
+  `files/<bundle_id>/<path>` first, then the project's `files/<path>`, then fall
+  back to the bundle — a bare name to the bundle's `files/` directory, other
+  relative paths to the bundle directory. Do not add module-specific path
+  resolvers.
 - DO check for an existing shared helper before implementing generic validation,
   filesystem, or similar logic. If none exists and the logic is generic, add it
   to `kitup/_utils/` (`validation.py` for argument checks) rather than duplicating it.

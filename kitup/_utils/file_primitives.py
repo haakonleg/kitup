@@ -1,7 +1,10 @@
-"""Low-level filesystem operations shared by built-in modules and the worker.
+"""Standard-library-only filesystem primitives shared by modules and the worker.
 
-The privileged worker embeds this module's source, so keep the imports
-standard-library-only and avoid package imports.
+These functions operate on plain paths and return plain data; they know nothing
+about ``TaskContext``, dry runs, or recorded results. The privileged worker
+embeds this module's source, so keep the imports standard-library-only and
+avoid package imports. For context-aware operations, use
+:mod:`kitup._utils.file_actions`.
 """
 
 import contextlib

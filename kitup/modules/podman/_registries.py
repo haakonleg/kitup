@@ -3,7 +3,7 @@
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-from ..._utils import file_ops
+from ..._utils import file_actions
 from ..._utils.paths import expand_path
 from ..._utils.toml import toml_string
 from ..._utils.validation import (
@@ -57,9 +57,9 @@ def registry(
     sudo = scope == "system"
     target = _registry_path(name, scope=scope, path=path)
     if state == "absent":
-        info = file_ops.stat(ctx, target, sudo=sudo)
+        info = file_actions.stat(ctx, target, sudo=sudo)
         return ctx.changed(
-            file_ops.remove(
+            file_actions.remove(
                 ctx,
                 target,
                 info,
@@ -87,8 +87,9 @@ def registry(
         blocked=blocked,
         mirrors=wanted_mirrors,
     )
+    file_actions.require_parent(ctx, target, sudo=sudo)
     return ctx.changed(
-        file_ops.apply_bytes(
+        file_actions.apply_bytes(
             ctx,
             target,
             content.encode(),
@@ -127,6 +128,7 @@ def login(
     if tls_verify is not None:
         require_bool(tls_verify, "registry tls_verify")
     require_bool(force, "registry force")
+    require_bool(sudo, "registry sudo")
 
     podman_command = podman(ctx)
     if (
@@ -178,6 +180,7 @@ def logout(
     require_text(registry, "registry")
     if authfile is not None:
         require_path(authfile, "registry authfile")
+    require_bool(sudo, "registry sudo")
     authfile_path = expand_path(authfile, error=TaskFailed) if authfile is not None else None
 
     podman_command = podman(ctx)

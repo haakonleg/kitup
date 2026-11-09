@@ -22,14 +22,14 @@ from typing import Final, Literal, NamedTuple
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
-from . import file_ops
+from . import file_actions
+from .text import LINE_BREAKS, line_body
 from .validation import require_text
 
 type TomlValue = str | bool | int | float | Iterable[str]
 type _KeyAction = Literal["added", "replaced", "unchanged"]
 
 _BARE_KEY_RE: Final = re.compile(r"[A-Za-z0-9_-]+")
-_LINE_BREAKS: Final = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
 _KEY_PART: Final = r'(?:[A-Za-z0-9_-]+|"(?:[^"\\\n]|\\.)*"|\'[^\'\n]*\')'
 _KEY_LINE_RE: Final = re.compile(rf"^\s*(?P<key>{_KEY_PART}(?:\s*\.\s*{_KEY_PART})*)\s*=")
 _TABLE_HEADER_RE: Final = re.compile(r"^\[(?P<name>[^\]\n]+?)\]\s*(?:#.*)?$")
@@ -126,7 +126,7 @@ def require_toml_key(key: str, label: str = "toml key") -> str:
     if not isinstance(key, str):
         raise TaskFailed(f"{label} must be a string")
     require_text(key, label)
-    if any(char in key for char in _LINE_BREAKS) or "\0" in key:
+    if any(char in key for char in LINE_BREAKS) or "\0" in key:
         raise TaskFailed(f"{label} must not contain line breaks or null bytes")
     parts: list[str] = []
     for part in key.split("."):
@@ -270,10 +270,10 @@ def apply_toml_key(
     on a missing file is a no-op. The returned call is not recorded; the caller
     records it with ``ctx.changed``.
     """
-    exists = file_ops.stat(ctx, target, sudo=sudo) is not None
+    exists = file_actions.stat(ctx, target, sudo=sudo) is not None
     if not create and not exists:
         raise TaskFailed(f"file does not exist and create=False: {target}")
-    text = file_ops.read_text(ctx, target, sudo=sudo)
+    text = file_actions.read_text(ctx, target, sudo=sudo)
     lines = split_lines(text)
     where = f"[{table}] of {target}" if table is not None else str(target)
     stored: object = value
@@ -315,8 +315,8 @@ def apply_toml_key(
         new_text += newline_of(lines)
     data["toml_action"] = toml_action
     if not exists:
-        file_ops.ensure_parent(ctx, target, sudo=sudo)
-    return file_ops.apply_text(
+        file_actions.ensure_parent(ctx, target, sudo=sudo)
+    return file_actions.apply_text(
         ctx,
         target,
         text,
@@ -348,11 +348,6 @@ def _set_array_value(
     if existing is None:
         return set_key(lines, table, key, value_text)
     return set_array(lines, table, key, items)
-
-
-def _line_body(line: str) -> str:
-    """Return ``line`` without its line ending."""
-    return line.removesuffix("\n").removesuffix("\r")
 
 
 def _quote_run(text: str, index: int) -> int:
@@ -421,7 +416,7 @@ def _scan(lines: list[str]) -> tuple[list[_Header], list[_Entry]]:
     table: str | None = None
     index = 0
     while index < len(lines):
-        body = _line_body(lines[index])
+        body = line_body(lines[index])
         stripped = body.strip()
         if not stripped or stripped.startswith("#"):
             index += 1
@@ -449,7 +444,7 @@ def _scan(lines: list[str]) -> tuple[list[_Header], list[_Entry]]:
         parts: list[str] = []
         start = index
         while index < len(lines):
-            chunk = body[key_match.end() :] if index == start else _line_body(lines[index])
+            chunk = body[key_match.end() :] if index == start else line_body(lines[index])
             parts.append(chunk)
             state = _scan_chunk(chunk, state)
             index += 1
@@ -523,7 +518,7 @@ def _insert_block(
     start, end = span
     insert_at = start
     for index in range(start, end):
-        body = _line_body(lines[index]).strip()
+        body = line_body(lines[index]).strip()
         if body and not body.startswith("#"):
             insert_at = index + 1
     if insert_at > 0 and not new_lines[insert_at - 1].endswith("\n"):

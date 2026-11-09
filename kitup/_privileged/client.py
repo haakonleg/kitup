@@ -245,9 +245,9 @@ class PrivilegedWorker:
 @lru_cache(maxsize=1)
 def _embedded_script() -> str:
     protocol = _read_source(__package__, "protocol.py")
-    helper = _read_source(f"{PACKAGE_NAME}._utils", "file_helper.py")
+    primitives = _read_source(f"{PACKAGE_NAME}._utils", "file_primitives.py")
     worker = _read_source(__package__, "worker.py")
-    return f"{protocol.strip()}\n\n{helper.strip()}\n\n{worker.strip()}\n\nmain()\n"
+    return f"{protocol.strip()}\n\n{primitives.strip()}\n\n{worker.strip()}\n\nmain()\n"
 
 
 def _read_source(package: str, name: str) -> str:

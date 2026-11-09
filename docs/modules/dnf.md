@@ -24,9 +24,8 @@ Ensure packages or groups are present or absent.
 
 - `added` — package names installed (present results).
 - `removed` — package names removed (absent results).
-- `groups` — affected group names, when both groups and packages are affected.
-- `packages` — affected package names, when both groups and packages are
-  affected.
+- `groups` — affected group names.
+- `packages` — affected package names.
 
 ```python
 @task("Install multimedia tools", tags={"packages"})
@@ -166,9 +165,9 @@ Set or remove one option in a `dnf.conf`-style INI file.
 ### Parameters
 
 - `option` — option name, written canonically as `option = value`.
-- `value` — required for `state="present"`. A string is written as-is, a
-  boolean as `True`/`False`, an integer in decimal form, and a list or tuple
-  of strings as a comma-separated list.
+- `value` — required for `state="present"` and rejected with `state="absent"`.
+  A string is written as-is, a boolean as `True`/`False`, an integer in
+  decimal form, and a list or tuple of strings as a comma-separated list.
 - `section` — INI section to edit, default `"main"`.
 - `state="present"` sets the option; `state="absent"` removes it.
 - `path` — config file to edit, default `/etc/dnf/dnf.conf`. A missing file

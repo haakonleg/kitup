@@ -2,7 +2,13 @@
 
 from collections.abc import Mapping, Sequence
 
-from ..._utils.validation import require_bool, require_non_negative_int, require_state, require_text
+from ..._utils.validation import (
+    require_bool,
+    require_non_negative_int,
+    require_state,
+    require_text,
+    require_timeout,
+)
 from ...context import TaskContext
 from ...errors import TaskFailed
 from ...results import CallResult
@@ -42,6 +48,8 @@ def container(
     require_object_name(name, "container name")
     require_state(state, "container", CONTAINER_STATES)
     require_bool(recreate, "container recreate")
+    require_bool(sudo, "container sudo")
+    require_timeout(timeout)
     if stop_timeout is not None:
         require_non_negative_int(stop_timeout, "container stop_timeout")
     if recreate and state not in ("present", "started"):

@@ -1,5 +1,7 @@
 """Shared argument validation for module APIs."""
 
+import math
+import re
 import subprocess
 from collections.abc import Collection, Iterable
 from pathlib import Path
@@ -94,6 +96,20 @@ def require_bool(value: object, label: str) -> None:
         raise TaskFailed(f"{label} must be a boolean")
 
 
+def require_timeout(value: float, label: str = "timeout") -> None:
+    """Reject non-finite, non-numeric, or non-positive timeouts."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TaskFailed(f"{label} must be a positive number")
+    if not math.isfinite(value) or value <= 0:
+        raise TaskFailed(f"{label} must be a positive number")
+
+
+def require_single_line(value: str, label: str) -> None:
+    """Reject text containing line breaks."""
+    if "\n" in value or "\r" in value:
+        raise TaskFailed(f"{label} must not contain line breaks")
+
+
 def require_non_negative_int(value: int, label: str) -> None:
     """Reject a negative or non-integer value."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -154,10 +170,16 @@ def require_path(value: str | Path, label: str) -> None:
         raise TaskFailed(f"{label} must not be empty")
 
 
-def require_regex(value: str, label: str) -> None:
-    """Reject an empty regular expression."""
+def require_regex(value: str, label: str) -> re.Pattern[str]:
+    """Validate a regular expression and return the compiled pattern."""
+    if not isinstance(value, str):
+        raise TaskFailed(f"{label} must be a string")
     if value == "":
         raise TaskFailed(f"{label} must not be empty")
+    try:
+        return re.compile(value)
+    except re.error as exc:
+        raise TaskFailed(f"invalid {label}: {exc}") from exc
 
 
 def require_encodable(value: str, label: str) -> None:

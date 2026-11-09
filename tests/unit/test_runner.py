@@ -32,7 +32,7 @@ def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False, vars=No
 
 def stored_result(context, task):
     """Read a stored result after the run cleared the current bundle."""
-    return context._run_state.bundles[task.bundle.id].results[task.id]
+    return context.run_state.bundles[task.bundle.id].results[task.id]
 
 
 def test_dependency_order_and_shared_dependency_once(tmp_path):
@@ -230,8 +230,8 @@ def test_task_results_are_stored_per_bundle(tmp_path):
     code, _, context = run_plan(tmp_path, [desktop])
 
     assert code == 0
-    assert context._run_state.bundles["base"].results["base.shared"].value == "base"
-    assert context._run_state.bundles["desktop"].results["desktop.shared"].value == "desktop"
+    assert context.run_state.bundles["base"].results["base.shared"].value == "base"
+    assert context.run_state.bundles["desktop"].results["desktop.shared"].value == "desktop"
 
 
 def test_result_lookup_reads_the_current_bundle_only(tmp_path):
@@ -279,6 +279,21 @@ def test_fail_fast_and_remaining_count(tmp_path):
     assert "error: boom" in text
     assert "Summary: 0 changed, 1 ok, 1 failed, 1 not run" in text
     assert 'Aborted after failure in "Second". 1 task(s) not run.' in text
+
+
+def test_failure_prints_captured_stdout(tmp_path):
+    bundle = Bundle("base")
+
+    def fail(ctx):
+        raise TaskFailed("boom", command=["tool"], stdout="diagnostic output\n")
+
+    add_task(bundle, fail, name="Fail")
+
+    code, text, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 1
+    assert "stdout:" in text
+    assert "diagnostic output" in text
 
 
 def test_privilege_error_preserves_changes_and_notes(tmp_path):
@@ -826,7 +841,7 @@ def test_side_effect_results_are_accessible_and_stored(tmp_path):
     code, _, context = run_plan(tmp_path, [bundle])
     assert code == 0
     assert seen == ["release-1"]
-    assert context._run_state.bundles["base"].results["base.refresh"].value == "done"
+    assert context.run_state.bundles["base"].results["base.refresh"].value == "done"
 
 
 def test_side_effect_results_are_bundle_local(tmp_path):

@@ -134,4 +134,5 @@ def remove_custom_option(ctx):
 - `dependencies` edits only `pyproject.toml`; `uv sync` manages `uv.lock` and `.venv`.
 - Without `group=`, the sync includes the default `dev` group; `group=` syncs the named group in addition.
 - uv re-resolves the lockfile for its up-to-date checks, so an offline run can report a pending change even when the project is correct.
+- A `tools(state="latest")` dry run uses `uv tool list --outdated` to decide which installed tools would change.
 - `config(state="absent")` edits only the selected file. uv still applies the same option from the other config files it loads (project > user > system for scalars), so removing a user-scope option has no effect while the system file defines it.

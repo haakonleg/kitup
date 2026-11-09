@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Final, Literal
 
-from .._utils import file_ops
+from .._utils import file_actions
 from .._utils import ini as ini_ops
 from .._utils.paths import expand_path
 from .._utils.pep508 import dist_name_of, normalize_dist_name, parse_requirement
@@ -160,11 +160,11 @@ def config(
     elif value is not None:
         raise TaskFailed("config state 'absent' does not take a value")
 
-    if state == "present" and file_ops.stat(ctx, target, sudo=sudo) is None:
-        file_ops.ensure_parent(ctx, target, sudo=sudo)
+    if state == "present" and file_actions.stat(ctx, target, sudo=sudo) is None:
+        file_actions.ensure_parent(ctx, target, sudo=sudo)
 
     return ctx.changed(
-        file_ops.apply_ini(
+        file_actions.apply_ini(
             ctx,
             target,
             section=section,
@@ -422,7 +422,7 @@ def _prepare_venv(
     """Create a missing venv unless ``state="absent"``; return the resulting venv state."""
     if venv is None or _is_venv(ctx, venv, sudo=sudo):
         return "exists"
-    if file_ops.stat(ctx, venv, sudo=sudo) is not None:
+    if file_actions.stat(ctx, venv, sudo=sudo) is not None:
         raise TaskFailed(f"path exists and is not a virtualenv: {venv}")
     if state == "absent":
         return "missing"
@@ -437,8 +437,8 @@ def _prepare_venv(
 def _is_venv(ctx: TaskContext, venv: Path, *, sudo: bool) -> bool:
     """Return whether ``venv`` is a real virtualenv, checked with matching privilege."""
     return (
-        file_ops.stat(ctx, venv / _VENV_PYTHON, sudo=sudo) is not None
-        and file_ops.stat(ctx, venv / _VENV_CFG, sudo=sudo) is not None
+        file_actions.stat(ctx, venv / _VENV_PYTHON, sudo=sudo) is not None
+        and file_actions.stat(ctx, venv / _VENV_CFG, sudo=sudo) is not None
     )
 
 

@@ -213,21 +213,23 @@ def _load_bundles(bundle_dirs: Sequence[Path], *, local_root: Path) -> tuple[Bun
         elif not isinstance(bundle, Bundle):
             raise ProjectError(f"bundle {folder.name!r} has a non-Bundle __kitup_bundle__")
 
-        bundle.id = folder.name
-        if not bundle.name:
-            bundle.name = folder.name
-        bundle.var_paths = _discover_bundle_var_paths(bundle, folder)
+        var_paths = _discover_bundle_var_paths(bundle, folder, bundle_id=folder.name)
+        bundle._finalize(
+            id=folder.name,
+            name=bundle.name or folder.name,
+            var_paths=var_paths,
+        )
         bundles.append(bundle)
     return tuple(bundles)
 
 
-def _discover_bundle_var_paths(bundle: Bundle, folder: Path) -> tuple[Path, ...]:
+def _discover_bundle_var_paths(bundle: Bundle, folder: Path, *, bundle_id: str) -> tuple[Path, ...]:
     """Discover a bundle's optional ``vars/`` files."""
     root = bundle.path if bundle.path is not None else folder
     try:
         return discover_var_paths(root)
     except ProjectError as exc:
-        raise ProjectError(f"bundle {bundle.id!r}: {exc}") from exc
+        raise ProjectError(f"bundle {bundle_id!r}: {exc}") from exc
 
 
 def _load_external_bundle(folder: Path, package_name: str) -> ModuleType:

@@ -50,18 +50,22 @@ declarative and construct the bundle:
 
 ```python
 # bundles/base/__init__.py
-from kitup import Bundle
+from kitup import bundle
 
-Bundle("Base system", "Core packages and services")
+bundle("Base system", "Core packages and services")
 ```
 
 The first argument is the display name shown by `kitup list`; it defaults to the
 folder name. The description is optional. The bundle id always comes from the
-folder name, so `Bundle` has no `id` argument.
+folder name, so the factory has no `id` argument.
+
+`bundle()` returns the bundle when you need the object, but the return value can
+be discarded: calls made from a package `__init__.py` register the bundle
+automatically.
 
 ### Task modules
 
-When `Bundle(...)` omits `modules`, kitup discovers sibling `*.py` files except
+When `bundle(...)` omits `modules`, kitup discovers sibling `*.py` files except
 `__init__.py` and `_`-prefixed helpers. Files load in filename order, and tasks
 run in declaration order within each file. Zero-padded prefixes are an easy way
 to control order:
@@ -77,9 +81,11 @@ bundles/base/
 Pass an explicit sequence to control order or include only some modules:
 
 ```python
+from kitup import bundle
+
 from . import packages, services
 
-Bundle("Base system", modules=[packages, services])
+bundle("Base system", modules=[packages, services])
 ```
 
 `modules=[]` disables discovery. Every module passed to `modules` or discovered
@@ -92,9 +98,9 @@ absolute paths and paths beginning with `~` are accepted:
 
 ```python
 from pathlib import Path
-from kitup import Bundle
+from kitup import bundle
 
-Bundle(
+bundle(
     "Base",
     modules=[
         "tasks.py",
@@ -117,9 +123,9 @@ Depend on other bundles by id:
 
 ```python
 # bundles/workstation/__init__.py
-from kitup import Bundle
+from kitup import bundle
 
-Bundle("Workstation", depends_on=["base"])
+bundle("Workstation", depends_on=["base"])
 ```
 
 Dependencies run first and each bundle runs at most once. Unknown ids and
@@ -235,8 +241,8 @@ stem. Duplicate var ids are errors.
 
 ### Bundle vars
 
-A bundle may also contain a `vars/` directory in its bundle folder
-(`Bundle.path`, normally `bundles/<id>/`). Files load in lexicographic order,
+A bundle may also contain a `vars/` directory in its bundle folder (the bundle's
+`path`, normally `bundles/<id>/`). Files load in lexicographic order,
 just like project vars. Bundle vars are scoped to that bundle: its tasks and
 side effects see them, but sibling and dependency bundles do not.
 

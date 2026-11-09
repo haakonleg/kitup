@@ -184,13 +184,22 @@ class Output:
         if command:
             self.write(f"command: {' '.join(command)}")
 
+        stdout = getattr(error, "stdout", "") or ""
+        if stdout.strip():
+            self._failure_output_block("stdout", stdout)
+
         stderr = getattr(error, "stderr", "") or ""
         if stderr.strip():
-            lines = stderr.rstrip().splitlines()
-            if not self.verbose:
-                lines = lines[-20:]
-            for line in lines:
-                self.write(f"  {line}")
+            self._failure_output_block("stderr", stderr)
+
+    def _failure_output_block(self, label: str, text: str) -> None:
+        """Print a trimmed captured-output block."""
+        self.write(f"{label}:")
+        lines = text.rstrip().splitlines()
+        if not self.verbose:
+            lines = lines[-20:]
+        for line in lines:
+            self.write(f"  {line}")
 
     def summary(self, counts: Mapping[Status, int], duration: float) -> None:
         """Print the run summary."""

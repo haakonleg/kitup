@@ -1,6 +1,6 @@
-from kitup import Bundle
+from kitup import bundle
 
-Bundle(
+bundle(
     "Dotfiles",
     "Shell and editor configuration",
     depends_on=["base"],

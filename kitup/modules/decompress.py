@@ -17,8 +17,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import IO, Any, Final
 
-from .._utils import file_ops
-from .._utils.file_helper import (
+from .._utils import file_actions
+from .._utils.file_primitives import (
     apply_metadata,
     mkdir_path,
     replace_path,
@@ -103,7 +103,7 @@ def archive(
     if target_info is not None and not (stat.S_ISDIR(target_info.st_mode) and not stat.S_ISLNK(target_info.st_mode)):
         raise TaskFailed(f"archive destination is not a directory: {target}")
     if target_info is None:
-        file_ops.require_parent_local(target)
+        file_actions.require_parent_local(target)
     if creates is not None:
         marker = expand_path(creates, error=TaskFailed)
         if not marker.is_absolute():
@@ -194,7 +194,7 @@ def file(
         if not stat.S_ISREG(info.st_mode):
             raise TaskFailed(f"decompressed destination is not a regular file: {target}")
     else:
-        file_ops.require_parent_local(target)
+        file_actions.require_parent_local(target)
 
     needs_write = info is None
     if info is not None:

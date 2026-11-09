@@ -1,4 +1,9 @@
-"""Context-aware filesystem helpers shared by built-in modules."""
+"""Context-aware filesystem actions shared by built-in modules.
+
+These helpers build on :mod:`kitup._utils.file_primitives` and add
+``TaskContext`` behavior: dry runs, privileged-worker routing, diffs, and
+``CallResult`` construction. They are not embedded in the worker.
+"""
 
 import base64
 import difflib
@@ -14,7 +19,7 @@ from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
 from . import ini as ini_ops
-from .file_helper import (
+from .file_primitives import (
     apply_metadata,
     mkdir_path,
     read_path,
@@ -39,7 +44,7 @@ class FileInfo:
     link: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        """Return the metadata in the shape used by ``file_helper``."""
+        """Return the metadata in the shape used by ``file_primitives``."""
         return {
             "mode": self.mode,
             "uid": self.uid,
@@ -356,6 +361,8 @@ def apply_ini(
     when ``option`` is also ``None`` — is removed instead. The returned call
     is not recorded; the caller records it with ``ctx.changed``.
     """
+    if value is not None and option is None:
+        raise TaskFailed("ini value requires an option")
     if not create and stat(ctx, target, sudo=sudo) is None:
         raise TaskFailed(f"file does not exist and create=False: {target}")
     text = read_text(ctx, target, sudo=sudo)
@@ -472,7 +479,12 @@ def remove(
     if ctx.dry_run:
         return CallResult(action=action, changed=True, summary=summary, **data)
     if privileged(ctx, sudo=sudo):
-        worker_request(ctx, "remove", path=str(path), force=force)
+        try:
+            worker_request(ctx, "remove", path=str(path), force=force)
+        except TaskFailed as exc:
+            if is_dir and not force:
+                raise TaskFailed(f"directory is not empty: {path}") from exc
+            raise TaskFailed(f"could not remove {path}: {exc}") from exc
         return CallResult(action=action, changed=True, summary=summary, **data)
     try:
         remove_path(path, force=force)

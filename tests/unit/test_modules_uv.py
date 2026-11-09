@@ -759,6 +759,65 @@ def test_tools_latest_is_idempotent_when_the_version_does_not_change(tmp_path):
     assert result.summary == "ensure tools are up to date: ruff"
 
 
+def test_tools_latest_dry_run_is_idempotent_when_up_to_date(tmp_path):
+    tools_dir = tmp_path / "tools"
+    make_receipt(tools_dir, "ruff")
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, stdout=str(tools_dir)),
+        response(0, stdout=""),
+    ]
+    ctx = make_context(tmp_path, dry_run=True, command=command)
+
+    result = uv.tools(ctx, ["ruff"], state="latest")
+
+    assert argvs(command) == [
+        [UV, "tool", "dir"],
+        [UV, "tool", "list", "--outdated"],
+    ]
+    assert result.changed is False
+    assert result.summary == "ensure tools are up to date: ruff"
+    assert call_data(result) == {"tools": ["ruff"], "added": []}
+
+
+def test_tools_latest_dry_run_reports_an_outdated_tool(tmp_path):
+    tools_dir = tmp_path / "tools"
+    make_receipt(tools_dir, "ruff")
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, stdout=str(tools_dir)),
+        response(0, stdout="ruff v1.0 [latest: 2.0]\n- ruff\n"),
+    ]
+    ctx = make_context(tmp_path, dry_run=True, command=command)
+
+    result = uv.tools(ctx, ["ruff"], state="latest")
+
+    assert argvs(command) == [
+        [UV, "tool", "dir"],
+        [UV, "tool", "list", "--outdated"],
+    ]
+    assert result.changed is True
+    assert result.summary == "+ruff"
+    assert call_data(result) == {"tools": ["ruff"], "added": ["ruff"]}
+
+
+def test_tools_latest_dry_run_falls_back_when_the_outdated_probe_fails(tmp_path):
+    tools_dir = tmp_path / "tools"
+    make_receipt(tools_dir, "ruff")
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, stdout=str(tools_dir)),
+        response(1, stderr="network unavailable"),
+    ]
+    ctx = make_context(tmp_path, dry_run=True, command=command)
+
+    result = uv.tools(ctx, ["ruff"], state="latest")
+
+    assert result.changed is True
+    assert result.summary == "+ruff"
+    assert any("could not check for outdated uv tools" in note for note in ctx.notes)
+
+
 def test_tools_absent_uninstalls_and_checks_the_receipts(tmp_path):
     tools_dir = tmp_path / "tools"
     make_receipt(tools_dir, "ruff")

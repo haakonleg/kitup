@@ -129,6 +129,8 @@ def test_invalid_arguments_are_rejected(tmp_path):
 
     with pytest.raises(TaskFailed, match="value is required"):
         gsettings.key(ctx, "org.example", "theme")
+    with pytest.raises(TaskFailed, match="state 'absent' does not take a value"):
+        gsettings.key(ctx, "org.example", "theme", "dark", state="absent")
     with pytest.raises(TaskFailed, match="invalid gsettings state"):
         gsettings.key(ctx, "org.example", "theme", state="unknown")
     with pytest.raises(TaskFailed, match="gsettings schema must not be empty"):

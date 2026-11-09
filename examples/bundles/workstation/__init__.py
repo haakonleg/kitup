@@ -1,6 +1,6 @@
-from kitup import Bundle
+from kitup import bundle
 
-Bundle(
+bundle(
     "Workstation",
     "Flatpak applications and desktop settings",
     depends_on=["base"],

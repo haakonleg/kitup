@@ -5,9 +5,9 @@ from functools import cache
 from pathlib import Path
 from typing import Any, Final
 
-from .._utils import file_ops
+from .._utils import file_actions
 from .._utils.paths import expand_path
-from .._utils.validation import require_metadata, require_mode, require_path
+from .._utils.validation import require_bool, require_metadata, require_mode, require_path
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
@@ -40,16 +40,17 @@ def file(
     require_path(dest, "template destination")
     require_metadata(owner, group)
     require_mode(mode)
+    require_bool(sudo, "template sudo")
     extra = _require_variables(variables)
     target = expand_path(dest, error=TaskFailed)
-    file_ops.require_parent(ctx, target, sudo=sudo)
+    file_actions.require_parent(ctx, target, sudo=sudo)
 
     source = ctx.resolve_source(src)
     text = _read_template(ctx, source)
     rendered = _render(ctx, source, text, extra)
 
     return ctx.changed(
-        file_ops.apply_bytes(
+        file_actions.apply_bytes(
             ctx,
             target,
             rendered.encode("utf-8"),
@@ -81,14 +82,14 @@ def _require_variables(variables: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def _read_template(ctx: TaskContext, source: Path) -> str:
-    info = file_ops.stat_local(source)
+    info = file_actions.stat_local(source)
     if info is None:
         raise TaskFailed(f"template source does not exist: {source}")
     if info.is_symlink:
         raise TaskFailed(f"refusing to read symlink template: {source}")
     if not info.is_file:
         raise TaskFailed(f"template source is not a regular file: {source}")
-    data = file_ops.read_bytes(ctx, source, info, sudo=False)
+    data = file_actions.read_bytes(ctx, source, info, sudo=False)
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -122,6 +123,8 @@ def _render(
         raise TaskFailed(f"undefined variable in template {source}: {exc}") from exc
     except jinja2.TemplateError as exc:
         raise TaskFailed(f"template error in {source}: {exc}") from exc
+    except Exception as exc:
+        raise TaskFailed(f"template rendering error in {source}: {exc}") from exc
 
 
 @cache

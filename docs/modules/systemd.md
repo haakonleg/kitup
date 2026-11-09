@@ -9,7 +9,8 @@ from kitup import task
 
 ## `unit(ctx, unit, *, enabled=None, state=None, scope="system")`
 
-Manage a unit's enabled and active state.
+Manage a unit's enabled and active state. At least one of `enabled` or `state`
+must be provided.
 
 ### Parameters
 
@@ -34,6 +35,8 @@ def enable_example_service(ctx):
 ## `daemon_reload(ctx, *, scope="system")`
 
 Reload systemd manager configuration.
+
+This always runs `systemctl daemon-reload` and reports a change.
 
 ### Parameters
 

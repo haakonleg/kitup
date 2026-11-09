@@ -7,7 +7,14 @@ from pathlib import Path
 
 from .._utils.paths import expand_path
 from .._utils.timing import timed
-from .._utils.validation import normalize_strings, require_collection, require_path, require_text
+from .._utils.validation import (
+    normalize_strings,
+    require_bool,
+    require_collection,
+    require_path,
+    require_text,
+    require_timeout,
+)
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
@@ -100,6 +107,11 @@ def _run(
 ) -> CallResult:
     cmd = normalize_strings(cmd)
     require_collection(cmd, "cmd")
+    require_bool(changed, "changed")
+    require_bool(sudo, "sudo")
+    if check is not None:
+        require_bool(check, "check")
+    require_timeout(timeout)
     if unless is not None:
         unless = normalize_strings(unless)
         require_collection(unless, "unless")
@@ -115,7 +127,7 @@ def _run(
         marker = expand_path(creates, error=TaskFailed)
         if cwd_path is not None and not marker.is_absolute():
             marker = cwd_path / marker
-        if marker.exists():
+        if os.path.lexists(marker):
             return ctx.changed(
                 action=action,
                 changed=False,

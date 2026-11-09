@@ -3,6 +3,7 @@
 import compileall
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,7 +24,25 @@ FUNCTION: Final[str] = ENTRY_POINT.split(":", 1)[1]
 PACKAGE: Final = MODULE.split(".", 1)[0]
 TARGET: Final = ROOT / "dist" / COMMAND
 
-BUNDLED_PACKAGES: Final = ("jinja2", "markupsafe")
+_REQUIREMENT_NAME: Final = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def _dependency_names(requirements: object) -> tuple[str, ...]:
+    """Return distribution names from ``project.dependencies`` in pyproject.toml."""
+    if not isinstance(requirements, list):
+        raise SystemExit("project.dependencies must be a list in pyproject.toml")
+    names: list[str] = []
+    for requirement in requirements:
+        if not isinstance(requirement, str):
+            raise SystemExit(f"invalid project dependency: {requirement!r}")
+        match = _REQUIREMENT_NAME.match(requirement)
+        if match is None:
+            raise SystemExit(f"cannot parse project dependency: {requirement!r}")
+        names.append(match.group(1))
+    return tuple(names)
+
+
+BUNDLED_DISTRIBUTIONS: Final = _dependency_names(PROJECT.get("dependencies"))
 NOTICES: Final = Path(__file__).with_name("THIRD_PARTY_NOTICES.txt")
 IGNORE: Final = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.so")
 
@@ -35,15 +54,55 @@ raise SystemExit({FUNCTION}())
 
 LOCATE_PACKAGES: Final = textwrap.dedent(
     """\
+    import importlib.metadata
     import importlib.util
     import json
+    import re
     import sys
 
+    REQUIREMENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
+
+    def canonical(name):
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+    def requirement_name(value):
+        match = REQUIREMENT_NAME.match(value)
+        return match.group(0) if match else None
+
+    roots = {canonical(name) for name in sys.argv[1:]}
+    owners = {}
+    for module, distributions in importlib.metadata.packages_distributions().items():
+        for distribution in distributions:
+            owners.setdefault(canonical(distribution), set()).add(module)
+
+    pending = list(sys.argv[1:])
+    seen = set()
+    imports = set()
+    while pending:
+        name = pending.pop()
+        key = canonical(name)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            distribution = importlib.metadata.distribution(name)
+        except importlib.metadata.PackageNotFoundError:
+            if key in roots:
+                raise SystemExit(f"missing distribution: {name}")
+            continue
+        imports.update(owners.get(key, ()))
+        for requirement in distribution.requires or ():
+            if "extra ==" in requirement:
+                continue
+            required = requirement_name(requirement)
+            if required is not None:
+                pending.append(required)
+
     paths = {}
-    for name in sys.argv[1:]:
+    for name in sorted(imports):
         spec = importlib.util.find_spec(name)
         if spec is None or not spec.submodule_search_locations:
-            raise SystemExit(f"missing package: {name}")
+            continue
         paths[name] = next(iter(spec.submodule_search_locations))
 
     print(json.dumps(paths))
@@ -98,7 +157,7 @@ def _stage_package(stage: Path) -> None:
 
 def _stage_dependencies(stage: Path, python: Path) -> None:
     """Copy bundled runtime packages from ``python`` into the staging directory."""
-    for name, directory in _find_packages(python, BUNDLED_PACKAGES).items():
+    for name, directory in _find_packages(python, BUNDLED_DISTRIBUTIONS).items():
         shutil.copytree(directory, stage / name, ignore=IGNORE)
 
 
@@ -141,10 +200,10 @@ def _create_archive(stage: Path, target: Path) -> None:
     target.chmod(0o755)
 
 
-def _find_packages(python: Path, names: tuple[str, ...]) -> dict[str, Path]:
-    """Return the source directories of packages importable by ``python``."""
+def _find_packages(python: Path, distributions: tuple[str, ...]) -> dict[str, Path]:
+    """Return package directories for ``distributions`` and their dependencies."""
     result = subprocess.run(
-        [str(python), "-c", LOCATE_PACKAGES, *names],
+        [str(python), "-c", LOCATE_PACKAGES, *distributions],
         check=False,
         text=True,
         encoding="utf-8",

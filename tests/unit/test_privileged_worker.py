@@ -9,7 +9,7 @@ from kitup._privileged import PrivilegedWorker
 from kitup._privileged import client as client_module
 from kitup._privileged.protocol import Request, Response
 from kitup._privileged.worker import _read_limited
-from kitup._utils.file_helper import stat_path
+from kitup._utils.file_primitives import stat_path
 from kitup.errors import TaskFailed
 from kitup.modules import files
 

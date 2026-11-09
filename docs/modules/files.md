@@ -109,7 +109,7 @@ Add, replace, or remove a line.
 ### Parameters
 
 - `path` — file to edit.
-- `line` — desired line, without a trailing newline.
+- `line` — desired line, without a trailing newline or other line breaks.
 - `match=None` compares the full line; otherwise `match` is a regular expression.
 - `state="present"` replaces the first match or appends the line.
 - `state="absent"` removes all matches.
@@ -132,7 +132,8 @@ content
 ### Parameters
 
 - `path` — file to edit.
-- `marker` — block name used in the `# BEGIN` and `# END` markers.
+- `marker` — block name used in the `# BEGIN` and `# END` markers. It must not
+  contain line breaks.
 - `content` — block body. A trailing newline is added when missing.
 - `state="present"` creates or updates the block; `"absent"` removes it.
 - `sudo=True` edits the file through the privileged worker.
@@ -153,9 +154,10 @@ Set or remove one option in an INI-style file.
 - `section=None` — target `[section]` header, matched case-sensitively.
   `None` edits the preamble before the first header.
 - `option` — option name. Required with `state="present"`.
-- `value` — option value, required with `state="present"`. Written as
-  `option = value`; surrounding whitespace is ignored, so `key=value` and
-  `key = value` are equivalent. Values may contain `=`.
+- `value` — option value, required with `state="present"` and rejected with
+  `state="absent"`. Written as `option = value`; surrounding whitespace is
+  ignored, so `key=value` and `key = value` are equivalent. Values may contain
+  `=`.
 - `match=None` — option names to required values, selecting one of several
   same-named sections. Keys and values are regular expressions (`re.search`);
   escape literals with `re.escape`. Requires `section` and is never written to

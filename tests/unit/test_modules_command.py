@@ -21,6 +21,19 @@ def test_guarded_command_is_skipped(tmp_path):
     assert result.summary == f"skip touch {marker}"
 
 
+def test_broken_symlink_marker_skips_the_command(tmp_path):
+    runner = FakeCommandRunner()
+    ctx = make_context(tmp_path, command=runner)
+    marker = tmp_path / "marker"
+    marker.symlink_to(tmp_path / "missing")
+
+    result = command.run(ctx, ["true"], creates=marker)
+
+    assert runner.calls == []
+    assert result.changed is False
+    assert result.summary == "skip true"
+
+
 def test_unguarded_command_runs_and_records_change(tmp_path):
     runner = FakeCommandRunner()
     ctx = make_context(tmp_path, command=runner)
@@ -154,3 +167,13 @@ def test_invalid_arguments_are_rejected(tmp_path):
         command.shell(ctx, "true", unless="  ")
     with pytest.raises(TaskFailed, match="shell must not be empty"):
         command.shell(ctx, "true", shell="")
+
+    for keyword, value in (
+        ("changed", "yes"),
+        ("sudo", 1),
+        ("check", "no"),
+        ("timeout", 0),
+        ("timeout", float("inf")),
+    ):
+        with pytest.raises(TaskFailed, match="must be"):
+            command.run(ctx, ["true"], **{keyword: value})

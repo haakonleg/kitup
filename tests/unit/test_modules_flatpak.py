@@ -139,6 +139,8 @@ def test_invalid_remote_arguments_are_rejected(tmp_path):
         flatpak.remote(ctx, REMOTE, REMOTE_URL, state="invalid")
     with pytest.raises(TaskFailed, match="invalid flatpak scope"):
         flatpak.remote(ctx, REMOTE, REMOTE_URL, scope="session")
+    with pytest.raises(TaskFailed, match="flatpak gpg_verify must be a boolean"):
+        flatpak.remote(ctx, REMOTE, REMOTE_URL, gpg_verify="yes")
 
 
 def test_packages_present_is_a_noop_when_installed(tmp_path):

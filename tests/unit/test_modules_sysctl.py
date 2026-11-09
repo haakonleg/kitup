@@ -320,6 +320,8 @@ def test_invalid_arguments_are_rejected(tmp_path):
 
     with pytest.raises(TaskFailed, match="value is required"):
         sysctl.key(ctx, "vm.swappiness")
+    with pytest.raises(TaskFailed, match="state 'absent' does not take a value"):
+        sysctl.key(ctx, "vm.swappiness", 10, state="absent", file=tmp_path / "99-kitup.conf")
     with pytest.raises(TaskFailed, match="invalid sysctl state"):
         sysctl.key(ctx, "vm.swappiness", 10, state="unknown")
     with pytest.raises(TaskFailed, match="sysctl key must not be empty"):

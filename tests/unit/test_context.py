@@ -135,7 +135,7 @@ def test_result_returns_stored_results_and_raises_for_unrun_tasks(tmp_path):
     task = task_for("Check")
     context.begin_task(task)
     result = TaskResult(task=task, status=Status.CHANGED, value="done")
-    context._store_result(task, result)
+    context.store_result(task, result)
 
     assert context.result(task.func) is result
 
@@ -153,7 +153,7 @@ def test_results_returns_a_snapshot_that_survives_begin_task(tmp_path):
     task = task_for("Check")
     context.begin_task(task)
     result = TaskResult(task=task, status=Status.OK)
-    context._store_result(task, result)
+    context.store_result(task, result)
 
     snapshot = context.results
     assert snapshot == {task.id: result}
@@ -168,11 +168,22 @@ def test_result_and_results_are_empty_without_a_current_bundle(tmp_path):
     context = make_context(tmp_path)
     task = task_for("Check")
     result = TaskResult(task=task, status=Status.OK)
-    context._store_result(task, result)
+    context.store_result(task, result)
 
     assert context.results == {}
     with pytest.raises(TaskFailed, match="no current bundle"):
         context.result(task.func)
+
+
+def test_finish_run_clears_the_current_bundle(tmp_path):
+    context = make_context(tmp_path)
+    context.begin_task(task_for("Check"))
+    assert context.run_state.current is not None
+
+    context.finish_run()
+
+    assert context.run_state.current is None
+    assert context.results == {}
 
 
 def test_run_executes_and_forwards_options(tmp_path):
@@ -297,7 +308,7 @@ def test_side_effect_queues_for_the_current_task(tmp_path):
 
     context.side_effect(effect)
 
-    assert context._take_side_effects() == [effect]
+    assert context.take_side_effects() == [effect]
 
 
 def test_side_effect_rejects_invalid_contexts(tmp_path):
@@ -331,12 +342,12 @@ def test_side_effect_queue_lifecycle(tmp_path):
     context.side_effect(first)
     context.side_effect(second)
 
-    assert context._take_side_effects() == [first, second]
-    assert context._take_side_effects() == []
+    assert context.take_side_effects() == [first, second]
+    assert context.take_side_effects() == []
 
     context.side_effect(first)
     context.begin_task(task_for("Other"))
-    assert context._take_side_effects() == []
+    assert context.take_side_effects() == []
 
 
 def test_side_effect_rejects_duplicate_function_names(tmp_path):

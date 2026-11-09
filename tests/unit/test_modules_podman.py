@@ -1024,6 +1024,39 @@ def test_dry_run_does_not_write_files(tmp_path):
     assert len(ctx.changes) == 2
 
 
+def test_dry_run_rejects_a_missing_parent(tmp_path):
+    ctx = context(tmp_path, dry_run=True, sudo=FakeSudo(is_root=True))
+    missing = tmp_path / "missing"
+
+    with pytest.raises(TaskFailed, match="parent directory does not exist"):
+        podman.registry(ctx, "example", location="docker.io", path=missing / "example.conf")
+    with pytest.raises(TaskFailed, match="parent directory does not exist"):
+        podman.quadlet(ctx, CONTAINER, image=IMAGE, dest=missing)
+
+
+def test_invalid_boolean_and_timeout_arguments_are_rejected(tmp_path):
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="image sudo must be a boolean"):
+        podman.image(ctx, IMAGE, sudo="yes")
+    with pytest.raises(TaskFailed, match="timeout must be a positive number"):
+        podman.image(ctx, IMAGE, timeout=0)
+    with pytest.raises(TaskFailed, match="container sudo must be a boolean"):
+        podman.container(ctx, CONTAINER, sudo="yes")
+    with pytest.raises(TaskFailed, match="timeout must be a positive number"):
+        podman.container(ctx, CONTAINER, timeout=0)
+    with pytest.raises(TaskFailed, match="build sudo must be a boolean"):
+        podman.build(ctx, tmp_path, tag=IMAGE, sudo="yes")
+    with pytest.raises(TaskFailed, match="timeout must be a positive number"):
+        podman.build(ctx, tmp_path, tag=IMAGE, timeout=0)
+    with pytest.raises(TaskFailed, match="tag sudo must be a boolean"):
+        podman.tag(ctx, IMAGE, "other", sudo="yes")
+    with pytest.raises(TaskFailed, match="registry sudo must be a boolean"):
+        podman.login(ctx, REGISTRY, username="u", password="p", sudo="yes")
+    with pytest.raises(TaskFailed, match="registry sudo must be a boolean"):
+        podman.logout(ctx, REGISTRY, sudo="yes")
+
+
 def test_dry_run_does_not_mutate_containers(tmp_path):
     command = FakeCommandRunner()
     command.responses = [missing_container()]

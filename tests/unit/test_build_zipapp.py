@@ -41,6 +41,12 @@ def test_build_environment_uses_uv(monkeypatch, tmp_path):
     assert description == "create the build environment"
 
 
+def test_bundled_distributions_come_from_pyproject():
+    module = load_build_module()
+
+    assert module.BUNDLED_DISTRIBUTIONS == ("Jinja2",)
+
+
 def test_zipapp_bundles_jinja2_and_licenses(tmp_path):
     module = load_build_module()
     target = tmp_path / "kitup"

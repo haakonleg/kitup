@@ -48,7 +48,7 @@ def write_bundle(root: Path, name: str, source: str) -> Path:
     folder = root / "bundles" / name
     folder.mkdir(parents=True)
     (folder / "__init__.py").write_text(
-        "from kitup import Bundle\n\nBundle()\n",
+        "from kitup import bundle\n\nbundle()\n",
         encoding="utf-8",
     )
 

@@ -3,7 +3,7 @@
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from ..._utils import file_ops
+from ..._utils import file_actions
 from ..._utils.paths import expand_path
 from ..._utils.validation import (
     require_bool,
@@ -118,7 +118,7 @@ def generate_systemd(
 
     target = destination / filename
     return ctx.changed(
-        file_ops.apply_bytes(
+        file_actions.apply_bytes(
             ctx,
             target,
             result.stdout.encode(),

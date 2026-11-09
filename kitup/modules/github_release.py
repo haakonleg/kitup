@@ -9,8 +9,8 @@ from typing import Any, Final
 from urllib.error import HTTPError
 from urllib.parse import quote
 
-from .._utils.http import open_url, read_bytes, validate_timeout
-from .._utils.validation import require_text
+from .._utils.http import open_url, read_bytes
+from .._utils.validation import require_text, require_timeout
 from ..context import TaskContext
 from ..errors import TaskFailed
 
@@ -85,7 +85,7 @@ def latest(
     non-prerelease release. Use :func:`by_tag` to fetch a prerelease.
     """
     project = _validate_project(project)
-    validate_timeout(timeout)
+    require_timeout(timeout)
 
     label = f"latest release for {project}"
     url = f"{_API_URL}/repos/{_project_path(project)}/releases/latest"
@@ -106,7 +106,7 @@ def by_tag(
     """Return the published release for ``tag`` in a public repository."""
     project = _validate_project(project)
     tag = _validate_tag(tag)
-    validate_timeout(timeout)
+    require_timeout(timeout)
 
     label = f"release {tag!r} for {project}"
     encoded_tag = quote(tag, safe="")

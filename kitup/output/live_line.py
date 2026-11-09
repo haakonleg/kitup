@@ -20,6 +20,7 @@ class LiveLine:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.stream = stream
+        self._clock = clock
         self._condition = threading.Condition()
         self._thread: threading.Thread | None = None
         self._animation: Animation | None = None
@@ -81,11 +82,6 @@ class LiveLine:
 
     def write(self, text: str = "") -> None:
         """Write a line without corrupting the animation."""
-        # Only the runner toggles the animation state, so checking without the
-        # lock is safe and keeps ordinary output uncontended.
-        if self._animation is None or self._suspended or not self._drawn:
-            print(text, file=self.stream)
-            return
         with self._condition:
             if self._animation is None or self._suspended or not self._drawn:
                 print(text, file=self.stream)
@@ -107,9 +103,9 @@ class LiveLine:
                     self._condition.wait()
                 animation = self._animation
 
-                deadline = time.monotonic() + animation.delay
+                deadline = self._clock() + animation.delay
                 while self._animation is animation:
-                    remaining = deadline - time.monotonic()
+                    remaining = deadline - self._clock()
                     if remaining <= 0:
                         break
                     self._condition.wait(remaining)

@@ -95,6 +95,13 @@ class Parser:
         """
         return self._parse(argv)
 
+    def is_known_option(self, token: str) -> bool:
+        """Return whether any command or the top level accepts ``token``."""
+        name = token.partition("=")[0]
+        if name in self._top_options:
+            return True
+        return any(name in options for options in self._command_options.values())
+
     def error(self, message: str, *, command: Command | None = None) -> Never:
         """Print a usage error to stderr and exit with status 2."""
         print(self._usage(command), file=sys.stderr)

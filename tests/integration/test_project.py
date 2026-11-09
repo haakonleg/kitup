@@ -15,7 +15,7 @@ def test_project_merges_vars_and_resolves_dependencies(tmp_path: Path, capsys: p
         tmp_path,
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "tasks.py": """
                 from kitup import task
 
@@ -26,7 +26,7 @@ def test_project_merges_vars_and_resolves_dependencies(tmp_path: Path, capsys: p
                 """,
             },
             "extra": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Extra', depends_on=['base'])\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Extra', depends_on=['base'])\n",
                 "tasks.py": """
                 from kitup import task
 
@@ -52,7 +52,7 @@ def test_preset_selects_bundles(tmp_path: Path, capsys: pytest.CaptureFixture[st
         tmp_path,
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "tasks.py": """
                 from kitup import task
 
@@ -62,7 +62,7 @@ def test_preset_selects_bundles(tmp_path: Path, capsys: pytest.CaptureFixture[st
                 """,
             },
             "extra": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Extra')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Extra')\n",
                 "tasks.py": """
                 from kitup import task
 
@@ -87,7 +87,7 @@ def test_bundle_path_loads_external_bundles(tmp_path: Path, capsys: pytest.Captu
         tmp_path / "machine",
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "tasks.py": "from kitup import task\n\n@task\ndef base_task(ctx):\n    ctx.changed(summary='base')\n",
             }
         },
@@ -112,7 +112,7 @@ def test_var_file_adds_values_after_discovered_vars(tmp_path: Path, capsys: pyte
         tmp_path / "machine",
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "tasks.py": """
                 from kitup import task
 

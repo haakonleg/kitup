@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
 
-from .._utils import file_ops
+from .._utils import file_actions
 from .._utils import toml as toml_ops
 from .._utils.executables import require_command
 from .._utils.paths import expand_path
@@ -93,10 +93,10 @@ def dependencies(
     requirements = [_require_project_requirement(name, state=state) for name in wanted]
 
     pyproject = project_path / "pyproject.toml"
-    project_info = file_ops.stat(ctx, project_path, sudo=False, follow=True)
+    project_info = file_actions.stat(ctx, project_path, sudo=False, follow=True)
     if project_info is not None and not project_info.is_dir:
         raise TaskFailed(f"project path is not a directory: {project_path}")
-    pyproject_info = file_ops.stat(ctx, pyproject, sudo=False)
+    pyproject_info = file_actions.stat(ctx, pyproject, sudo=False)
     if pyproject_info is None and state == "absent":
         # nothing to remove from a missing project; no uv needed
         return ctx.changed(_absent_no_change(wanted, project_path, state))
@@ -240,8 +240,20 @@ def tools(
     refresh = [req.name for req in requirements if state == "latest" and req.normalized in installed]
     changed_items = [name.removesuffix("@latest") for name in install]
     if ctx.dry_run:
-        if state == "latest":
+        if state == "latest" and upgrade:
+            try:
+                outdated = _outdated_tools(ctx, uv)
+            except TaskFailed as exc:
+                # Offline or custom-index runs may not be able to query the
+                # index; fall back to the previous over-approximation.
+                ctx.note(
+                    f"could not check for outdated uv tools; reporting installed tools as potentially outdated: {exc}"
+                )
+            else:
+                refresh = [name for name in refresh if normalize_dist_name(name) in outdated]
             changed_items = unique_strings([*changed_items, *refresh])
+        if not changed_items:
+            return ctx.changed(_tools_no_change(wanted, state))
         return ctx.changed(_tools_changed(wanted, state, changed_items))
 
     versions_before = _tool_versions(ctx, uv) if state == "latest" else {}
@@ -329,8 +341,8 @@ def config(
     elif value is not None:
         raise TaskFailed("config state 'absent' does not take a value")
 
-    if state == "present" and file_ops.stat(ctx, target, sudo=sudo) is None:
-        file_ops.ensure_parent(ctx, target, sudo=sudo)
+    if state == "present" and file_actions.stat(ctx, target, sudo=sudo) is None:
+        file_actions.ensure_parent(ctx, target, sudo=sudo)
 
     return ctx.changed(
         toml_ops.apply_toml_key(
@@ -385,7 +397,7 @@ def _check_args(base: list[str], extra: list[str], upgrade: list[str] | None = N
 
 def _init_project(
     ctx: TaskContext,
-    pyproject_info: file_ops.FileInfo | None,
+    pyproject_info: file_actions.FileInfo | None,
     pyproject: Path,
     project_path: Path,
     python: str | None,
@@ -397,7 +409,7 @@ def _init_project(
         return True
     uv = _uv_bin(ctx)
     ctx.run([uv, "init", "--bare", *_python_args(python), str(project_path)])
-    if file_ops.stat(ctx, pyproject, sudo=False) is None:
+    if file_actions.stat(ctx, pyproject, sudo=False) is None:
         raise TaskFailed(f"uv init did not create {pyproject}")
     return True
 
@@ -411,7 +423,7 @@ def _read_table(
     group: str | None,
 ) -> tuple[str, list[str], str, str]:
     """Read ``pyproject.toml`` and return ``(text, lines, table, key)`` for the edited table."""
-    text = file_ops.read_text(ctx, pyproject, sudo=False)
+    text = file_actions.read_text(ctx, pyproject, sudo=False)
     if not initialized and state != "absent" and group is None:
         _require_project_table(text, pyproject)
     table = "dependency-groups" if group is not None else "project"
@@ -454,7 +466,7 @@ def _write_table(
     new_text = "".join(new_lines)
     if new_text and not new_text.endswith("\n"):
         new_text += toml_ops.newline_of(lines)
-    file_ops.apply_text(
+    file_actions.apply_text(
         ctx, pyproject, text, new_text, action="uv.dependencies", summary=summary, data=data, sudo=False
     )
 
@@ -561,7 +573,7 @@ def _project_env_exists(ctx: TaskContext, project_path: Path) -> bool:
     env = expand_path(configured, error=TaskFailed) if configured else project_path / ".venv"
     if not env.is_absolute():
         env = project_path / env
-    info = file_ops.stat(ctx, env, sudo=False, follow=True)
+    info = file_actions.stat(ctx, env, sudo=False, follow=True)
     return info is not None and info.is_dir
 
 
@@ -764,8 +776,19 @@ def _installed_tools(ctx: TaskContext, tools_dir: Path) -> dict[str, InstalledTo
 def _tool_versions(ctx: TaskContext, uv: str) -> dict[str, str]:
     """Return normalized tool name -> installed version, parsed from ``uv tool list``."""
     result = _require_uv(ctx, [uv, "tool", "list"], failure="could not list uv tools")
+    return _parse_tool_list(result.stdout)
+
+
+def _outdated_tools(ctx: TaskContext, uv: str) -> set[str]:
+    """Return normalized names of installed tools with a newer version available."""
+    result = _require_uv(ctx, [uv, "tool", "list", "--outdated"], failure="could not list outdated uv tools")
+    return set(_parse_tool_list(result.stdout))
+
+
+def _parse_tool_list(output: str) -> dict[str, str]:
+    """Parse ``uv tool list`` output into normalized name -> installed version."""
     versions: dict[str, str] = {}
-    for line in result.stdout.splitlines():
+    for line in output.splitlines():
         match = _TOOL_LINE_RE.match(line.strip())
         if match is not None:
             versions[normalize_dist_name(match.group("name"))] = match.group("version")

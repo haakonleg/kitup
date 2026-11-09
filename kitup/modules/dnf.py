@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import urlparse
 
-from .._utils import file_ops
+from .._utils import file_actions
 from .._utils import ini as ini_ops
 from .._utils.executables import require_command
 from .._utils.paths import expand_path
@@ -42,13 +42,13 @@ def packages(
 
     Names beginning with ``@`` are treated as package groups.
     """
+    require_state(state, "package")
     wanted = unique_strings(normalize_strings(names))
     require_collection(wanted, "package names")
     require_texts(wanted, "package name")
 
     excluded = _normalize_excludes(exclude)
     group_names, package_names = _split_names(wanted, group=group)
-    require_state(state, "package")
     if state == "present":
         result = _ensure_present(
             ctx,
@@ -133,7 +133,8 @@ def _ensure_absent(
         changed=True,
         summary=" ".join(f"-{name}" for name in removed),
         removed=removed,
-        **_package_data(installed_groups, installed_packages),
+        groups=installed_groups,
+        packages=installed_packages,
     )
     if ctx.dry_run:
         return result
@@ -358,10 +359,12 @@ def config(
         if value is None:
             raise TaskFailed("config state 'present' requires a value")
         set_value = _normalize_config_value(value)
+    elif value is not None:
+        raise TaskFailed("config state 'absent' does not take a value")
 
     target = expand_path(path, error=TaskFailed) if path is not None else _DEFAULT_CONFIG_PATH
     return ctx.changed(
-        file_ops.apply_ini(
+        file_actions.apply_ini(
             ctx,
             target,
             section=section,
@@ -421,7 +424,8 @@ def _ensure_present(
         changed=True,
         summary=" ".join(f"+{name}" for name in added),
         added=added,
-        **_package_data(missing_groups, missing_packages),
+        groups=missing_groups,
+        packages=missing_packages,
     )
     if ctx.dry_run:
         return result
@@ -541,12 +545,6 @@ def _affected_names(groups: list[str], packages: list[str]) -> list[str]:
     if groups and packages:
         return _display_names(groups, packages)
     return groups or packages
-
-
-def _package_data(groups: list[str], packages: list[str]) -> dict[str, list[str]]:
-    if groups and packages:
-        return {"groups": groups, "packages": packages}
-    return {}
 
 
 def _missing_group_names(ctx: TaskContext, names: list[str]) -> list[str]:

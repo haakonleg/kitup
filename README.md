@@ -62,9 +62,9 @@ display name and description:
 
 ```python
 # bundles/workstation/__init__.py
-from kitup import Bundle
+from kitup import bundle
 
-Bundle("Workstation", "Desktop packages and security settings")
+bundle("Workstation", "Desktop packages and security settings")
 ```
 
 Tasks are Python functions decorated with `@task`. Built-in modules keep each

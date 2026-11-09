@@ -2,7 +2,9 @@
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-image=localhost/kitup-integration:44
+tag=44
+base_image="registry.fedoraproject.org/fedora-minimal:${tag}"
+image="localhost/kitup-integration:${tag}"
 container=kitup-integration-$$
 
 cd -- "$root"
@@ -16,7 +18,10 @@ echo "==> building dist/kitup"
 ./build.sh
 
 echo "==> building $image"
-podman build --squash-all --layers -t "$image" -f tests/integration/Containerfile .
+podman build --squash-all --layers \
+    --build-arg BASE_IMAGE="$base_image" \
+    -t "$image" \
+    -f tests/integration/Containerfile .
 
 echo "==> starting $container"
 podman run -d --rm \

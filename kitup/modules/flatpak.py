@@ -6,6 +6,7 @@ from .._utils.executables import require_command
 from .._utils.validation import (
     State,
     normalize_strings,
+    require_bool,
     require_collection,
     require_scope,
     require_state,
@@ -32,6 +33,7 @@ def remote(
     require_state(state, "flatpak")
     flag = _scope_flag(ctx, scope)
     require_text(name, "flatpak remote name")
+    require_bool(gpg_verify, "flatpak gpg_verify")
 
     if state == "present":
         if url is None:

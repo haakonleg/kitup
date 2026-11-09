@@ -17,7 +17,8 @@ Set a sysctl key, or remove its entry from a configuration file.
 - `name` — dot-separated key, for example `vm.swappiness`. Slashes are accepted
   as separators, so `net/ipv4/ip_forward` works too.
 - `value` — desired value: `str`, `int`, `float`, or `bool` (`True`/`False`
-  become `1`/`0`). Required when `state="present"`.
+  become `1`/`0`). Required when `state="present"` and rejected when
+  `state="absent"`.
 - `state` — `"present"` or `"absent"`.
 - `file` — absolute path of a sysctl configuration file, for example
   `/etc/sysctl.d/99-kitup.conf`. When given, a `name = value` entry is also

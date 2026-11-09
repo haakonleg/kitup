@@ -1,7 +1,8 @@
 """Read plain-text preset files from the project and merge them into CLI arguments."""
 
 import shlex
-from collections.abc import Sequence
+import warnings
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Final
 
@@ -42,6 +43,7 @@ def parse_with_presets(
     argv: Sequence[str],
     *,
     root: Path | None = None,
+    on_warning: Callable[[str], None] | None = None,
 ) -> tuple[Args, tuple[Path, ...]]:
     """Parse ``argv`` and overlay any ``--preset`` files before the real CLI.
 
@@ -50,9 +52,14 @@ def parse_with_presets(
     suppressed defaults so an option that is absent from one source does not
     erase a value from another. Returns the merged namespace and the resolved
     preset paths.
+
+    Unknown options in a preset are reported through ``on_warning``, which
+    defaults to :func:`warnings.warn`. Options that are valid for another
+    command are ignored without a warning.
     """
     real = parser.parse_args(list(argv))
     command = real.command
+    warn = on_warning if on_warning is not None else _warn
 
     if root is None:
         project_dir = getattr(real, "project_dir", None)
@@ -64,7 +71,7 @@ def parse_with_presets(
     merged = Args()
     for path in preset_paths:
         tokens = read_preset_tokens(path)
-        namespace = _parse_preset_tokens(parser, command, tokens, path)
+        namespace = _parse_preset_tokens(parser, command, tokens, path, warn)
         _overlay(merged, namespace)
     _overlay(merged, real)
     return merged, preset_paths
@@ -75,17 +82,27 @@ def _parse_preset_tokens(
     command: str,
     tokens: Sequence[str],
     path: Path,
+    on_warning: Callable[[str], None],
 ) -> Args:
     filtered = _filter_preset_tokens(tokens)
     try:
-        namespace, _ = parser.parse_known_args([command, *filtered])
+        namespace, extras = parser.parse_known_args([command, *filtered])
     except ParseError as exc:
         raise PresetError(f"invalid preset {path}: {exc}") from exc
+
+    for token in extras:
+        if token.startswith("-") and token != "-" and not parser.is_known_option(token):
+            on_warning(f"preset {path}: ignoring unknown option {token!r}")
 
     for key in ("command", "project_dir", "preset"):
         if hasattr(namespace, key):
             delattr(namespace, key)
     return namespace
+
+
+def _warn(message: str) -> None:
+    """Emit a preset warning through the standard warnings machinery."""
+    warnings.warn(message, stacklevel=3)
 
 
 def _filter_preset_tokens(tokens: Sequence[str]) -> list[str]:

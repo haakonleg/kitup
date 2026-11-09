@@ -1,4 +1,6 @@
-FROM registry.fedoraproject.org/fedora-minimal:44 AS builder
+ARG BASE_IMAGE
+
+FROM ${BASE_IMAGE} AS builder
 
 RUN dnf5 install -y \
         --setopt=install_weak_deps=False \
@@ -51,7 +53,7 @@ RUN python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-tool-fixtu
     && python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-tool-fixture \
     && rm -rf /tmp/pip-tool-fixture
 
-FROM registry.fedoraproject.org/fedora-minimal:44
+FROM ${BASE_IMAGE}
 
 # Weak dependencies are disabled to keep the image small: Flatpak and systemd
 # otherwise pull in large desktop, audio, and udev stacks that the tests do

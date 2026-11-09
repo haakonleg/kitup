@@ -396,6 +396,31 @@ def test_url_change_triggers_fetch_and_update_even_when_update_is_false(tmp_path
     }
 
 
+def test_dry_run_url_change_does_not_fetch_the_old_remote(tmp_path):
+    command = FakeCommandRunner()
+    ctx = make_context(tmp_path, command=command, dry_run=True)
+    dest = tmp_path / "repo"
+    dest.mkdir()
+    command.responses = [
+        toplevel(str(dest)),
+        response(0, f"{OLD_URL}\n"),
+    ]
+
+    git.repo(ctx, URL, dest)
+
+    assert argvs(command) == [
+        is_repo(str(dest)),
+        ["git", "-C", str(dest), "remote", "get-url", "origin"],
+    ]
+    assert [change.summary for change in ctx.changes] == [f"set remote URL of {dest} to {URL}"]
+    assert call_data(ctx.changes[0]) == {
+        "repo": URL,
+        "dest": str(dest),
+        "version": "HEAD",
+        "previous_url": OLD_URL,
+    }
+
+
 def test_url_change_without_drift_only_sets_the_url(tmp_path):
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
@@ -526,6 +551,9 @@ def test_invalid_arguments_are_rejected(tmp_path):
         git.repo(ctx, URL, dest, depth="3")
     with pytest.raises(TaskFailed, match="depth must be at least 1"):
         git.repo(ctx, URL, dest, depth=0)
+    for keyword in ("single_branch", "update", "force"):
+        with pytest.raises(TaskFailed, match=f"git {keyword} must be a boolean"):
+            git.repo(ctx, URL, dest, **{keyword: "yes"})
 
 
 def test_missing_git_binary_fails(tmp_path, monkeypatch):

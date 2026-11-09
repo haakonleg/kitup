@@ -1,5 +1,9 @@
+import tomllib
+from pathlib import Path
+
 import pytest
 
+import kitup
 from kitup import cli
 from kitup.errors import PrivilegeError, TaskFailed
 
@@ -60,6 +64,21 @@ def test_default_project_is_the_current_directory(tmp_path, monkeypatch, capsys)
 
     assert code == 0
     assert "bundle: base" in capsys.readouterr().out
+
+
+def test_unknown_preset_option_warns_on_stderr(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        preset={"laptop": "--dry-runn\n"},
+        bundles={"base": task_source("run")},
+    )
+
+    code = cli.main(["list", str(tmp_path), "--preset", "laptop", "--no-color"])
+
+    assert code == 0
+    err = capsys.readouterr().err
+    assert "warning: preset" in err
+    assert "--dry-runn" in err
 
 
 def test_list_shows_project_preset_and_active_vars(tmp_path, capsys):
@@ -150,7 +169,7 @@ def test_list_shows_ids_and_display_names(tmp_path, capsys):
         tmp_path,
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base system')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base system')\n",
                 "tasks.py": task_source("install"),
             }
         },
@@ -167,7 +186,7 @@ def test_list_non_verbose_shows_only_task_names(tmp_path, capsys):
         tmp_path,
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base system', 'Core packages')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base system', 'Core packages')\n",
                 "tasks.py": """
                 from kitup import task
 
@@ -196,7 +215,7 @@ def test_list_verbose_shows_task_details(tmp_path, capsys):
         tmp_path,
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle()\n",
+                "__init__.py": "from kitup import bundle\n\nbundle()\n",
                 "tasks.py": """
                 from kitup import task
 
@@ -224,7 +243,7 @@ def test_verbose_output_indents_multiline_descriptions(tmp_path, capsys):
         tmp_path,
         bundles={
             "base": {
-                "__init__.py": "from kitup import Bundle\n\nBundle('Base', 'Bundle first.\\n\\nBundle second.')\n",
+                "__init__.py": "from kitup import bundle\n\nbundle('Base', 'Bundle first.\\n\\nBundle second.')\n",
                 "tasks.py": """
                 from kitup import task
 
@@ -273,10 +292,10 @@ def test_shared_task_module_is_listed_and_applied_in_each_bundle(tmp_path, capsy
         write(
             tmp_path / "bundles" / bundle_id / "__init__.py",
             f"""
-            from kitup import Bundle
+            from kitup import bundle
             from .. import shared
 
-            Bundle({display!r}, modules=[shared])
+            bundle({display!r}, modules=[shared])
             """,
         )
 
@@ -333,7 +352,7 @@ def test_list_with_zero_bundles_succeeds(tmp_path, capsys):
 def test_check_prints_the_plan_and_warns_about_empty_bundles(tmp_path, capsys):
     make_project(
         tmp_path,
-        bundles={"base": {"__init__.py": "from kitup import Bundle\n\nBundle()\n"}},
+        bundles={"base": {"__init__.py": "from kitup import bundle\n\nbundle()\n"}},
     )
 
     code = cli.main(["check", str(tmp_path), "--no-color"])
@@ -498,7 +517,7 @@ def test_unknown_bundle_dependency_is_exit_2(tmp_path, capsys):
         tmp_path,
         bundles={
             "desktop": {
-                "__init__.py": "from kitup import Bundle\n\nBundle(depends_on=['missing'])\n",
+                "__init__.py": "from kitup import bundle\n\nbundle(depends_on=['missing'])\n",
                 "tasks.py": task_source("run"),
             }
         },
@@ -818,6 +837,12 @@ def test_apply_shows_and_prefixes_side_effect_lines(tmp_path, capsys):
     assert not any(line.startswith("  ↳ Configure nginx") for line in lines)
 
 
+def test_version_matches_pyproject():
+    pyproject = tomllib.loads((Path(__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert kitup.__version__ == pyproject["project"]["version"]
+
+
 def test_version_flag(capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main(["--version"])
@@ -1095,7 +1120,7 @@ def test_bundle_vars_are_scoped_and_project_values_win(tmp_path, capsys):
                 "vars/base.py": "VALUE = 'bundle'\nBASE_ONLY = 1\n",
             },
             "other": {
-                "__init__.py": "from kitup import Bundle\n\nBundle(depends_on=['base'])\n",
+                "__init__.py": "from kitup import bundle\n\nbundle(depends_on=['base'])\n",
                 "tasks.py": """
                 from kitup import task
 

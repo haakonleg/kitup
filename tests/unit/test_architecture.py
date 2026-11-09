@@ -9,12 +9,12 @@ from kitup import PACKAGE_NAME
 PACKAGE_DIR = Path(__file__).parents[2] / PACKAGE_NAME
 MODULES_DIR = PACKAGE_DIR / "modules"
 DOCS_DIR = Path(__file__).parents[2] / "docs" / "modules"
-FILE_HELPER = PACKAGE_DIR / "_utils" / "file_helper.py"
+FILE_PRIMITIVES = PACKAGE_DIR / "_utils" / "file_primitives.py"
 PROTOCOL = PACKAGE_DIR / "_privileged" / "protocol.py"
 WORKER = PACKAGE_DIR / "_privileged" / "worker.py"
 CLIENT = PACKAGE_DIR / "_privileged" / "client.py"
 
-EMBEDDED_SOURCES = (PROTOCOL, FILE_HELPER, WORKER)
+EMBEDDED_SOURCES = (PROTOCOL, FILE_PRIMITIVES, WORKER)
 
 
 def _sibling_imports(path: Path) -> set[str]:

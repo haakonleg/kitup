@@ -58,7 +58,7 @@ def test_ensure_present_installs_only_missing_packages(tmp_path):
         "--setopt=install_weak_deps=False",
         "git",
     ]
-    assert call_data(ctx.changes[0]) == {"added": ["git"]}
+    assert call_data(ctx.changes[0]) == {"added": ["git"], "groups": [], "packages": ["git"]}
     assert ctx.changes[0].action == "dnf.packages"
     assert ctx.changes[0].summary == "+git"
 
@@ -93,7 +93,7 @@ def test_ensure_group_installs_missing_group(tmp_path):
         "--setopt=install_weak_deps=False",
         "desktop",
     ]
-    assert call_data(ctx.changes[0]) == {"added": ["desktop"]}
+    assert call_data(ctx.changes[0]) == {"added": ["desktop"], "groups": ["desktop"], "packages": []}
 
 
 def test_at_prefixed_group_and_package_install_together(tmp_path):
@@ -183,7 +183,7 @@ def test_group_removal_scenarios(tmp_path):
 
     dnf.packages(ctx, ["@multimedia"], state="absent")
     assert command.calls[1][0] == ["dnf5", "remove", "-y", "@multimedia"]
-    assert call_data(ctx.changes[0]) == {"removed": ["multimedia"]}
+    assert call_data(ctx.changes[0]) == {"removed": ["multimedia"], "groups": ["multimedia"], "packages": []}
 
     command.responses = [
         response(0, "Installed groups:\n multimedia\n"),
@@ -193,7 +193,7 @@ def test_group_removal_scenarios(tmp_path):
     ctx = make_context(tmp_path, command=command)
     dnf.packages(ctx, ["multimedia"], group=True, state="absent")
     assert command.calls[4][0] == ["dnf5", "group", "remove", "-y", "multimedia"]
-    assert call_data(ctx.changes[0]) == {"removed": ["multimedia"]}
+    assert call_data(ctx.changes[0]) == {"removed": ["multimedia"], "groups": ["multimedia"], "packages": []}
 
 
 def test_exclude_is_rejected_for_absent(tmp_path):
@@ -274,6 +274,8 @@ def test_invalid_states_are_errors(tmp_path):
 
     with pytest.raises(TaskFailed, match="invalid package state"):
         dnf.packages(ctx, ["git"], state="unknown")
+    with pytest.raises(TaskFailed, match="invalid package state"):
+        dnf.packages(ctx, [""], state="unknown")
     with pytest.raises(TaskFailed, match="invalid COPR state"):
         dnf.copr(ctx, "owner/project", state="invalid")
     with pytest.raises(TaskFailed, match="invalid repository state"):
@@ -635,6 +637,8 @@ def test_config_validates_arguments_before_touching_the_file(tmp_path):
 
     with pytest.raises(TaskFailed, match="requires a value"):
         dnf.config(ctx, "best", path=missing)
+    with pytest.raises(TaskFailed, match="state 'absent' does not take a value"):
+        dnf.config(ctx, "best", "1", path=missing, state="absent")
     with pytest.raises(TaskFailed, match="invalid config state"):
         dnf.config(ctx, "best", "1", path=missing, state="maybe")
     with pytest.raises(TaskFailed, match="must be a boolean"):

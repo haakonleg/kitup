@@ -12,6 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Final, Literal, NamedTuple
 
 from ..errors import TaskFailed
+from .text import LINE_BREAKS, line_body
 from .validation import require_collection, require_encodable, require_regex, require_text
 
 
@@ -26,17 +27,9 @@ class OptionEntry(NamedTuple):
 
 # A header line needs a closing bracket on the same line; section_re() agrees.
 _HEADER_RE: Final = re.compile(r"^\s*\[[^\]\n]*\]")
-# Every character str.splitlines() treats as a line boundary: written tokens must
-# not contain them, or the next read would split the line we just wrote.
-_LINE_BREAKS: Final = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
-_SECTION_FORBIDDEN: Final = "[]" + _LINE_BREAKS + "\0"
-_OPTION_FORBIDDEN: Final = "=[]" + _LINE_BREAKS + "\0"
-_VALUE_FORBIDDEN: Final = _LINE_BREAKS + "\0"
-
-
-def _line_body(line: str) -> str:
-    """Return ``line`` without its line ending."""
-    return line.removesuffix("\n").removesuffix("\r")
+_SECTION_FORBIDDEN: Final = "[]" + LINE_BREAKS + "\0"
+_OPTION_FORBIDDEN: Final = "=[]" + LINE_BREAKS + "\0"
+_VALUE_FORBIDDEN: Final = LINE_BREAKS + "\0"
 
 
 def parse_option(line: str) -> tuple[str, str] | None:
@@ -47,7 +40,7 @@ def parse_option(line: str) -> tuple[str, str] | None:
     delimiters. The value is everything after the first
     delimiter, stripped; inline comments stay part of the value.
     """
-    text = _line_body(line)
+    text = line_body(line)
     stripped = text.strip()
     if not stripped or stripped.startswith(("#", ";", "[")):
         return None
@@ -79,7 +72,7 @@ def _scan(lines: list[str]) -> tuple[list[int], list[OptionEntry]]:
     current: OptionEntry | None = None
     indent_level = 0
     for index, line in enumerate(lines):
-        body = _line_body(line)
+        body = line_body(line)
         stripped = body.strip()
         if not stripped or stripped.startswith(("#", ";")):
             continue
@@ -275,7 +268,7 @@ def set_option(
         return new_lines, "replaced"
     insert_at = start
     for index in range(start, end):
-        body = _line_body(lines[index]).strip()
+        body = line_body(lines[index]).strip()
         if body and not body.startswith(("#", ";")):
             insert_at = index + 1
     new_lines = list(lines)
@@ -413,11 +406,6 @@ def require_ini_match(match: Mapping[str, str]) -> dict[str, str]:
             raise TaskFailed("ini match keys and values must be strings")
         require_regex(key, "ini match key")
         require_regex(value, "ini match value")
-        try:
-            re.compile(key)
-            re.compile(value)
-        except re.error as exc:
-            raise TaskFailed(f"invalid ini match regex: {exc}") from exc
     return dict(match)
 
 

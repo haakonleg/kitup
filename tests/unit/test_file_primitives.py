@@ -4,7 +4,7 @@ import stat
 
 import pytest
 
-from kitup._utils.file_helper import (
+from kitup._utils.file_primitives import (
     apply_metadata,
     atomic_write_path,
     digest_path,

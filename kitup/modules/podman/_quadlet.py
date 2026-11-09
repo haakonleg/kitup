@@ -4,7 +4,7 @@ import shlex
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ..._utils import file_ops
+from ..._utils import file_actions
 from ..._utils.paths import expand_path
 from ..._utils.validation import require_mode, require_non_negative_int, require_scope, require_text
 from ...context import TaskContext
@@ -79,8 +79,9 @@ def quadlet(
         extra_lines=extra_lines,
         install_target=target,
     )
+    file_actions.require_parent(ctx, path, sudo=sudo)
     return ctx.changed(
-        file_ops.apply_bytes(
+        file_actions.apply_bytes(
             ctx,
             path,
             content.encode(),

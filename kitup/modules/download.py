@@ -16,12 +16,12 @@ from typing import Any, BinaryIO, Final, Protocol
 from urllib.error import HTTPError
 from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
-from .._utils import file_ops
-from .._utils.file_helper import digest_path, replace_path
-from .._utils.http import open_url, read_response, validate_timeout
+from .._utils import file_actions
+from .._utils.file_primitives import digest_path, replace_path
+from .._utils.http import open_url, read_response
 from .._utils.paths import expand_path
 from .._utils.timing import timed
-from .._utils.validation import require_bool, require_mode, require_path
+from .._utils.validation import require_bool, require_mode, require_path, require_timeout
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
@@ -158,7 +158,7 @@ def to_file(
         raise TaskFailed("download destination must be a path")
     expected = _parse_checksum(checksum)
     request_headers = _build_headers(headers)
-    validate_timeout(timeout)
+    require_timeout(timeout)
     require_bool(validate_certs, "validate_certs")
     require_mode(mode)
     require_bool(force, "force")
@@ -179,7 +179,7 @@ def to_file(
             )
         )
 
-    file_ops.require_parent_local(target)
+    file_actions.require_parent_local(target)
     if ctx.dry_run:
         return ctx.changed(
             _record_download(
@@ -257,7 +257,7 @@ def to_bytes(
     url, parts = _validate_url(url)
     expected = _parse_checksum(checksum)
     request_headers = _build_headers(headers)
-    validate_timeout(timeout)
+    require_timeout(timeout)
     require_bool(validate_certs, "validate_certs")
     limit = _validate_max_bytes(max_bytes)
     display = _display_url(parts)
@@ -372,16 +372,16 @@ def _read_response(
 def _resolve_destination(
     dest: str | Path,
     parts: SplitResult,
-) -> tuple[Path, file_ops.FileInfo | None]:
+) -> tuple[Path, file_actions.FileInfo | None]:
     require_path(dest, "download destination")
     target = expand_path(dest, error=TaskFailed)
     if isinstance(dest, str) and dest.endswith("/"):
         target = target / _url_filename(parts)
-        return target, file_ops.stat_local(target)
-    info = file_ops.stat_local(target)
+        return target, file_actions.stat_local(target)
+    info = file_actions.stat_local(target)
     if info is not None and info.is_dir and not info.is_symlink:
         target = target / _url_filename(parts)
-        return target, file_ops.stat_local(target)
+        return target, file_actions.stat_local(target)
     return target, info
 
 
@@ -478,7 +478,7 @@ def _validate_max_bytes(max_bytes: int | None) -> int | None:
     return max_bytes
 
 
-def _validate_destination_info(target: Path, info: file_ops.FileInfo | None) -> None:
+def _validate_destination_info(target: Path, info: file_actions.FileInfo | None) -> None:
     if info is None:
         return
     if info.is_symlink:
@@ -491,7 +491,7 @@ def _validate_destination_info(target: Path, info: file_ops.FileInfo | None) -> 
 
 def _needs_download(
     target: Path,
-    info: file_ops.FileInfo | None,
+    info: file_actions.FileInfo | None,
     *,
     force: bool,
     checksum: _Checksum | None,
@@ -516,7 +516,7 @@ def _content_matches(target: Path, checksum_dest: str) -> bool:
 def _reconcile_metadata(
     ctx: TaskContext,
     target: Path,
-    info: file_ops.FileInfo | None,
+    info: file_actions.FileInfo | None,
     mode: int | None,
     *,
     display: str,
@@ -530,7 +530,7 @@ def _reconcile_metadata(
         summary = unchanged_summary or f"ensure metadata for {target}"
     else:
         if not ctx.dry_run:
-            file_ops.apply_metadata_ctx(ctx, target, mode, None, None, sudo=False)
+            file_actions.apply_metadata_ctx(ctx, target, mode, None, None, sudo=False)
         changed = True
         summary = f"update metadata for {target}"
     return _download_result(

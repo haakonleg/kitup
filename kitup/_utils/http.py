@@ -2,7 +2,6 @@
 
 import http.client
 import io
-import math
 import ssl
 from collections.abc import Callable, Mapping
 from typing import Any, BinaryIO, Final
@@ -45,14 +44,6 @@ def open_url(
         raise TaskFailed(f"{label} request failed for {context}: {exc}") from exc
     except ValueError as exc:
         raise TaskFailed(f"invalid {label} request for {context}: {exc}") from exc
-
-
-def validate_timeout(timeout: float) -> None:
-    """Reject non-finite, non-numeric, or non-positive timeouts."""
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        raise TaskFailed("timeout must be a positive number")
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise TaskFailed("timeout must be a positive number")
 
 
 def read_response(
