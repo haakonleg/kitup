@@ -164,6 +164,20 @@ def test_absent_removes_only_installed_packages(tmp_path):
     assert call_data(result) == {"removed": ["requests"], "packages": ["requests", "urllib3"]}
 
 
+def test_absent_checks_installed_packages_once_for_all_targets(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [listing(["requests", "urllib3"]), response(0), listing([])]
+    ctx = make_context(tmp_path, command=command)
+
+    pip.packages(ctx, ["requests", "urllib3"], state="absent")
+
+    assert argvs(command) == [
+        ["/usr/bin/python3", "-m", "pip", "list", "--local", "--format=json"],
+        ["/usr/bin/python3", "-m", "pip", "uninstall", "-y", "requests", "urllib3"],
+        ["/usr/bin/python3", "-m", "pip", "list", "--local", "--format=json"],
+    ]
+
+
 def test_absent_is_idempotent_when_nothing_is_installed(tmp_path):
     command = FakeCommandRunner()
     command.responses = [listing(["pip"])]

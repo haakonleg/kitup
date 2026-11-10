@@ -262,7 +262,8 @@ def _ensure_absent(
         return result
 
     ctx.run([*pip, "uninstall", "-y", *extra, *targets], sudo=sudo)
-    remaining = [name for name in targets if normalize_dist_name(name) in _installed_names(ctx, pip, sudo=sudo)]
+    installed_after = _installed_names(ctx, pip, sudo=sudo)
+    remaining = [name for name in targets if normalize_dist_name(name) in installed_after]
     if remaining:
         raise TaskFailed(f"packages still installed after removal: {', '.join(remaining)}")
     return result

@@ -838,6 +838,36 @@ def test_tools_absent_uninstalls_and_checks_the_receipts(tmp_path):
     assert call_data(result) == {"tools": ["ruff"], "removed": ["ruff"]}
 
 
+def test_tools_absent_reads_the_receipts_once_for_all_targets(tmp_path, monkeypatch):
+    tools_dir = tmp_path / "tools"
+    make_receipt(tools_dir, "ruff")
+    make_receipt(tools_dir, "httpie")
+
+    def uninstall(argv):
+        shutil.rmtree(tools_dir / argv[-1])
+        return completed(argv, 0)
+
+    command = FakeCommandRunner()
+    command.responses = [response(0, stdout=str(tools_dir)), uninstall, uninstall]
+    ctx = make_context(tmp_path, command=command)
+
+    scans = 0
+    read_receipts = uv._installed_tools
+
+    def counting(ctx, tools_dir):
+        nonlocal scans
+        scans += 1
+        return read_receipts(ctx, tools_dir)
+
+    monkeypatch.setattr(uv, "_installed_tools", counting)
+
+    result = uv.tools(ctx, ["ruff", "httpie"], state="absent")
+
+    assert scans == 2
+    assert result.changed is True
+    assert result.summary == "-ruff -httpie"
+
+
 def test_tools_absent_is_idempotent_when_nothing_is_installed(tmp_path):
     tools_dir = tmp_path / "tools"
     command = FakeCommandRunner()

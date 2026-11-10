@@ -213,7 +213,8 @@ def tools(
             return ctx.changed(result)
         for name in removed:
             ctx.run([uv, "tool", "uninstall", name])
-        remaining = [req.name for req in targets if req.normalized in _installed_tools(ctx, tools_dir)]
+        post = _installed_tools(ctx, tools_dir)
+        remaining = [req.name for req in targets if req.normalized in post]
         if remaining:
             raise TaskFailed(f"tools still installed after removal: {', '.join(remaining)}")
         return ctx.changed(result)
