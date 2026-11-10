@@ -123,6 +123,89 @@ def test_archive_extracts_and_is_idempotent(tmp_path, tar_archive):
     assert second.calls[0].size == call.size
 
 
+def test_archive_applies_directory_modes_for_late_directory_entries(tmp_path):
+    archive = tmp_path / "late-dirs.tar"
+    with tarfile.open(archive, "w") as tar:
+        _tar_entry(tar, "app/etc/config.ini", b"key=value\n", mode=0o640)
+        _tar_entry(tar, "app/etc", kind="dir", mode=0o750)
+        _tar_entry(tar, "app/bin/run", b"#!/bin/sh\n", mode=0o755)
+        _tar_entry(tar, "app/bin", kind="dir", mode=0o700)
+    dest = tmp_path / "dest"
+
+    ctx = make_context(tmp_path)
+    decompress.archive(ctx, archive, dest)
+
+    assert (dest / "app/etc/config.ini").read_bytes() == b"key=value\n"
+    assert (dest / "app/bin/run").read_bytes() == b"#!/bin/sh\n"
+    assert stat.S_IMODE((dest / "app/etc").stat().st_mode) == 0o750
+    assert stat.S_IMODE((dest / "app/bin").stat().st_mode) == 0o700
+    assert len(ctx.changes) == 1
+
+    second = make_context(tmp_path)
+    decompress.archive(second, archive, dest)
+
+    assert second.changes == []
+
+
+class _CountingStream:
+    """Wrap a decompressed archive stream and count backward seeks."""
+
+    def __init__(self, stream, raw):
+        self._stream = stream
+        self._raw = raw
+        self.rewinds = 0
+
+    def read(self, size=-1):
+        return self._stream.read(size)
+
+    def seek(self, offset, whence=0):
+        before = self._stream.tell()
+        result = self._stream.seek(offset, whence)
+        if result < before:
+            self.rewinds += 1
+        return result
+
+    def tell(self):
+        return self._stream.tell()
+
+    def close(self):
+        self._stream.close()
+        self._raw.close()
+
+
+def test_archive_processes_members_in_archive_order(tmp_path, monkeypatch):
+    archive = tmp_path / "ordered.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        # Deliberately out of order: deep members first, their directories last.
+        for index in reversed(range(8)):
+            _tar_entry(tar, f"app/dir{index}/file{index}.txt", f"payload {index}\n".encode() * 64)
+        for index in reversed(range(8)):
+            _tar_entry(tar, f"app/dir{index}", kind="dir", mode=0o750)
+    dest = tmp_path / "dest"
+    decompress.archive(make_context(tmp_path), archive, dest)
+
+    readers: list[_CountingStream] = []
+
+    def counting_open(path):
+        raw = path.open("rb")
+        reader = _CountingStream(gzip.GzipFile(fileobj=raw, mode="rb"), raw)
+        readers.append(reader)
+        return tarfile.open(fileobj=reader, mode="r:")
+
+    monkeypatch.setattr(decompress, "_open_archive", counting_open)
+    try:
+        second = make_context(tmp_path)
+        decompress.archive(second, archive, dest)
+    finally:
+        for reader in readers:
+            reader.close()
+
+    assert second.changes == []
+    # One rewind is expected when the member scan finishes and extraction starts.
+    # Processing sorted by name would seek backwards once per out-of-order member.
+    assert readers[0].rewinds <= 2
+
+
 def test_archive_extracts_zip(tmp_path):
     archive = _write_zip(tmp_path / "app.zip")
     dest = tmp_path / "dest"
