@@ -6,15 +6,26 @@ from kitup.results import Status
 from kitup.runner import Runner
 from kitup.vars import Vars
 
-from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context, plain_output
+from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context, plain_output, response
 
 
-def run_plan(tmp_path, bundles, *, tags=(), skip_tags=(), dry_run=False, vars=None, bundle_vars=None):
+def run_plan(
+    tmp_path,
+    bundles,
+    *,
+    tags=(),
+    skip_tags=(),
+    dry_run=False,
+    vars=None,
+    bundle_vars=None,
+    command=None,
+    sudo=None,
+):
     context = make_context(
         tmp_path,
         dry_run=dry_run,
-        command=FakeCommandRunner(),
-        sudo=FakeSudo(),
+        command=command or FakeCommandRunner(),
+        sudo=sudo or FakeSudo(),
         vars=vars,
         bundle_vars=bundle_vars,
     )
@@ -377,11 +388,18 @@ def test_sudo_is_requested_at_first_sudo_operation(tmp_path):
 
     add_task(bundle, install, name="Install packages")
 
-    code, _, context = run_plan(tmp_path, [bundle])
+    command = FakeCommandRunner()
+    command.responses = [
+        response(1, stderr="sudo: a password is required\n"),
+        response(0),
+    ]
+    sudo = FakeSudo()
+
+    code, _, _ = run_plan(tmp_path, [bundle], command=command, sudo=sudo)
 
     assert code == 0
-    assert context.sudo.refresh_count == 1
-    assert context.sudo.reasons == ['task "Install packages" requires sudo privileges']
+    assert sudo.refresh_count == 1
+    assert sudo.reasons == ['task "Install packages" requires sudo privileges']
 
 
 def test_deferred_side_effect_runs_at_end_of_bundle_and_before_next_bundle(tmp_path):

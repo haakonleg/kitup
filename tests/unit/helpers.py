@@ -9,9 +9,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from kitup.commands import CommandRunner
+from kitup.commands import CommandRunner, raise_for_status
 from kitup.context import TaskContext
-from kitup.errors import TaskFailed
 from kitup.output import Output
 from kitup.project import Project
 from kitup.registry import Bundle
@@ -43,13 +42,8 @@ class FakeCommandRunner:
             if isinstance(response, subprocess.CompletedProcess)
             else subprocess.CompletedProcess(command, response, self.stdout, self.stderr)
         )
-        if kwargs.get("check", True) and result.returncode != 0:
-            raise TaskFailed(
-                f"command failed with exit code {result.returncode}",
-                command=command,
-                stdout=result.stdout,
-                stderr=result.stderr,
-            )
+        if kwargs.get("check", True):
+            raise_for_status(result)
         return result
 
 
@@ -102,20 +96,32 @@ class FakeSudo:
     def __init__(self, *, is_root: bool = False) -> None:
         self.is_root = is_root
         self.refresh_count = 0
-        self.validations = 0
+        self.require_count = 0
         self.reasons: list[str | None] = []
         self.valid = False
 
-    def refresh(self, reason: str | None = None) -> None:
+    def validate(self) -> None:
+        if self.credentials_valid():
+            return
+        self.authenticate()
+
+    def authenticate(self, reason: str | None = None) -> None:
         self.refresh_count += 1
         self.reasons.append(reason)
         self.valid = True
 
+    def require_available(self) -> None:
+        self.require_count += 1
+
     def credentials_valid(self) -> bool:
         return self.valid
 
-    def validate(self) -> None:
-        self.validations += 1
+    def is_auth_failure(self, result: subprocess.CompletedProcess[str]) -> bool:
+        if result.returncode == 0:
+            return False
+        if not any(line.startswith("sudo: ") for line in result.stderr.splitlines()):
+            return False
+        return not self.credentials_valid()
 
     def wrap(self, argv: list[str]) -> list[str]:
         return argv if self.is_root else ["sudo", "-n", "--", *argv]

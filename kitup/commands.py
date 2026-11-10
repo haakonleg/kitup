@@ -46,6 +46,7 @@ class CommandRunner:
             raise TaskFailed("empty command")
 
         if sudo:
+            self.privileges.require_available()
             command = self.privileges.wrap(command)
 
         command_env = None
@@ -94,14 +95,10 @@ class CommandRunner:
 
         self._report(command, started, process.returncode, stdout, stderr)
 
-        if check and process.returncode != 0:
-            raise TaskFailed(
-                f"command failed with exit code {process.returncode}",
-                command=command,
-                stdout=stdout,
-                stderr=stderr,
-            )
-        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        if check:
+            raise_for_status(result)
+        return result
 
     def _report(
         self,
@@ -119,6 +116,19 @@ class CommandRunner:
                 stdout,
                 stderr,
             )
+
+
+def raise_for_status(result: subprocess.CompletedProcess[str]) -> None:
+    """Raise ``TaskFailed`` when a completed command failed."""
+    if result.returncode == 0:
+        return
+    command = result.args if isinstance(result.args, list) else [result.args]
+    raise TaskFailed(
+        f"command failed with exit code {result.returncode}",
+        command=command,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
 
 
 def _kill_process_group(process: subprocess.Popen[str]) -> None:

@@ -10,7 +10,7 @@ from typing import Any, Final, Never, cast, overload
 from ._privileged.client import PrivilegedWorker
 from ._utils.paths import expand_path
 from ._utils.validation import require_text
-from .commands import CommandRunner
+from .commands import CommandRunner, raise_for_status
 from .errors import SkipTask, TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
@@ -69,7 +69,6 @@ class TaskContext:
         self._bundle_path: Path | None = None
         self._task: Task | None = None
         self._running_side_effect = False
-        self._sudo_ready = False
         self.privileged_worker: PrivilegedWorker = PrivilegedWorker(self)
 
     @property
@@ -202,17 +201,19 @@ class TaskContext:
         self._run_state.current = None
 
     def ensure_sudo(self, reason: str | None = None) -> None:
-        """Revalidate sudo, prompting only when cached credentials expired."""
+        """Ensure sudo credentials are valid, prompting when needed."""
         if reason is None:
             reason = self._sudo_reason()
-        if self._sudo_ready and self.sudo.credentials_valid():
+        if self.sudo.credentials_valid():
             return
+        self._prompt_sudo(reason)
+
+    def _prompt_sudo(self, reason: str) -> None:
         if self.output is not None:
             with self.output.interactive():
-                self.sudo.refresh(reason)
+                self.sudo.authenticate(reason)
         else:
-            self.sudo.refresh(reason)
-        self._sudo_ready = True
+            self.sudo.authenticate(reason)
 
     def _sudo_reason(self) -> str:
         if not self._task_name:
@@ -234,21 +235,28 @@ class TaskContext:
 
         This is a pure command runner: it never records changes, evaluates
         guards, or handles dry-run. Only commands run with ``sudo=True``
-        request sudo credentials; cached credentials are checked again before
-        every privileged operation.
+        request sudo credentials; a command that fails because the credentials
+        expired is retried once after prompting.
         """
-        if sudo:
-            self.ensure_sudo()
 
-        return self.command.run(
-            argv,
-            cwd=cwd,
-            env=env,
-            sudo=sudo,
-            timeout=timeout,
-            check=check,
-            stdin=stdin,
-        )
+        def execute() -> subprocess.CompletedProcess[str]:
+            return self.command.run(
+                argv,
+                cwd=cwd,
+                env=env,
+                sudo=sudo,
+                timeout=timeout,
+                check=False,
+                stdin=stdin,
+            )
+
+        result = execute()
+        if sudo and self.sudo.is_auth_failure(result):
+            self._prompt_sudo(self._sudo_reason())
+            result = execute()
+        if check:
+            raise_for_status(result)
+        return result
 
     def probe(self, argv: str | Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         """Run a query command without failing on a nonzero exit."""

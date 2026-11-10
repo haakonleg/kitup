@@ -485,7 +485,6 @@ def test_commands_and_probes_request_sudo_when_asked(tmp_path):
     # probes use the same privilege as the changes, so they see the environment
     # the privileged install/uninstall actually acts on (no user-site shadowing)
     assert [call[1]["sudo"] for call in command.calls] == [True, True, True]
-    assert sudo.refresh_count == 1
 
 
 def test_absent_probes_request_sudo_when_asked(tmp_path):

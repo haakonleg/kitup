@@ -83,7 +83,6 @@ def test_sudo_is_forwarded_and_requested_only_when_set(tmp_path):
 
     assert runner.calls[0][1]["sudo"] is False
     assert runner.calls[1][1]["sudo"] is True
-    assert sudo.refresh_count == 1
 
 
 def test_dry_run_does_not_execute_mutating_command(tmp_path):

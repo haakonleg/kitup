@@ -383,3 +383,35 @@ def test_unprivileged_operations_do_not_start_worker(tmp_path):
 
     assert context.privileged_worker._process is None
     context.close()
+
+
+def test_worker_start_reprompts_when_sudo_expires(tmp_path, monkeypatch):
+    class ExpiringSudo(PassthroughSudo):
+        def __init__(self) -> None:
+            super().__init__()
+            self.checks = 0
+
+        def credentials_valid(self) -> bool:
+            self.checks += 1
+            return self.checks == 1
+
+    sudo = ExpiringSudo()
+    context = make_context(tmp_path, sudo=sudo)
+    worker = PrivilegedWorker(context)
+    attempts = []
+    spawn = worker._spawn_locked
+
+    def flaky() -> None:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise TaskFailed("privileged worker exited unexpectedly: sudo: a password is required")
+        spawn()
+
+    monkeypatch.setattr(worker, "_spawn_locked", flaky)
+    try:
+        worker.start()
+        assert len(attempts) == 2
+        assert sudo.refresh_count == 1
+    finally:
+        worker.close()
+        context.close()

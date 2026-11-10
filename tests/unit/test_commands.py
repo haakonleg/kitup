@@ -133,6 +133,16 @@ def test_sudo_is_wrapped(monkeypatch):
     assert calls[0][0] == ["sudo", "-n", "--", "dnf5", "install"]
 
 
+def test_sudo_checks_availability(monkeypatch):
+    patch_popen(monkeypatch, FakeProcess())
+    sudo = FakeSudo()
+    runner = CommandRunner(sudo)  # type: ignore[arg-type]
+
+    runner.run(["dnf5", "install"], sudo=True)
+
+    assert sudo.require_count == 1
+
+
 def test_timeout_kills_the_process_group(monkeypatch):
     process = TimeoutProcess()
     patch_popen(monkeypatch, process)

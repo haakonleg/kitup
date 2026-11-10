@@ -9,7 +9,7 @@ from kitup.registry import Bundle, side_effect
 from kitup.results import CallResult, Status, TaskResult
 from kitup.vars import Vars
 
-from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context
+from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context, response
 
 
 def _noop(ctx):
@@ -225,36 +225,104 @@ def test_probe_returns_nonzero_result_instead_of_failing(tmp_path):
     assert command.calls[0][1]["check"] is False
 
 
-def test_sudo_is_refreshed_once_and_revalidated_when_expired(tmp_path):
-    command = FakeCommandRunner()
+def test_ensure_sudo_prompts_only_when_credentials_are_invalid(tmp_path):
     sudo = FakeSudo()
-    context = make_context(tmp_path, command=command, sudo=sudo)
+    context = make_context(tmp_path, sudo=sudo)
     context.begin_task(task_for("Install packages"))
     expected = 'task "Install packages" requires sudo privileges'
 
-    context.run(["first"], sudo=True)
-    context.run(["second"], sudo=True)
+    context.ensure_sudo()
+    context.ensure_sudo()
     assert sudo.refresh_count == 1
     assert sudo.reasons == [expected]
-    assert command.calls[0][1]["sudo"] is True
-    assert command.calls[1][1]["sudo"] is True
 
     sudo.valid = False
-    context.run(["third"], sudo=True)
+    context.ensure_sudo()
     assert sudo.refresh_count == 2
     assert sudo.reasons == [expected, expected]
 
 
 def test_run_requests_sudo_even_in_dry_run(tmp_path):
     command = FakeCommandRunner()
-    sudo = FakeSudo()
-    context = make_context(tmp_path, dry_run=True, command=command, sudo=sudo)
+    context = make_context(tmp_path, dry_run=True, command=command)
     context.begin_task(task_for())
 
     context.run(["install"], sudo=True)
 
-    assert sudo.refresh_count == 1
     assert command.calls[0][0] == ["install"]
+    assert command.calls[0][1]["sudo"] is True
+
+
+def test_sudo_auth_failure_reprompts_and_retries(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [
+        response(1, stderr="sudo: a password is required\n"),
+        response(0),
+    ]
+    sudo = FakeSudo()
+    context = make_context(tmp_path, command=command, sudo=sudo)
+    context.begin_task(task_for("Install packages"))
+
+    result = context.run(["dnf5", "install", "-y", "git"], sudo=True)
+
+    assert result.returncode == 0
+    assert len(command.calls) == 2
+    assert sudo.refresh_count == 1
+    assert sudo.reasons == ['task "Install packages" requires sudo privileges']
+
+
+def test_sudo_auth_failure_retries_probes(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [
+        response(1, stderr="sudo: a password is required\n"),
+        response(0, stdout="enabled\n"),
+    ]
+    sudo = FakeSudo()
+    context = make_context(tmp_path, command=command, sudo=sudo)
+
+    result = context.probe(["systemctl", "is-enabled", "foo.service"], sudo=True)
+
+    assert result.returncode == 0
+    assert result.stdout == "enabled\n"
+    assert len(command.calls) == 2
+
+
+def test_sudo_command_failure_is_not_retried(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1, stderr="boom\n")]
+    sudo = FakeSudo()
+    context = make_context(tmp_path, command=command, sudo=sudo)
+
+    with pytest.raises(TaskFailed, match="exit code 1"):
+        context.run(["dnf5", "install"], sudo=True)
+
+    assert len(command.calls) == 1
+    assert sudo.refresh_count == 0
+
+
+def test_sudo_error_with_valid_credentials_is_not_retried(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1, stderr="sudo: unknown command\n")]
+    sudo = FakeSudo()
+    sudo.valid = True
+    context = make_context(tmp_path, command=command, sudo=sudo)
+
+    with pytest.raises(TaskFailed, match="exit code 1"):
+        context.run(["dnf5", "install"], sudo=True)
+
+    assert len(command.calls) == 1
+    assert sudo.refresh_count == 0
+
+
+def test_non_sudo_failure_is_not_retried(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1, stderr="sudo: a password is required\n")]
+    context = make_context(tmp_path, command=command)
+
+    with pytest.raises(TaskFailed, match="exit code 1"):
+        context.run(["false"])
+
+    assert len(command.calls) == 1
 
 
 def test_bundle_is_the_owning_bundle_for_the_current_task(tmp_path):

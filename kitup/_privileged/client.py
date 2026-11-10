@@ -123,6 +123,15 @@ class PrivilegedWorker:
             raise TaskFailed("privileged worker is closed")
 
         self.ctx.ensure_sudo()
+        try:
+            self._spawn_locked()
+        except TaskFailed:
+            if self._closed or self.ctx.sudo.credentials_valid():
+                raise
+            self.ctx.ensure_sudo()
+            self._spawn_locked()
+
+    def _spawn_locked(self) -> None:
         argv = [sys.executable, "-I", "-u", "-c", _embedded_script()]
         if not self.ctx.sudo.is_root:
             argv = self.ctx.sudo.wrap(argv)
