@@ -1,5 +1,6 @@
 """Integration tests for real uv behavior: projects, tools, and config."""
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ pytestmark = pytest.mark.integration
 PACKAGE = "kitup-pip-test"
 MODULE = "kitup_pip_test"
 TOOL = "kitup-tool-test"
+EXTRA_TOOL = "kitup-tool-extra"
 WHEELS = "/srv/pip-repo"
 EXTRA_ARGS = ["--no-index", "--find-links", WHEELS]
 
@@ -29,12 +31,22 @@ def installed_version(project: Path) -> str | None:
     return result.stdout.strip()
 
 
-def tool_version() -> str | None:
+def tool_version(name: str) -> str | None:
     result = run(["uv", "tool", "list"], check=False)
     for line in result.stdout.splitlines():
-        if line.startswith(f"{TOOL} v"):
+        if line.startswith(f"{name} v"):
             return line.partition(" v")[2].strip()
     return None
+
+
+def copy_tool_wheels(target: Path, versions: tuple[str, ...]) -> None:
+    """Copy the fixture tool wheels for ``versions`` into a local repository."""
+    target.mkdir(parents=True, exist_ok=True)
+    for name in (TOOL, EXTRA_TOOL):
+        distribution = name.replace("-", "_")
+        for version in versions:
+            for wheel in Path(WHEELS).glob(f"{distribution}-{version}-*.whl"):
+                shutil.copy(wheel, target)
 
 
 def test_dependencies_present_latest_and_absent(tmp_path: Path, capsys) -> None:
@@ -164,12 +176,12 @@ def test_tools_install_latest_and_uninstall(tmp_path: Path, capsys) -> None:
         """,
     )
     assert run_kitup("apply", tools) == 0
-    assert tool_version() == "1.0"
+    assert tool_version(TOOL) == "1.0"
 
     capsys.readouterr()
     assert run_kitup("apply", tools) == 0
     assert "0 changed" in capsys.readouterr().out
-    assert tool_version() == "1.0"
+    assert tool_version(TOOL) == "1.0"
 
     latest = bundle(
         tmp_path,
@@ -183,12 +195,12 @@ def test_tools_install_latest_and_uninstall(tmp_path: Path, capsys) -> None:
         """,
     )
     assert run_kitup("apply", latest) == 0
-    assert tool_version() == "1.1"
+    assert tool_version(TOOL) == "1.1"
 
     capsys.readouterr()
     assert run_kitup("apply", latest) == 0
     assert "0 changed" in capsys.readouterr().out
-    assert tool_version() == "1.1"
+    assert tool_version(TOOL) == "1.1"
 
     remove = bundle(
         tmp_path,
@@ -202,7 +214,69 @@ def test_tools_install_latest_and_uninstall(tmp_path: Path, capsys) -> None:
         """,
     )
     assert run_kitup("apply", remove) == 0
-    assert tool_version() is None
+    assert tool_version(TOOL) is None
+
+    capsys.readouterr()
+    assert run_kitup("apply", remove) == 0
+    assert "0 changed" in capsys.readouterr().out
+
+
+def test_tools_batch_multiple_tools_through_install_upgrade_and_uninstall(tmp_path: Path, capsys) -> None:
+    repo = tmp_path / "tool-repo"
+    copy_tool_wheels(repo, ("1.0",))
+    args = ["--no-index", "--find-links", str(repo)]
+
+    install = bundle(
+        tmp_path,
+        "tools_batch_install",
+        f"""
+        from kitup.modules import uv
+
+        @task("install the fixture tools")
+        def install_tools(ctx):
+            uv.tools(ctx, ["{TOOL}", "{EXTRA_TOOL}"], extra_args={args!r})
+        """,
+    )
+    assert run_kitup("apply", install) == 0
+    assert tool_version(TOOL) == "1.0"
+    assert tool_version(EXTRA_TOOL) == "1.0"
+
+    # Add the newer wheels so `uv tool upgrade` has a target for both tools.
+    copy_tool_wheels(repo, ("1.1",))
+
+    upgrade = bundle(
+        tmp_path,
+        "tools_batch_upgrade",
+        f"""
+        from kitup.modules import uv
+
+        @task("upgrade the fixture tools")
+        def upgrade_tools(ctx):
+            uv.tools(ctx, ["{TOOL}", "{EXTRA_TOOL}"], state="latest", extra_args={args!r})
+        """,
+    )
+    assert run_kitup("apply", upgrade) == 0
+    assert tool_version(TOOL) == "1.1"
+    assert tool_version(EXTRA_TOOL) == "1.1"
+
+    capsys.readouterr()
+    assert run_kitup("apply", upgrade) == 0
+    assert "0 changed" in capsys.readouterr().out
+
+    remove = bundle(
+        tmp_path,
+        "tools_batch_remove",
+        f"""
+        from kitup.modules import uv
+
+        @task("uninstall the fixture tools")
+        def remove_tools(ctx):
+            uv.tools(ctx, ["{TOOL}", "{EXTRA_TOOL}"], state="absent")
+        """,
+    )
+    assert run_kitup("apply", remove) == 0
+    assert tool_version(TOOL) is None
+    assert tool_version(EXTRA_TOOL) is None
 
     capsys.readouterr()
     assert run_kitup("apply", remove) == 0

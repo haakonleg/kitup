@@ -68,6 +68,26 @@ def test_present_installs_what_the_report_lists(tmp_path):
     assert call_data(result) == {"added": ["requests", "urllib3"], "packages": ["requests"]}
 
 
+def test_present_installs_all_requested_packages_in_one_command(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [report(["requests", "urllib3"]), response(0), report([])]
+    ctx = make_context(tmp_path, command=command)
+
+    result = pip.packages(ctx, ["requests", "urllib3"])
+
+    assert argvs(command)[1] == [
+        "/usr/bin/python3",
+        "-m",
+        "pip",
+        "install",
+        "requests",
+        "urllib3",
+    ]
+    assert result.changed is True
+    assert result.summary == "+requests +urllib3"
+    assert call_data(result) == {"added": ["requests", "urllib3"], "packages": ["requests", "urllib3"]}
+
+
 def test_present_version_mismatch_is_reinstalled(tmp_path):
     command = FakeCommandRunner()
     command.responses = [report(["foo"]), response(0), report([])]

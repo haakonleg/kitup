@@ -123,11 +123,12 @@ def dependencies(
     lock_probe = _check_args(lock_base, extra, upgrade_args)
     check_args = _check_args(sync_base, extra)
     lock_args = _check_args(lock_base, extra)
-    converged = _project_converged(
+    # An edit forces a sync, so only probe convergence when nothing is being edited.
+    converged = not edits_needed and _project_converged(
         ctx, project_path, sync_probe, lock_probe, initialized=initialized, dry_run=ctx.dry_run
     )
 
-    if not edits_needed and converged:
+    if converged:
         desired_state = "up to date" if state == "latest" else state
         data = _call_data("dependencies", wanted, state, project=str(project_path))
         return ctx.changed(
@@ -146,9 +147,7 @@ def dependencies(
         parts.extend(f"-{entry}" for entry in removed)
     else:
         parts.extend(f"+{requirement}" for requirement in added)
-    need_sync = edits_needed or not converged
-    if need_sync:
-        parts.append(f"sync {project_path}")
+    parts.append(f"sync {project_path}")
     data = _call_data("dependencies", wanted, state, project=str(project_path), added=added, removed=removed)
     result = CallResult(action="uv.dependencies", changed=True, summary="; ".join(parts), **data)
     if ctx.dry_run:
@@ -156,8 +155,7 @@ def dependencies(
 
     if edits_needed:
         _write_table(ctx, pyproject, snapshot, lines, table, key, desired, result.summary, data)
-    if need_sync:
-        _sync_project(ctx, sync_base, upgrade_args, extra, project_path, check_args, lock_args)
+    _sync_project(ctx, sync_base, upgrade_args, extra, project_path, check_args, lock_args)
     return ctx.changed(result)
 
 
@@ -211,8 +209,7 @@ def tools(
         result = _tools_changed(wanted, state, removed)
         if ctx.dry_run:
             return ctx.changed(result)
-        for name in removed:
-            ctx.run([uv, "tool", "uninstall", name])
+        ctx.run([uv, "tool", "uninstall", *removed])
         post = _installed_tools(ctx, tools_dir)
         remaining = [req.name for req in targets if req.normalized in post]
         if remaining:
@@ -258,10 +255,11 @@ def tools(
         return ctx.changed(_tools_changed(wanted, state, changed_items))
 
     versions_before = _tool_versions(ctx, uv) if state == "latest" else {}
+    # `uv tool install` takes one package, but uninstall and upgrade accept multiple names.
     for name in install:
         ctx.run([uv, "tool", "install", *python_args, *extra, name])
-    for name in upgrade:
-        ctx.run([uv, "tool", "upgrade", *python_args, *extra, name])
+    if upgrade:
+        ctx.run([uv, "tool", "upgrade", *python_args, *extra, *upgrade])
 
     post = _installed_tools(ctx, tools_dir)
     missing = [name for name in install if parse_requirement(name, tool=True).normalized not in post]

@@ -34,14 +34,6 @@ def write_pyproject(project, body: str = "[]") -> None:
     )
 
 
-def stale_probes() -> list:
-    """Scripted pre-sync probes when the project is not converged.
-
-    The lock probe is skipped because the sync probe already failed.
-    """
-    return [response(1)]
-
-
 def synced_probes() -> list:
     """Scripted pre-sync probes when the project is already converged."""
     return [response(0), response(0)]
@@ -82,13 +74,13 @@ def test_present_adds_a_missing_dependency_and_syncs(tmp_path):
     pyproject = project / "pyproject.toml"
     write_pyproject(project)
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     result = uv.dependencies(ctx, ["requests>=2"], project=project)
 
+    # an edit already forces a sync, so the pre-sync probes are skipped
     assert argvs(command) == [
-        [UV, "sync", "--project", str(project), "--check"],
         [UV, "sync", "--project", str(project)],
         [UV, "sync", "--project", str(project), "--check"],
         [UV, "lock", "--project", str(project), "--check"],
@@ -131,7 +123,7 @@ def test_present_replaces_a_differing_specifier_verbatim(tmp_path):
     pyproject = project / "pyproject.toml"
     write_pyproject(project, '["requests >= 2"]')
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     result = uv.dependencies(ctx, ["requests>=3"], project=project)
@@ -146,7 +138,7 @@ def test_present_matches_normalized_names(tmp_path):
     pyproject = project / "pyproject.toml"
     write_pyproject(project, '["Charset_Normalizer>=3"]')
     command = FakeCommandRunner()
-    command.responses = synced_probes()
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     result = uv.dependencies(ctx, ["charset-normalizer"], project=project)
@@ -161,7 +153,7 @@ def test_present_keeps_the_multi_line_layout_of_the_table(tmp_path):
     pyproject = project / "pyproject.toml"
     write_pyproject(project, '[\n    "flask",\n]')
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     uv.dependencies(ctx, ["requests"], project=project)
@@ -174,12 +166,11 @@ def test_present_dry_run_reports_without_writing_or_syncing(tmp_path):
     pyproject = project / "pyproject.toml"
     write_pyproject(project)
     command = FakeCommandRunner()
-    command.responses = stale_probes()
     ctx = make_context(tmp_path, dry_run=True, command=command)
 
     result = uv.dependencies(ctx, ["requests"], project=project)
 
-    assert argvs(command) == [[UV, "sync", "--project", str(project), "--check"]]
+    assert command.calls == []
     assert result.changed is True
     assert result.summary == f"+requests; sync {project}"
     assert pyproject.read_text().endswith("dependencies = []\n")
@@ -189,12 +180,12 @@ def test_latest_upgrades_only_bare_names(tmp_path):
     project = tmp_path / "proj"
     write_pyproject(project, '["flask>=1"]')
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     result = uv.dependencies(ctx, ["requests", "flask>=1"], project=project, state="latest")
 
-    assert argvs(command)[1] == [
+    assert argvs(command)[0] == [
         UV,
         "sync",
         "--project",
@@ -224,7 +215,7 @@ def test_absent_removes_entries_by_name_and_syncs(tmp_path):
     pyproject = project / "pyproject.toml"
     write_pyproject(project, '["requests>=2", "flask"]')
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     result = uv.dependencies(ctx, ["requests==2.32"], project=project, state="absent")
@@ -276,7 +267,7 @@ def test_missing_project_is_initialized_with_uv_init_bare(tmp_path):
         return completed(argv, 0)
 
     command = FakeCommandRunner()
-    command.responses = [init, *stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [init, response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     result = uv.dependencies(ctx, ["requests"], project=project)
@@ -367,7 +358,7 @@ def test_non_registry_entries_are_preserved_verbatim(tmp_path):
     pyproject = project / "pyproject.toml"
     write_pyproject(project, '["flask", "requests @ https://example.com/requests.whl", "./local"]')
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     result = uv.dependencies(ctx, ["requests>=2"], project=project)
@@ -385,7 +376,7 @@ def test_duplicate_entries_for_a_name_are_all_reconciled(tmp_path):
     pyproject = project / "pyproject.toml"
     write_pyproject(project, '["flask", "flask>=2"]')
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     uv.dependencies(ctx, ["flask>=3"], project=project)
@@ -400,13 +391,13 @@ def test_group_edits_dependency_groups_and_passes_the_group_flag(tmp_path):
     text = pyproject.read_text() + "\n[dependency-groups]\nlint = []\n"
     pyproject.write_text(text, encoding="utf-8")
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     result = uv.dependencies(ctx, ["ruff"], project=project, group="lint")
 
-    assert argvs(command)[0] == [UV, "sync", "--project", str(project), "--group", "lint", "--check"]
-    assert argvs(command)[1] == [UV, "sync", "--project", str(project), "--group", "lint"]
+    assert argvs(command)[0] == [UV, "sync", "--project", str(project), "--group", "lint"]
+    assert argvs(command)[1] == [UV, "sync", "--project", str(project), "--group", "lint", "--check"]
     assert 'lint = ["ruff"]' in pyproject.read_text()
     assert result.summary == f"+ruff; sync {project}"
 
@@ -415,13 +406,13 @@ def test_python_is_passed_as_the_python_flag(tmp_path):
     project = tmp_path / "proj"
     write_pyproject(project)
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     uv.dependencies(ctx, ["requests"], project=project, python="3.13")
 
-    assert argvs(command)[0] == [UV, "sync", "--project", str(project), "--python", "3.13", "--check"]
-    assert argvs(command)[1] == [UV, "sync", "--project", str(project), "--python", "3.13"]
+    assert argvs(command)[0] == [UV, "sync", "--project", str(project), "--python", "3.13"]
+    assert argvs(command)[1] == [UV, "sync", "--project", str(project), "--python", "3.13", "--check"]
 
 
 def test_python_is_passed_to_uv_init(tmp_path):
@@ -432,7 +423,7 @@ def test_python_is_passed_to_uv_init(tmp_path):
         return completed(argv, 0)
 
     command = FakeCommandRunner()
-    command.responses = [init, *stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [init, response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     uv.dependencies(ctx, ["requests"], project=project, python="3.13")
@@ -440,18 +431,17 @@ def test_python_is_passed_to_uv_init(tmp_path):
     assert argvs(command)[0] == [UV, "init", "--bare", "--python", "3.13", str(project)]
 
 
-def test_extra_args_are_passed_to_the_probes_and_sync(tmp_path):
+def test_extra_args_are_passed_to_the_sync_and_post_checks(tmp_path):
     project = tmp_path / "proj"
     write_pyproject(project)
     command = FakeCommandRunner()
-    command.responses = [*stale_probes(), response(0), *post_sync_ok()]
+    command.responses = [response(0), *post_sync_ok()]
     ctx = make_context(tmp_path, command=command)
 
     uv.dependencies(ctx, ["requests"], project=project, extra_args=["--no-index", "--find-links=/srv/repo"])
 
     sync_run = [UV, "sync", "--project", str(project), "--no-index", "--find-links=/srv/repo"]
     assert argvs(command) == [
-        [*sync_run, "--check"],  # pre-sync probe
         sync_run,  # the sync itself
         [*sync_run, "--check"],  # post-sync check
         [UV, "lock", "--project", str(project), "--no-index", "--find-links=/srv/repo", "--check"],
@@ -462,8 +452,8 @@ def test_sync_still_out_of_sync_after_sync_fails(tmp_path):
     project = tmp_path / "proj"
     write_pyproject(project)
     command = FakeCommandRunner()
-    # pre-sync probe fails, the sync succeeds, then the lock post-check fails
-    command.responses = [response(1), response(0), response(0), response(1)]
+    # the sync succeeds, then the lock post-check fails
+    command.responses = [response(0), response(0), response(1)]
     ctx = make_context(tmp_path, command=command)
 
     with pytest.raises(TaskFailed, match="not synchronized after uv sync"):
@@ -715,6 +705,65 @@ def test_tools_latest_upgrades_an_installed_bare_tool(tmp_path):
     assert call_data(result)["added"] == ["ruff"]
 
 
+def test_tools_latest_upgrades_all_targets_in_one_command(tmp_path):
+    tools_dir = tmp_path / "tools"
+    make_receipt(tools_dir, "ruff")
+    make_receipt(tools_dir, "httpie")
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, stdout=str(tools_dir)),
+        response(0, stdout="ruff v1.0\nhttpie v1.0\n- ruff\n- httpie\n"),
+        response(0),
+        response(0, stdout="ruff v2.0\nhttpie v2.0\n- ruff\n- httpie\n"),
+    ]
+    ctx = make_context(tmp_path, command=command)
+
+    result = uv.tools(ctx, ["ruff", "httpie"], state="latest")
+
+    assert argvs(command) == [
+        [UV, "tool", "dir"],
+        [UV, "tool", "list"],
+        [UV, "tool", "upgrade", "ruff", "httpie"],
+        [UV, "tool", "list"],
+    ]
+    assert result.changed is True
+    assert result.summary == "+ruff +httpie"
+
+
+def test_tools_passes_python_and_extra_args_to_upgrade(tmp_path):
+    tools_dir = tmp_path / "tools"
+    make_receipt(tools_dir, "ruff")
+    make_receipt(tools_dir, "httpie")
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, stdout=str(tools_dir)),
+        response(0, stdout="ruff v1.0\nhttpie v1.0\n"),
+        response(0),
+        response(0, stdout="ruff v2.0\nhttpie v2.0\n"),
+    ]
+    ctx = make_context(tmp_path, command=command)
+
+    uv.tools(
+        ctx,
+        ["ruff", "httpie"],
+        state="latest",
+        python="3.13",
+        extra_args=["--no-index", "--find-links=/srv/repo"],
+    )
+
+    assert argvs(command)[2] == [
+        UV,
+        "tool",
+        "upgrade",
+        "--python",
+        "3.13",
+        "--no-index",
+        "--find-links=/srv/repo",
+        "ruff",
+        "httpie",
+    ]
+
+
 def test_tools_latest_reinstalls_a_pinned_tool_at_latest(tmp_path):
     tools_dir = tmp_path / "tools"
     make_receipt(tools_dir, "ruff", specifier="==1.0")
@@ -844,11 +893,12 @@ def test_tools_absent_reads_the_receipts_once_for_all_targets(tmp_path, monkeypa
     make_receipt(tools_dir, "httpie")
 
     def uninstall(argv):
-        shutil.rmtree(tools_dir / argv[-1])
+        for name in argv[3:]:
+            shutil.rmtree(tools_dir / name)
         return completed(argv, 0)
 
     command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir)), uninstall, uninstall]
+    command.responses = [response(0, stdout=str(tools_dir)), uninstall]
     ctx = make_context(tmp_path, command=command)
 
     scans = 0
@@ -863,6 +913,10 @@ def test_tools_absent_reads_the_receipts_once_for_all_targets(tmp_path, monkeypa
 
     result = uv.tools(ctx, ["ruff", "httpie"], state="absent")
 
+    assert argvs(command) == [
+        [UV, "tool", "dir"],
+        [UV, "tool", "uninstall", "ruff", "httpie"],
+    ]
     assert scans == 2
     assert result.changed is True
     assert result.summary == "-ruff -httpie"

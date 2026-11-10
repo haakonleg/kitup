@@ -34,24 +34,22 @@ RUN mkdir -p /srv/flatpak-repo \
     && flatpak build-update-repo /srv/flatpak-repo \
     && rm -rf /tmp/flatpak-fixture
 
-# Build a local wheel repository with two versions of a fixture package.
-# Tests run with no network, so pip/uv installs must come from /srv/pip-repo.
-COPY tests/integration/fixtures/pip /tmp/pip-fixture
-RUN mkdir -p /srv/pip-repo \
-    && python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-fixture \
-    && sed -i 's/^version = "1.0"$/version = "1.1"/' /tmp/pip-fixture/pyproject.toml \
-    && sed -i 's/__version__ = "1.0"/__version__ = "1.1"/' /tmp/pip-fixture/kitup_pip_test/__init__.py \
-    && python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-fixture \
-    && rm -rf /tmp/pip-fixture /root/.cache/pip
-
-# Build a fixture CLI tool wheel (with a console script) into the same repo,
-# for uv tool install tests.
-COPY tests/integration/fixtures/pip-tool /tmp/pip-tool-fixture
-RUN python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-tool-fixture \
-    && sed -i 's/^version = "1.0"$/version = "1.1"/' /tmp/pip-tool-fixture/pyproject.toml \
-    && sed -i 's/__version__ = "1.0"/__version__ = "1.1"/' /tmp/pip-tool-fixture/kitup_tool_test/__init__.py \
-    && python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo /tmp/pip-tool-fixture \
-    && rm -rf /tmp/pip-tool-fixture
+# Build two versions of each fixture wheel (library and CLI tool) into a local
+# repository. Tests run with no network, so pip/uv installs must come from
+# /srv/pip-repo.
+COPY tests/integration/fixtures/pip /tmp/fixtures/pip
+COPY tests/integration/fixtures/pip-extra /tmp/fixtures/pip-extra
+COPY tests/integration/fixtures/pip-tool /tmp/fixtures/pip-tool
+COPY tests/integration/fixtures/pip-tool-extra /tmp/fixtures/pip-tool-extra
+RUN set -e; mkdir -p /srv/pip-repo; \
+    for fixture in pip pip-extra pip-tool pip-tool-extra; do \
+        directory="/tmp/fixtures/$fixture"; \
+        python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo "$directory"; \
+        sed -i 's/^version = "1.0"$/version = "1.1"/' "$directory/pyproject.toml"; \
+        sed -i 's/__version__ = "1.0"/__version__ = "1.1"/' "$directory"/*/__init__.py; \
+        python3 -m pip wheel --no-deps --wheel-dir /srv/pip-repo "$directory"; \
+    done; \
+    rm -rf /tmp/fixtures /root/.cache/pip
 
 FROM ${BASE_IMAGE}
 

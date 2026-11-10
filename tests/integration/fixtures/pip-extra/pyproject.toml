@@ -1,0 +1,9 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kitup-pip-extra"
+version = "1.0"
+description = "kitup integration fixture extra package"
+requires-python = ">=3.9"

@@ -9,6 +9,7 @@ from .helpers import run, run_kitup, write_bundle
 pytestmark = pytest.mark.integration
 
 PACKAGE = "kitup-pip-test"
+EXTRA_PACKAGE = "kitup-pip-extra"
 WHEELS = "/srv/pip-repo"
 EXTRA_ARGS = ["--no-index", "--find-links", WHEELS]
 
@@ -90,6 +91,53 @@ def test_install_latest_and_remove_in_venv(tmp_path: Path, capsys) -> None:
     )
     assert run_kitup("apply", remove) == 0
     assert installed_version(venv, PACKAGE) is None
+
+    capsys.readouterr()
+    assert run_kitup("apply", remove) == 0
+    assert "0 changed" in capsys.readouterr().out
+
+
+def test_install_multiple_packages_in_one_venv(tmp_path: Path, capsys) -> None:
+    venv = tmp_path / "multi-venv"
+
+    install = bundle(
+        tmp_path,
+        "multi_install",
+        f"""
+        from kitup.modules import pip
+
+        @task("install fixture packages")
+        def install_fixtures(ctx):
+            pip.packages(
+                ctx,
+                ["{PACKAGE}==1.0", "{EXTRA_PACKAGE}==1.0"],
+                venv=r"{venv}",
+                extra_args={EXTRA_ARGS!r},
+            )
+        """,
+    )
+    assert run_kitup("apply", install) == 0
+    assert installed_version(venv, PACKAGE) == "1.0"
+    assert installed_version(venv, EXTRA_PACKAGE) == "1.0"
+
+    capsys.readouterr()
+    assert run_kitup("apply", install) == 0
+    assert "0 changed" in capsys.readouterr().out
+
+    remove = bundle(
+        tmp_path,
+        "multi_remove",
+        f"""
+        from kitup.modules import pip
+
+        @task("remove fixture packages")
+        def remove_fixtures(ctx):
+            pip.packages(ctx, ["{PACKAGE}", "{EXTRA_PACKAGE}"], state="absent", venv=r"{venv}")
+        """,
+    )
+    assert run_kitup("apply", remove) == 0
+    assert installed_version(venv, PACKAGE) is None
+    assert installed_version(venv, EXTRA_PACKAGE) is None
 
     capsys.readouterr()
     assert run_kitup("apply", remove) == 0
