@@ -4,6 +4,7 @@ import stat
 
 import pytest
 
+from kitup._utils import file_actions
 from kitup._utils.file_primitives import stat_path
 from kitup.errors import TaskFailed
 from kitup.modules import files
@@ -21,6 +22,19 @@ def context(tmp_path, *, dry_run=False, diff=False):
     )
 
 
+def record_reads(monkeypatch):
+    """Record the paths whose content is read through ``file_actions``."""
+    reads = []
+    read_bytes = file_actions.read_bytes
+
+    def record(ctx, path, info, *, sudo):
+        reads.append(path)
+        return read_bytes(ctx, path, info, sudo=sudo)
+
+    monkeypatch.setattr(file_actions, "read_bytes", record)
+    return reads
+
+
 def test_file_creates_file_and_is_idempotent(tmp_path):
     path = tmp_path / "example.conf"
     ctx = context(tmp_path)
@@ -36,6 +50,30 @@ def test_file_creates_file_and_is_idempotent(tmp_path):
     assert len(ctx.changes) == 1
     assert len(ctx.calls) == 2
     assert ctx.calls[1].changed is False
+
+
+def test_file_skips_reading_a_target_with_a_different_size(tmp_path, monkeypatch):
+    path = tmp_path / "file"
+    path.write_text("old\n")
+    ctx = context(tmp_path)
+    reads = record_reads(monkeypatch)
+
+    files.file(ctx, path, content="new content\n")
+
+    assert reads == []
+    assert path.read_text() == "new content\n"
+
+
+def test_file_reads_a_same_size_target_to_compare_content(tmp_path, monkeypatch):
+    path = tmp_path / "file"
+    path.write_text("old\n")
+    ctx = context(tmp_path)
+    reads = record_reads(monkeypatch)
+
+    files.file(ctx, path, content="new\n")
+
+    assert reads == [path]
+    assert path.read_text() == "new\n"
 
 
 def test_file_updates_metadata_without_rewriting(tmp_path):
@@ -680,6 +718,34 @@ def test_copy_replaces_destination_symlink(tmp_path):
     assert not dest.is_symlink()
     assert dest.read_text() == "new\n"
     assert target.read_text() == "old\n"
+
+
+def test_copy_skips_reading_a_target_with_a_different_size(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.write_text("new content\n")
+    target = tmp_path / "target"
+    target.write_text("old\n")
+    ctx = context(tmp_path)
+    reads = record_reads(monkeypatch)
+
+    files.copy(ctx, source, target)
+
+    assert reads == [source]
+    assert target.read_text() == "new content\n"
+
+
+def test_copy_reads_a_same_size_target_to_compare_content(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.write_text("new\n")
+    target = tmp_path / "target"
+    target.write_text("old\n")
+    ctx = context(tmp_path)
+    reads = record_reads(monkeypatch)
+
+    files.copy(ctx, source, target)
+
+    assert reads == [source, target]
+    assert target.read_text() == "new\n"
 
 
 def test_copy_into_directory_with_trailing_slash(tmp_path):

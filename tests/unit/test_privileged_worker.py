@@ -101,6 +101,7 @@ def test_worker_file_actions(ctx, tmp_path):
         )
         info = worker.request(Request("stat", {"path": str(path)}))
         assert info["exists"] and info["is_file"] and info["mode"] == 0o600
+        assert info["size"] == 5 and info["mtime_ns"] > 0
 
         read = worker.request(Request("read", {"path": str(path)}))
         assert base64.b64decode(read["content"]) == b"data\n"

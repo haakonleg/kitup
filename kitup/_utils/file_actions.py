@@ -41,27 +41,18 @@ class FileInfo:
     is_dir: bool
     is_symlink: bool
     is_file: bool
+    size: int
+    mtime_ns: int
     link: str | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        """Return the metadata in the shape used by ``file_primitives``."""
-        return {
-            "mode": self.mode,
-            "uid": self.uid,
-            "gid": self.gid,
-            "is_dir": self.is_dir,
-            "is_symlink": self.is_symlink,
-            "is_file": self.is_file,
-            "link": self.link,
-        }
 
 
 @dataclass(frozen=True, slots=True)
 class FileSnapshot:
     """Metadata and content read once for a path.
 
-    ``content`` is ``None`` when the path is missing or is not a regular file,
-    so callers can pass a snapshot to an apply helper without reading again.
+    ``content`` is ``None`` when the path is missing, is not a regular file, or
+    when a known size difference already proves the content differs, so callers
+    can pass a snapshot to an apply helper without reading again.
     """
 
     info: FileInfo | None
@@ -131,6 +122,8 @@ def _file_info(result: dict[str, Any]) -> FileInfo:
         is_dir=result["is_dir"],
         is_symlink=result["is_symlink"],
         is_file=result["is_file"],
+        size=result["size"],
+        mtime_ns=result["mtime_ns"],
         link=result.get("link"),
     )
 
@@ -240,10 +233,23 @@ def read_bytes(
         raise TaskFailed(f"could not read {path}: {exc}") from exc
 
 
-def read_snapshot(ctx: TaskContext, path: Path, *, sudo: bool) -> FileSnapshot:
-    """Stat and read a path once for a later apply call."""
+def read_snapshot(
+    ctx: TaskContext,
+    path: Path,
+    *,
+    sudo: bool,
+    content_size: int | None = None,
+) -> FileSnapshot:
+    """Stat and read a path once for a later apply call.
+
+    ``content_size`` is the size of the content the caller intends to write.
+    When it differs from the existing size the content is known to differ, so
+    the read is skipped unless a diff was requested.
+    """
     info = stat(ctx, path, sudo=sudo)
     if info is None or not info.is_file:
+        return FileSnapshot(info)
+    if content_size is not None and info.size != content_size and not ctx.diff:
         return FileSnapshot(info)
     return FileSnapshot(info, read_bytes(ctx, path, info, sudo=sudo))
 
@@ -269,10 +275,11 @@ def apply_bytes(
     preserves an existing mode and uses ``0o644`` for new files.
     ``unchanged_summary`` describes the desired state when nothing changes.
     ``snapshot`` is the stat and content the caller already read for ``path``;
-    when omitted, the path is stat'ed and read once here.
+    when omitted, the path is stat'ed and read only when its size does not
+    already prove the content differs.
     """
     if snapshot is None:
-        snapshot = read_snapshot(ctx, path, sudo=sudo)
+        snapshot = read_snapshot(ctx, path, sudo=sudo, content_size=len(content))
     info = snapshot.info
     is_link = info is not None and info.is_symlink
     if info is not None and info.is_dir and not is_link:

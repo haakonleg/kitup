@@ -30,6 +30,8 @@ def test_write_stat_read_remove(tmp_path):
     assert not info["is_dir"]
     assert not info["is_symlink"]
     assert info["mode"] == 0o600
+    assert info["size"] == 5
+    assert info["mtime_ns"] > 0
     assert read_path(path) == b"data\n"
 
     remove_path(path)

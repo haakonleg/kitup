@@ -211,6 +211,36 @@ def test_to_file_force_refreshes_only_changed_content(tmp_path, http_server):
     assert len(changed.changes) == 1
 
 
+def test_to_file_skips_hashing_a_target_with_a_different_size(tmp_path, http_server, monkeypatch):
+    state, base = http_server
+    target = tmp_path / "file.txt"
+    target.write_bytes(b"old\n")
+    ctx = make_context(tmp_path)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("a different target size already proves different content")
+
+    monkeypatch.setattr(download, "digest_path", fail)
+
+    download.to_file(ctx, f"{base}/file.txt", target, force=True)
+
+    assert target.read_bytes() == state.payload
+    assert len(ctx.changes) == 1
+
+
+def test_to_file_hashes_a_same_size_target_to_detect_changed_content(tmp_path, http_server):
+    state, base = http_server
+    state.payload = b"changed\n"
+    target = tmp_path / "file.txt"
+    target.write_bytes(b"content\n")
+    ctx = make_context(tmp_path)
+
+    download.to_file(ctx, f"{base}/file.txt", target, force=True)
+
+    assert target.read_bytes() == state.payload
+    assert len(ctx.changes) == 1
+
+
 def test_to_file_checksum_skips_matching_file(tmp_path, http_server):
     state, base = http_server
     target = tmp_path / "file.txt"

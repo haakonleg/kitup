@@ -99,8 +99,8 @@ def archive(
     source = ctx.resolve_source(src)
     _require_source(source, "archive source")
     target = expand_path(dest, error=TaskFailed)
-    target_info = _lstat(target)
-    if target_info is not None and not _is_directory(target_info):
+    target_info = file_actions.stat_local(target)
+    if target_info is not None and not target_info.is_dir:
         raise TaskFailed(f"archive destination is not a directory: {target}")
     if target_info is None:
         file_actions.require_parent_local(target)
@@ -108,7 +108,7 @@ def archive(
         marker = expand_path(creates, error=TaskFailed)
         if not marker.is_absolute():
             marker = target / marker
-        if _lstat(marker) is not None:
+        if file_actions.stat_local(marker) is not None:
             return ctx.changed(
                 _archive_result(
                     source,
@@ -171,14 +171,13 @@ def file(
     # Validate the compression format even when a dry run skips decompression.
     with _translate_decompression_errors(source), _decompressed_stream(source):
         pass
-    target = _single_destination(source, dest)
-    info = _lstat(target)
+    target, info = _single_destination(source, dest)
     if info is not None:
-        if stat.S_ISLNK(info.st_mode):
+        if info.is_symlink:
             raise TaskFailed(f"refusing to replace symlink destination: {target}")
-        if stat.S_ISDIR(info.st_mode):
+        if info.is_dir:
             raise TaskFailed(f"decompressed destination is a directory: {target}")
-        if not stat.S_ISREG(info.st_mode):
+        if not info.is_file:
             raise TaskFailed(f"decompressed destination is not a regular file: {target}")
     else:
         file_actions.require_parent_local(target)
@@ -243,7 +242,7 @@ def _reconcile(
     archive: tarfile.TarFile | zipfile.ZipFile,
     entries: dict[str, _Member],
     target: Path,
-    target_info: os.stat_result | None,
+    target_info: file_actions.FileInfo | None,
     *,
     mode: int | None,
 ) -> int:
@@ -289,14 +288,14 @@ def _ensure_parents(
         current = current / part
         if current in created:
             continue
-        info = _lstat(current)
+        info = file_actions.stat_local(current)
         if info is None:
             if not dry_run:
                 _mkdir(current, 0o755)
             created.add(current)
             count += 1
             continue
-        if not _is_directory(info):
+        if not info.is_dir:
             raise TaskFailed(f"refusing to traverse non-directory: {current}")
     return count
 
@@ -313,13 +312,13 @@ def _ensure_directory(
         if not dry_run and member.mode is not None:
             _apply_mode(path, member.mode)
         return False
-    info = _lstat(path)
+    info = file_actions.stat_local(path)
     if info is None:
         if not dry_run:
             _mkdir(path, member.mode or 0o755)
         created.add(path)
         return True
-    if not _is_directory(info):
+    if not info.is_dir:
         raise TaskFailed(f"refusing to replace non-directory with directory: {path}")
     return False
 
@@ -332,8 +331,8 @@ def _ensure_file(
     dry_run: bool,
     mode: int | None,
 ) -> bool:
-    info = _lstat(path)
-    if info is not None and _is_directory(info):
+    info = file_actions.stat_local(path)
+    if info is not None and info.is_dir:
         raise TaskFailed(f"refusing to replace directory with file: {path}")
 
     if _member_matches(archive, member, path, info):
@@ -361,16 +360,12 @@ def _ensure_symlink(
     link = member.link
     if link is None:
         raise TaskFailed(f"missing symlink target in archive: {member.name!r}")
-    info = _lstat(path)
+    info = file_actions.stat_local(path)
     if info is not None:
-        if _is_directory(info):
+        if info.is_dir:
             raise TaskFailed(f"refusing to replace directory with symlink: {path}")
-        if stat.S_ISLNK(info.st_mode):
-            try:
-                if os.readlink(path) == link:
-                    return False
-            except OSError as exc:
-                raise TaskFailed(f"could not read symlink {path}: {exc}") from exc
+        if info.is_symlink and info.link == link:
+            return False
     if dry_run:
         return True
     try:
@@ -384,11 +379,11 @@ def _member_matches(
     archive: tarfile.TarFile | zipfile.ZipFile,
     member: _Member,
     path: Path,
-    info: os.stat_result | None,
+    info: file_actions.FileInfo | None,
 ) -> bool:
-    if info is None or stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+    if info is None or info.is_symlink or not info.is_file:
         return False
-    if info.st_size != member.size:
+    if info.size != member.size:
         return False
     try:
         with _open_member(archive, member) as stream:
@@ -499,12 +494,12 @@ def _install_temp(temporary: Path, path: Path, *, mode: int | None, default_mode
 
 def _reconcile_metadata(
     path: Path,
-    info: os.stat_result | None,
+    info: file_actions.FileInfo | None,
     *,
     mode: int | None,
     dry_run: bool,
 ) -> bool:
-    if info is None or mode is None or stat.S_IMODE(info.st_mode) == mode:
+    if info is None or mode is None or info.mode == mode:
         return False
     if not dry_run:
         _apply_mode(path, mode)
@@ -564,16 +559,16 @@ def _archive_files(entries: dict[str, _Member]) -> list[str]:
 
 def _directory_size(path: Path) -> int:
     """Return the total size of regular files under ``path`` in bytes."""
-    info = _lstat(path)
-    if not _is_directory(info):
+    info = file_actions.stat_local(path)
+    if info is None or not info.is_dir:
         return 0
     total = 0
     try:
         for root, _directories, names in os.walk(path, followlinks=False):
             for name in names:
-                file_info = _lstat(Path(root) / name)
-                if file_info is not None and stat.S_ISREG(file_info.st_mode):
-                    total += file_info.st_size
+                file_info = file_actions.stat_local(Path(root) / name)
+                if file_info is not None and file_info.is_file:
+                    total += file_info.size
     except OSError as exc:
         raise TaskFailed(f"could not measure {path}: {exc}") from exc
     return total
@@ -723,25 +718,11 @@ def _require_patterns(
 
 
 def _require_source(path: Path, label: str) -> None:
-    info = _lstat(path)
+    info = file_actions.stat_local(path)
     if info is None:
         raise TaskFailed(f"{label} does not exist: {path}")
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+    if info.is_symlink or not info.is_file:
         raise TaskFailed(f"{label} is not a regular file: {path}")
-
-
-def _lstat(path: Path) -> os.stat_result | None:
-    try:
-        return path.lstat()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise TaskFailed(f"could not stat {path}: {exc}") from exc
-
-
-def _is_directory(info: os.stat_result | None) -> bool:
-    """Return whether ``info`` came from a directory (``lstat`` never follows links)."""
-    return info is not None and stat.S_ISDIR(info.st_mode)
 
 
 def _mkdir(path: Path, mode: int) -> None:
@@ -751,13 +732,17 @@ def _mkdir(path: Path, mode: int) -> None:
         raise TaskFailed(f"could not create directory {path}: {exc}") from exc
 
 
-def _single_destination(source: Path, dest: str | Path) -> Path:
+def _single_destination(source: Path, dest: str | Path) -> tuple[Path, file_actions.FileInfo | None]:
+    """Resolve the destination file and stat it once."""
     target = expand_path(dest, error=TaskFailed)
     if isinstance(dest, str) and dest.endswith("/"):
-        return target / _decompressed_name(source)
-    if _is_directory(_lstat(target)):
-        return target / _decompressed_name(source)
-    return target
+        target = target / _decompressed_name(source)
+        return target, file_actions.stat_local(target)
+    info = file_actions.stat_local(target)
+    if info is not None and info.is_dir:
+        target = target / _decompressed_name(source)
+        return target, file_actions.stat_local(target)
+    return target, info
 
 
 def _decompressed_name(source: Path) -> str:

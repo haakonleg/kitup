@@ -53,6 +53,8 @@ def stat_path(path: str | os.PathLike[str], *, follow: bool = False) -> dict[str
         "mode": stat.S_IMODE(info.st_mode),
         "uid": info.st_uid,
         "gid": info.st_gid,
+        "size": info.st_size,
+        "mtime_ns": info.st_mtime_ns,
     }
     if result["is_symlink"]:
         result["link"] = os.readlink(path)

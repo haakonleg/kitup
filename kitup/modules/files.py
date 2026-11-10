@@ -91,8 +91,8 @@ def file(
         data = b""
         summary = f"create {target}"
     else:
-        snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
         data = content.encode()
+        snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo, content_size=len(data))
         summary = f"write {target}"
 
     file_actions.require_parent(ctx, target, sudo=sudo)
@@ -142,7 +142,8 @@ def copy(
     source_info = file_actions.stat(ctx, source, sudo=sudo)
     if source_info is None or source_info.is_symlink or not source_info.is_file:
         raise TaskFailed(f"copy source is not a regular file: {source}")
-    target_snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
+    content = file_actions.read_bytes(ctx, source, source_info, sudo=sudo)
+    target_snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo, content_size=len(content))
     if target_snapshot.info is not None and target_snapshot.info.is_dir:
         raise TaskFailed(f"destination is a directory: {target}")
 
@@ -151,7 +152,7 @@ def copy(
         file_actions.apply_bytes(
             ctx,
             target,
-            file_actions.read_bytes(ctx, source, source_info, sudo=sudo),
+            content,
             snapshot=target_snapshot,
             action="files.copy",
             mode=source_info.mode if mode is None else mode,

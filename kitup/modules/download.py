@@ -207,7 +207,7 @@ def to_file(
             size = temporary.stat().st_size
         except OSError as exc:
             raise TaskFailed(f"could not inspect downloaded file: {exc}") from exc
-        if info is not None and _content_matches(target, checksum_dest):
+        if info is not None and info.size == size and _content_matches(target, checksum_dest):
             return ctx.changed(
                 _reconcile_metadata(
                     ctx,
