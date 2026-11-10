@@ -38,39 +38,77 @@ def test_read_only_probes_do_not_request_sudo(tmp_path):
 
 def test_ensure_present_installs_only_missing_packages(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [response(0), response(0)]
+    command.responses = [response(0, "git\nvim\n")]
     ctx = make_context(tmp_path, command=command)
 
     dnf.packages(ctx, ["git", "vim"])
-    assert argvs(command) == [
-        ["rpm", "-q", "git"],
-        ["rpm", "-q", "vim"],
-    ]
+    assert argvs(command) == [["rpm", "-q", "--queryformat", "%{NAME}\n", "git", "vim"]]
     assert ctx.changes == []
 
-    command.responses = [response(1), response(0), response(0), response(0)]
+    command.responses = [
+        response(1, "git\npackage vim is not installed\n"),
+        response(0),
+        response(0, "vim\n"),
+    ]
     ctx = make_context(tmp_path, command=command)
     dnf.packages(ctx, ["git", "vim"])
-    assert command.calls[4][0] == [
+    assert command.calls[2][0] == [
         "dnf5",
         "install",
         "-y",
         "--setopt=install_weak_deps=False",
-        "git",
+        "vim",
     ]
-    assert call_data(ctx.changes[0]) == {"added": ["git"], "groups": [], "packages": ["git"]}
+    assert call_data(ctx.changes[0]) == {"added": ["vim"], "groups": [], "packages": ["vim"]}
     assert ctx.changes[0].action == "dnf.packages"
-    assert ctx.changes[0].summary == "+git"
+    assert ctx.changes[0].summary == "+vim"
 
 
-def test_ensure_present_dry_run_does_not_install(tmp_path):
+def test_package_checks_use_a_single_rpm_query(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [response(1)]
+    command.responses = [
+        response(1, "git\npackage vim is not installed\n"),
+        response(0),
+        response(0, "vim\n"),
+    ]
+    ctx = make_context(tmp_path, command=command)
+
+    dnf.packages(ctx, ["git", "vim"])
+
+    assert argvs(command) == [
+        ["rpm", "-q", "--queryformat", "%{NAME}\n", "git", "vim"],
+        ["dnf5", "install", "-y", "--setopt=install_weak_deps=False", "vim"],
+        ["rpm", "-q", "--queryformat", "%{NAME}\n", "vim"],
+    ]
+
+
+def test_missing_packages_are_parsed_from_stderr(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1, stderr="package git is not installed\n")]
     ctx = make_context(tmp_path, dry_run=True, command=command)
 
     dnf.packages(ctx, ["git"])
 
-    assert argvs(command) == [["rpm", "-q", "git"]]
+    assert ctx.changes[0].summary == "+git"
+
+
+def test_package_query_failure_is_reported(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1, stderr="rpmdb: cannot open database\n")]
+    ctx = make_context(tmp_path, command=command)
+
+    with pytest.raises(TaskFailed, match="could not query installed packages"):
+        dnf.packages(ctx, ["git"])
+
+
+def test_ensure_present_dry_run_does_not_install(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1, "package git is not installed\n")]
+    ctx = make_context(tmp_path, dry_run=True, command=command)
+
+    dnf.packages(ctx, ["git"])
+
+    assert argvs(command) == [["rpm", "-q", "--queryformat", "%{NAME}\n", "git"]]
     assert ctx.changes[0].summary == "+git"
 
 
@@ -100,16 +138,16 @@ def test_at_prefixed_group_and_package_install_together(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, "Installed groups:\n base\n"),
-        response(1),
+        response(1, "package ripgrep is not installed\n"),
         response(0),
         response(0, "Installed groups:\n base\n multimedia\n"),
-        response(0),
+        response(0, "ripgrep\n"),
     ]
     ctx = make_context(tmp_path, command=command)
 
     dnf.packages(ctx, ["@multimedia", "ripgrep"])
 
-    assert command.calls[1][0] == ["rpm", "-q", "ripgrep"]
+    assert command.calls[1][0] == ["rpm", "-q", "--queryformat", "%{NAME}\n", "ripgrep"]
     assert command.calls[2][0] == [
         "dnf5",
         "install",
@@ -156,7 +194,11 @@ def test_group_install_passes_weak_deps_and_excludes(tmp_path):
 
 def test_package_install_passes_excludes(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [response(1), response(0), response(0)]
+    command.responses = [
+        response(1, "package git is not installed\n"),
+        response(0),
+        response(0, "git\n"),
+    ]
     ctx = make_context(tmp_path, command=command)
 
     dnf.packages(ctx, ["git"], exclude=["foo", "bar"])
@@ -216,7 +258,11 @@ def test_hidden_group_is_detected_as_installed(tmp_path):
 
 def test_remove_removes_installed_packages(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [response(0), response(0), response(1)]
+    command.responses = [
+        response(0, "git\n"),
+        response(0),
+        response(1, "package git is not installed\n"),
+    ]
     ctx = make_context(tmp_path, command=command)
 
     dnf.packages(ctx, ["git"], state="absent")
@@ -227,7 +273,11 @@ def test_remove_removes_installed_packages(tmp_path):
 
 def test_install_failure_is_reported(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [response(1), response(0), response(1)]
+    command.responses = [
+        response(1, "package git is not installed\n"),
+        response(0),
+        response(1, "package git is not installed\n"),
+    ]
     ctx = make_context(tmp_path, command=command)
 
     with pytest.raises(TaskFailed, match="still missing"):
@@ -236,14 +286,18 @@ def test_install_failure_is_reported(tmp_path):
 
 def test_swap_replaces_package_and_is_idempotent(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [response(0)]
+    command.responses = [response(0, "ffmpeg\n")]
     ctx = make_context(tmp_path, command=command)
 
     dnf.swap(ctx, "ffmpeg-free", "ffmpeg")
-    assert argvs(command) == [["rpm", "-q", "ffmpeg"]]
+    assert argvs(command) == [["rpm", "-q", "--queryformat", "%{NAME}\n", "ffmpeg"]]
     assert ctx.changes == []
 
-    command.responses = [response(1), response(0), response(0)]
+    command.responses = [
+        response(1, "package ffmpeg is not installed\n"),
+        response(0),
+        response(0, "ffmpeg\n"),
+    ]
     ctx = make_context(tmp_path, command=command)
     dnf.swap(ctx, "ffmpeg-free", "ffmpeg", allowerasing=True)
     assert command.calls[2][0] == [
@@ -255,14 +309,18 @@ def test_swap_replaces_package_and_is_idempotent(tmp_path):
         "--allowerasing",
     ]
     assert command.calls[2][1]["sudo"] is True
-    assert command.calls[3][0] == ["rpm", "-q", "ffmpeg"]
+    assert command.calls[3][0] == ["rpm", "-q", "--queryformat", "%{NAME}\n", "ffmpeg"]
     assert call_data(ctx.changes[0]) == {"removed": "ffmpeg-free", "installed": "ffmpeg"}
     assert ctx.changes[0].summary == "swap ffmpeg-free -> ffmpeg"
 
 
 def test_swap_failure_is_reported(tmp_path):
     command = FakeCommandRunner()
-    command.responses = [response(1), response(0), response(1)]
+    command.responses = [
+        response(1, "package ffmpeg is not installed\n"),
+        response(0),
+        response(1, "package ffmpeg is not installed\n"),
+    ]
     ctx = make_context(tmp_path, command=command)
 
     with pytest.raises(TaskFailed, match="still missing after swap"):
@@ -352,7 +410,10 @@ def test_copr_absent_scenarios(tmp_path):
 def test_rpm_release_scenarios(tmp_path):
     source = "https://example.test/tool-release-2-1.noarch.rpm"
     command = FakeCommandRunner()
-    command.responses = [response(0, "tool-release\n"), response(1)]
+    command.responses = [
+        response(0, "tool-release\n"),
+        response(1, "package tool-release is not installed\n"),
+    ]
     ctx = make_context(tmp_path, command=command)
 
     result = dnf.rpm(ctx, source)
@@ -363,12 +424,12 @@ def test_rpm_release_scenarios(tmp_path):
         "%{name}\n",
         source,
     ]
-    assert command.calls[1][0] == ["rpm", "-q", "tool-release"]
+    assert command.calls[1][0] == ["rpm", "-q", "--queryformat", "%{NAME}\n", "tool-release"]
     assert command.calls[2][0] == ["dnf5", "install", "-y", source]
     assert command.calls[2][1]["sudo"] is True
     assert call_data(result) == {"installed": ["tool-release"]}
 
-    command.responses = [response(0, "tool-release\n"), response(0)]
+    command.responses = [response(0, "tool-release\n"), response(0, "tool-release\n")]
     ctx = make_context(tmp_path, command=command)
     result = dnf.rpm(ctx, source)
     assert command.calls[3][0] == [
@@ -382,10 +443,13 @@ def test_rpm_release_scenarios(tmp_path):
     assert call_data(result) == {"installed": []}
     assert ctx.changes == []
 
-    command.responses = [response(0, "tool-release\n"), response(1)]
+    command.responses = [
+        response(0, "tool-release\n"),
+        response(1, "package tool-release is not installed\n"),
+    ]
     ctx = make_context(tmp_path, dry_run=True, command=command)
     result = dnf.rpm(ctx, source)
-    assert command.calls[6][0] == ["rpm", "-q", "tool-release"]
+    assert command.calls[6][0] == ["rpm", "-q", "--queryformat", "%{NAME}\n", "tool-release"]
     assert result.changed is True
     assert call_data(result) == {"installed": ["tool-release"]}
 
@@ -395,7 +459,10 @@ def test_rpm_release_does_not_use_bundle_file_discovery(tmp_path):
     (bundle_dir / "files").mkdir(parents=True)
     (bundle_dir / "files" / "tool-release.rpm").write_text("rpm")
     command = FakeCommandRunner()
-    command.responses = [response(0, "tool-release\n"), response(1)]
+    command.responses = [
+        response(0, "tool-release\n"),
+        response(1, "package tool-release is not installed\n"),
+    ]
     ctx = make_context(tmp_path, command=command)
 
     dnf.rpm(ctx, "tool-release.rpm")
@@ -406,7 +473,10 @@ def test_rpm_release_does_not_use_bundle_file_discovery(tmp_path):
 def test_rpm_release_accepts_local_path(tmp_path):
     source = tmp_path / "tool-release-2-1.noarch.rpm"
     command = FakeCommandRunner()
-    command.responses = [response(0, "tool-release\n"), response(1)]
+    command.responses = [
+        response(0, "tool-release\n"),
+        response(1, "package tool-release is not installed\n"),
+    ]
     ctx = make_context(tmp_path, command=command)
 
     result = dnf.rpm(ctx, source)
@@ -421,14 +491,14 @@ def test_rpm_release_accepts_multiple_sources(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, "tool-release\nextra-release\n"),
-        response(1),
-        response(1),
+        response(1, "package tool-release is not installed\npackage extra-release is not installed\n"),
+        response(0),
     ]
     ctx = make_context(tmp_path, command=command)
 
     result = dnf.rpm(ctx, [url, local])
 
-    assert command.calls[3][0] == ["dnf5", "install", "-y", url, str(local)]
+    assert command.calls[2][0] == ["dnf5", "install", "-y", url, str(local)]
     assert call_data(result) == {"installed": ["tool-release", "extra-release"]}
     assert result.summary == ("install tool-release-2-1.noarch.rpm, extra-release-1-1.noarch.rpm")
 

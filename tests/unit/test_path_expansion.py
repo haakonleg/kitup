@@ -226,7 +226,10 @@ def test_dnf_source_paths_expand_home(tmp_path, home):
     assert f"--from-repofile={home / 'tool.repo'}" in command_runner.calls[1][0]
 
     rpm_command = FakeCommandRunner()
-    rpm_command.responses = [response(0, "tool-release\n"), response(1)]
+    rpm_command.responses = [
+        response(0, "tool-release\n"),
+        response(1, "package tool-release is not installed\n"),
+    ]
     rpm_ctx = context(tmp_path, command_runner=rpm_command)
 
     dnf.rpm(rpm_ctx, "~/tool-release.rpm")
