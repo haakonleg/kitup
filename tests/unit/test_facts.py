@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from kitup.facts import collect_facts, collect_mounts, parse_mountinfo, parse_os_release
 
 
@@ -73,19 +75,23 @@ def test_collect_mounts_adds_capacity_and_skips_unreadable_mounts(tmp_path):
 
     assert len(mounts) == 1
     assert mounts[0]["mount"] == "/"
+    assert mounts[0].mount == "/"
     assert mounts[0]["device"] == "/dev/nvme0n1p1"
+    assert mounts[0].device == "/dev/nvme0n1p1"
     assert mounts[0]["fstype"] == "ext4"
+    assert mounts[0].fstype == "ext4"
+    assert mounts[0]["options"] == ("rw", "relatime")
+    assert mounts[0].options == ("rw", "relatime")
     assert mounts[0]["bytes_total"] == 4096 * 1000
+    assert mounts[0].bytes_total == 4096 * 1000
     assert mounts[0]["bytes_free"] == 4096 * 250
+    assert mounts[0].bytes_free == 4096 * 250
     assert mounts[0]["bytes_used"] == 4096 * 750
+    assert mounts[0].bytes_used == 4096 * 750
     assert mounts[0]["bytes_total"] == mounts[0]["bytes_used"] + mounts[0]["bytes_free"]
 
-    try:
+    with pytest.raises(TypeError):
         mounts[0]["bytes_free"] = 0
-    except TypeError:
-        pass
-    else:
-        raise AssertionError("mounts should be read-only")
 
 
 def test_collect_facts_from_os_release(tmp_path):
@@ -98,11 +104,29 @@ def test_collect_facts_from_os_release(tmp_path):
     facts = collect_facts(path)
 
     assert facts["distro_id"] == "testos"
+    assert facts.distro_id == "testos"
     assert facts["version_id"] == "1"
+    assert facts.version_id == "1"
     assert facts["os_release"]["PRETTY_NAME"] == "Test Linux 1 (Workstation Edition)"
+    assert facts.os_release.PRETTY_NAME == "Test Linux 1 (Workstation Edition)"
+    assert facts["os_release"].ID == "testos"
     assert facts["hostname"]
+    assert facts.hostname
     assert facts["arch"]
+    assert facts.arch
     assert facts["kernel"]
+    assert facts.kernel
+
+
+def test_facts_are_read_only(tmp_path):
+    facts = collect_facts(tmp_path / "missing-os-release")
+
+    with pytest.raises(AttributeError):
+        facts.hostname = "other"
+    with pytest.raises(TypeError):
+        facts["hostname"] = "other"
+    with pytest.raises(TypeError):
+        del facts["hostname"]
 
 
 def test_missing_sources_omit_optional_facts(tmp_path):

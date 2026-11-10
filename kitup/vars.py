@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any, Final
 
 from ._utils.importer import load_var_module
-from ._utils.mapping import AttrDict
+from ._utils.mapping import wrap_attr
 from ._utils.paths import expand_path
 from .errors import VarsError
 from .registry import Bundle
@@ -15,24 +15,12 @@ from .registry import Bundle
 _RESERVED_NAMES: Final = frozenset({"get", "require"})
 
 
-def _wrap_vars_value(value: Any) -> Any:
-    """Return a value with nested plain dictionaries made attribute-accessible."""
-    # Exact type checks keep subclasses such as defaultdict and namedtuple intact.
-    if type(value) is dict:
-        return AttrDict({key: _wrap_vars_value(item) for key, item in value.items()})
-    if type(value) is list:
-        return [_wrap_vars_value(item) for item in value]
-    if type(value) is tuple:
-        return tuple(_wrap_vars_value(item) for item in value)
-    return value
-
-
 class Vars(SimpleNamespace):
     """Merged variable values with attribute and lookup access."""
 
     def __init__(self, **values: Any) -> None:
         _reject_reserved_names(values, source=None)
-        super().__init__(**{name: _wrap_vars_value(value) for name, value in values.items()})
+        super().__init__(**{name: wrap_attr(value) for name, value in values.items()})
 
     def get(self, key: str, default: Any = None) -> Any:
         """Return a variable value, or ``default`` when it is missing."""

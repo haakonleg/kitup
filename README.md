@@ -119,10 +119,6 @@ Bundles may also contain a `vars/` folder. Bundle vars are scoped to that
 bundle's tasks and act as defaults: project-level vars (including `--var-file`)
 are layered on top, so project values win on same-named keys.
 
-Plain nested dictionary values can be read with attributes as well as items,
-for example `ctx.vars.SETTINGS.theme.name`. Lists and tuples remain ordinary
-sequences, so indexed dictionaries still use `ctx.vars.SERVERS[0].host`.
-
 Presets are reusable sets of command-line options:
 
 ```text

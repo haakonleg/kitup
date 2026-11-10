@@ -274,7 +274,7 @@ color_scheme = ctx.vars.require("GNOME_COLOR_SCHEME")
 `require()` raises a vars error naming the missing key and listing the available
 keys.
 
-Plain nested dictionary values support attribute access as well as item access:
+For example:
 
 ```python
 # vars/base.py
@@ -286,11 +286,6 @@ SERVERS = [{"host": "example", "port": 443}]
 theme = ctx.vars.SETTINGS.theme.name
 port = ctx.vars.SERVERS[0].port
 ```
-
-Lists and tuples are not given attribute access themselves; only the plain
-dictionaries inside them are converted. Attribute access requires a valid
-Python identifier and cannot shadow dictionary methods, so keys such as
-`"my-key"` or `"items"` still need item access.
 
 Var files may import each other through the `vars` package:
 
@@ -305,8 +300,7 @@ Keep var files side-effect-free and limited to public constants.
 
 Every task receives `ctx`:
 
-- `ctx.vars` — merged variable values, with nested plain dictionaries also
-  readable as attributes.
+- `ctx.vars` — merged variable values.
 - `ctx.facts` — read-only host facts; see [Facts](facts.md).
 - `ctx.root` — the project root.
 - `ctx.project` — the discovered project: bundles, var paths, preset paths, and

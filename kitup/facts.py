@@ -8,8 +8,9 @@ import shlex
 import socket
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any, Final
+
+from ._utils.mapping import AttrMapping, wrap_attr
 
 OS_RELEASE_PATH: Final = Path("/etc/os-release")
 MOUNTINFO_PATH: Final = Path("/proc/self/mountinfo")
@@ -97,7 +98,7 @@ def collect_mounts(
         mount["bytes_total"] = total
         mount["bytes_free"] = free
         mount["bytes_used"] = total - free
-        mounts.append(MappingProxyType(mount))
+        mounts.append(AttrMapping(mount))
     return tuple(mounts)
 
 
@@ -127,7 +128,7 @@ def collect_facts(os_release_path: Path = OS_RELEASE_PATH) -> Mapping[str, Any]:
 
     os_release = read_os_release(os_release_path)
     if os_release:
-        facts["os_release"] = MappingProxyType(os_release)
+        facts["os_release"] = os_release
         if "ID" in os_release:
             facts["distro_id"] = os_release["ID"]
         if "VERSION_ID" in os_release:
@@ -142,4 +143,4 @@ def collect_facts(os_release_path: Path = OS_RELEASE_PATH) -> Mapping[str, Any]:
     if mounts:
         facts["mounts"] = mounts
 
-    return MappingProxyType(facts)
+    return AttrMapping({key: wrap_attr(value, frozen=True) for key, value in facts.items()})

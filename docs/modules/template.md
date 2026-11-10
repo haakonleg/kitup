@@ -53,9 +53,8 @@ PasswordAuthentication no
 Templates receive three things:
 
 - `vars` — the merged variable values for the current task, including any
-  bundle-scoped values, available as attributes or items:
-  `{{ vars.SSH_PORT }}` or `{{ vars["SSH_PORT"] }}`. Nested dictionaries work
-  the same way: `{{ vars.SETTINGS.theme.name }}`.
+  bundle-scoped values: `{{ vars.SSH_PORT }}`, `{{ vars["SSH_PORT"] }}`, or
+  `{{ vars.SETTINGS.theme.name }}`.
 - `facts` — the host facts snapshot: `{{ facts.hostname }}`.
 - every key from `variables`, at the top level: `{{ workers }}`.
 

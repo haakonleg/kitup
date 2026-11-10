@@ -41,15 +41,15 @@ Each mount contains:
 ## Example
 
 ```python
-hostname = ctx.facts.get("hostname", "unknown")
+hostname = ctx.facts.hostname
 os_release = ctx.facts.get("os_release", {})
 
 if ctx.facts.get("distro_id") == "fedora":
-    ctx.note(f"Fedora {ctx.facts.get('version_id', '')}".strip())
+    ctx.note(f"Fedora {ctx.facts.version_id}".strip())
 
 for mount in ctx.facts.get("mounts", ()):
-    if mount["mount"] == "/":
-        ctx.note(f"root is {mount['bytes_used']} of {mount['bytes_total']} bytes used")
+    if mount.mount == "/":
+        ctx.note(f"root is {mount.bytes_used} of {mount.bytes_total} bytes used")
 ```
 
 Bytes are raw values suitable for calculations; format them for display as needed.
