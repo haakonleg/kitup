@@ -9,6 +9,7 @@ import tarfile
 import zipfile
 from collections.abc import Callable
 from compression import zstd
+from contextlib import contextmanager
 
 import pytest
 
@@ -473,6 +474,52 @@ def test_file_rewrites_changed_content(tmp_path):
 
     assert dest.read_bytes() == b"payload\n"
     assert len(ctx.changes) == 1
+    assert list(tmp_path.glob(".kitup-decompress-*")) == []
+
+
+def test_file_decompresses_source_once_when_rewriting(tmp_path, monkeypatch):
+    payload = b"payload\n" * 1024
+    source = tmp_path / "data.txt.gz"
+    source.write_bytes(gzip.compress(payload))
+    dest = tmp_path / "out.txt"
+    dest.write_bytes(b"old\n")
+
+    decompressed = 0
+    original = decompress._decompressed_stream
+
+    @contextmanager
+    def counting_stream(path):
+        nonlocal decompressed
+        with original(path) as stream:
+            read = stream.read
+
+            def counting_read(size=-1):
+                nonlocal decompressed
+                data = read(size)
+                decompressed += len(data)
+                return data
+
+            stream.read = counting_read
+            yield stream
+
+    monkeypatch.setattr(decompress, "_decompressed_stream", counting_stream)
+    decompress.file(make_context(tmp_path), source, dest)
+
+    assert dest.read_bytes() == payload
+    assert decompressed == len(payload)
+
+
+def test_file_discards_staged_copy_when_content_matches(tmp_path):
+    source = tmp_path / "data.txt.gz"
+    source.write_bytes(gzip.compress(b"payload\n"))
+    dest = tmp_path / "out.txt"
+    dest.write_bytes(b"payload\n")
+
+    ctx = make_context(tmp_path)
+    decompress.file(ctx, source, dest)
+
+    assert ctx.changes == []
+    assert list(tmp_path.glob(".kitup-decompress-*")) == []
 
 
 def test_file_preserves_or_overrides_existing_modes(tmp_path):

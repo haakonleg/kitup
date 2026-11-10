@@ -168,6 +168,7 @@ def file(
     source = ctx.resolve_source(src)
     _require_source(source, "compressed source")
     _reject_archive(source)
+    # Validate the compression format even when a dry run skips decompression.
     with _translate_decompression_errors(source), _decompressed_stream(source):
         pass
     target = _single_destination(source, dest)
@@ -182,23 +183,27 @@ def file(
     else:
         file_actions.require_parent_local(target)
 
-    needs_write = info is None
-    if info is not None:
-        with _translate_decompression_errors(source), _decompressed_stream(source) as stream:
-            needs_write = not _stream_matches(target, stream)
-
-    if not needs_write:
-        if _reconcile_metadata(target, info, mode=mode, dry_run=ctx.dry_run):
-            return ctx.changed(_file_change(target, source, changed=True))
-        return ctx.changed(_file_change(target, source, changed=False))
-
     if ctx.dry_run:
-        return ctx.changed(_file_change(target, source, changed=True))
-
-    with _translate_decompression_errors(source):
-        temporary = _decompress_to_temp(source, target.parent)
-    _install_temp(temporary, target, mode=mode, default_mode=0o644)
-    return ctx.changed(_file_change(target, source, changed=True))
+        if info is None:
+            changed = True
+        else:
+            with _translate_decompression_errors(source), _decompressed_stream(source) as stream:
+                matches = _stream_matches(target, stream)
+            changed = not matches or _reconcile_metadata(target, info, mode=mode, dry_run=True)
+    else:
+        # Decompress once into a staged file, then compare it with the target so
+        # a rewrite never decompresses the source a second time.
+        with _translate_decompression_errors(source):
+            temporary = _decompress_to_temp(source, target.parent)
+        try:
+            if info is not None and _files_match(target, temporary):
+                changed = _reconcile_metadata(target, info, mode=mode, dry_run=False)
+            else:
+                _install_temp(temporary, target, mode=mode, default_mode=0o644)
+                changed = True
+        finally:
+            temporary.unlink(missing_ok=True)
+    return ctx.changed(_file_change(target, source, changed=changed))
 
 
 def _archive_result(
@@ -392,6 +397,15 @@ def _member_matches(
         raise
     except _ARCHIVE_ERRORS as exc:
         raise TaskFailed(f"could not read archive member {member.name!r}: {exc}") from exc
+
+
+def _files_match(path: Path, other: Path) -> bool:
+    """Return whether two regular files have identical contents."""
+    try:
+        with other.open("rb") as stream:
+            return _stream_matches(path, stream)
+    except OSError as exc:
+        raise TaskFailed(f"could not read {other}: {exc}") from exc
 
 
 def _stream_matches(path: Path, stream: Any) -> bool:
