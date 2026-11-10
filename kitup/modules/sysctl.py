@@ -115,7 +115,8 @@ def _normalize_ws(value: str) -> str:
 
 def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> CallResult:
     pattern = ini.option_re(name)
-    text = file_actions.read_text(ctx, target, sudo=True)
+    snapshot = file_actions.read_snapshot(ctx, target, sudo=True)
+    text = snapshot.text(target)
     lines = text.splitlines(keepends=True)
     matches = [line for line in lines if pattern.match(line) is not None]
     if len(matches) == 1 and _entry_value(matches[0]) == _normalize_ws(desired):
@@ -134,8 +135,8 @@ def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> Cal
     return file_actions.apply_text(
         ctx,
         target,
-        text,
         "".join(remaining),
+        snapshot=snapshot,
         action="sysctl.key",
         summary=f"set {name} in {target}",
         unchanged_summary=f"ensure {name} in {target}",
@@ -153,13 +154,14 @@ def _entry_value(line: str) -> str:
 
 def _remove_entry(ctx: TaskContext, target: Path, name: str) -> CallResult:
     pattern = ini.option_re(name)
-    text = file_actions.read_text(ctx, target, sudo=True)
+    snapshot = file_actions.read_snapshot(ctx, target, sudo=True)
+    text = snapshot.text(target)
     new_text = "".join(line for line in text.splitlines(keepends=True) if pattern.match(line) is None)
     return file_actions.apply_text(
         ctx,
         target,
-        text,
         new_text,
+        snapshot=snapshot,
         action="sysctl.key",
         summary=f"remove {name} from {target}",
         unchanged_summary=f"ensure {name} is absent from {target}",

@@ -56,6 +56,32 @@ class FileInfo:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class FileSnapshot:
+    """Metadata and content read once for a path.
+
+    ``content`` is ``None`` when the path is missing or is not a regular file,
+    so callers can pass a snapshot to an apply helper without reading again.
+    """
+
+    info: FileInfo | None
+    content: bytes | None = None
+
+    def text(self, path: Path) -> str:
+        """Return the content as UTF-8 text, validating that it is a regular file."""
+        if self.info is not None:
+            if self.info.is_dir:
+                raise TaskFailed(f"path is a directory: {path}")
+            if self.info.is_symlink:
+                raise TaskFailed(f"refusing to edit symlink: {path}")
+            if not self.info.is_file:
+                raise TaskFailed(f"path is not a regular file: {path}")
+        try:
+            return (self.content or b"").decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise TaskFailed(f"not a UTF-8 text file: {path}") from exc
+
+
 def privileged(ctx: TaskContext, *, sudo: bool) -> bool:
     """Return whether an operation should use the privileged worker."""
     return sudo and not ctx.sudo.is_root
@@ -214,25 +240,12 @@ def read_bytes(
         raise TaskFailed(f"could not read {path}: {exc}") from exc
 
 
-def read_text(ctx: TaskContext, path: Path, *, sudo: bool) -> str:
-    """Read a regular UTF-8 text file, returning ``""`` when it is missing.
-
-    Directories, symlinks, other non-regular files, and non-UTF-8 content
-    raise ``TaskFailed``.
-    """
+def read_snapshot(ctx: TaskContext, path: Path, *, sudo: bool) -> FileSnapshot:
+    """Stat and read a path once for a later apply call."""
     info = stat(ctx, path, sudo=sudo)
-    if info is None:
-        return ""
-    if info.is_dir:
-        raise TaskFailed(f"path is a directory: {path}")
-    if info.is_symlink:
-        raise TaskFailed(f"refusing to edit symlink: {path}")
-    if not info.is_file:
-        raise TaskFailed(f"path is not a regular file: {path}")
-    try:
-        return read_bytes(ctx, path, info, sudo=sudo).decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise TaskFailed(f"not a UTF-8 text file: {path}") from exc
+    if info is None or not info.is_file:
+        return FileSnapshot(info)
+    return FileSnapshot(info, read_bytes(ctx, path, info, sudo=sudo))
 
 
 def apply_bytes(
@@ -248,63 +261,61 @@ def apply_bytes(
     data: dict[str, object],
     sudo: bool,
     unchanged_summary: str | None = None,
+    snapshot: FileSnapshot | None = None,
 ) -> CallResult:
     """Write bytes idempotently, returning the resulting call.
 
     Existing symlinks are replaced rather than followed. ``mode=None``
     preserves an existing mode and uses ``0o644`` for new files.
     ``unchanged_summary`` describes the desired state when nothing changes.
+    ``snapshot`` is the stat and content the caller already read for ``path``;
+    when omitted, the path is stat'ed and read once here.
     """
-    info = stat(ctx, path, sudo=sudo)
-    is_link = info.is_symlink if info is not None else False
+    if snapshot is None:
+        snapshot = read_snapshot(ctx, path, sudo=sudo)
+    info = snapshot.info
+    is_link = info is not None and info.is_symlink
     if info is not None and info.is_dir and not is_link:
         raise TaskFailed(f"path is a directory: {path}")
     if info is not None and not is_link and not info.is_file:
         raise TaskFailed(f"path is not a regular file: {path}")
 
-    old = read_bytes(ctx, path, info, sudo=sudo) if info is not None and not is_link else None
+    old = snapshot.content
     content_differs = is_link or old != content
+    if not content_differs:
+        return reconcile_metadata(
+            ctx,
+            path,
+            info,
+            action=action,
+            mode=mode,
+            owner=owner,
+            group=group,
+            summary=summary,
+            unchanged_summary=unchanged_summary,
+            data=data,
+            sudo=sudo,
+        )
+
     resolved = mode
     if resolved is None:
         resolved = info.mode if info is not None and not is_link else 0o644
-    metadata_changed = (
-        info is None
-        or is_link
-        or metadata_differs(
-            info,
-            resolved,
-            owner,
-            group,
-        )
-    )
-    if not content_differs and not metadata_changed:
-        return CallResult(
-            action=action,
-            changed=False,
-            summary=unchanged_summary or summary,
-            **data,
-        )
-
-    if content_differs:
-        _emit_diff(ctx, path, old, content)
+    _emit_diff(ctx, path, old, content)
     if ctx.dry_run:
         resolve_metadata(owner, group)
         return CallResult(action=action, changed=True, summary=summary, **data)
 
     require_parent(ctx, path, sudo=sudo)
-    if content_differs:
-        _write_bytes(ctx, path, content, resolved, owner, group, sudo=sudo)
-    else:
-        apply_metadata_ctx(ctx, path, resolved, owner, group, sudo=sudo)
+    _write_bytes(ctx, path, content, resolved, owner, group, sudo=sudo)
     return CallResult(action=action, changed=True, summary=summary, **data)
 
 
 def apply_text(
     ctx: TaskContext,
     path: Path,
-    old_text: str,
     new_text: str,
     *,
+    snapshot: FileSnapshot,
     action: str,
     summary: str,
     data: dict[str, object],
@@ -313,10 +324,12 @@ def apply_text(
 ) -> CallResult:
     """Write text idempotently, preserving the metadata of an existing file.
 
+    ``snapshot`` is the stat and content the caller already read for ``path``.
     Identical text returns a ``changed=False`` call without touching the file;
     otherwise the write goes through :func:`apply_bytes`, which handles
     ``--dry-run``, diffs, and privileged writes. New files get mode ``0o644``.
     """
+    old_text = snapshot.text(path)
     if new_text == old_text:
         return CallResult(action=action, changed=False, summary=unchanged_summary or summary, **data)
     try:
@@ -335,6 +348,7 @@ def apply_text(
         data=data,
         sudo=sudo,
         unchanged_summary=unchanged_summary,
+        snapshot=snapshot,
     )
 
 
@@ -363,9 +377,10 @@ def apply_ini(
     """
     if value is not None and option is None:
         raise TaskFailed("ini value requires an option")
-    if not create and stat(ctx, target, sudo=sudo) is None:
+    snapshot = read_snapshot(ctx, target, sudo=sudo)
+    if not create and snapshot.info is None:
         raise TaskFailed(f"file does not exist and create=False: {target}")
-    text = read_text(ctx, target, sudo=sudo)
+    text = snapshot.text(target)
     lines = text.splitlines(keepends=True)
 
     where = f"[{section}] of {target}" if section is not None else str(target)
@@ -403,8 +418,8 @@ def apply_ini(
         return apply_text(
             ctx,
             target,
-            text,
             new_text,
+            snapshot=snapshot,
             action=action,
             summary=summary,
             data=data,
@@ -439,6 +454,37 @@ def apply_metadata_ctx(
         raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not update metadata for {path}: {exc}") from exc
+
+
+def reconcile_metadata(
+    ctx: TaskContext,
+    path: Path,
+    info: FileInfo | None,
+    *,
+    action: str,
+    mode: int | None,
+    owner: str | int | None,
+    group: str | int | None,
+    summary: str,
+    data: dict[str, object],
+    sudo: bool,
+    unchanged_summary: str | None = None,
+) -> CallResult:
+    """Reconcile metadata of an existing path without reading its content.
+
+    ``info`` is the result of :func:`stat`; ``None`` means the path is missing,
+    which is reported as no change. ``summary`` describes the changed state and
+    ``unchanged_summary`` the desired state when nothing changes.
+    """
+    if info is not None:
+        resolved = info.mode if mode is None else mode
+        if metadata_differs(info, resolved, owner, group):
+            if ctx.dry_run:
+                resolve_metadata(owner, group)
+                return CallResult(action=action, changed=True, summary=summary, **data)
+            apply_metadata_ctx(ctx, path, resolved, owner, group, sudo=sudo)
+            return CallResult(action=action, changed=True, summary=summary, **data)
+    return CallResult(action=action, changed=False, summary=unchanged_summary or summary, **data)
 
 
 def remove(

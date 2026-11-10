@@ -102,7 +102,7 @@ def dependencies(
         return ctx.changed(_absent_no_change(wanted, project_path, state))
 
     initialized = _init_project(ctx, pyproject_info, pyproject, project_path, python)
-    text, lines, table, key = _read_table(ctx, pyproject, initialized=initialized, state=state, group=group)
+    snapshot, lines, table, key = _read_table(ctx, pyproject, initialized=initialized, state=state, group=group)
     current_raw = toml_ops.array_items(lines, table, key)
     if state == "absent" and group is not None and current_raw is None:
         # the group is not defined, so there is nothing to remove and a
@@ -155,7 +155,7 @@ def dependencies(
         return ctx.changed(result)
 
     if edits_needed:
-        _write_table(ctx, pyproject, text, lines, table, key, desired, result.summary, data)
+        _write_table(ctx, pyproject, snapshot, lines, table, key, desired, result.summary, data)
     if need_sync:
         _sync_project(ctx, sync_base, upgrade_args, extra, project_path, check_args, lock_args)
     return ctx.changed(result)
@@ -422,14 +422,15 @@ def _read_table(
     initialized: bool,
     state: UvState,
     group: str | None,
-) -> tuple[str, list[str], str, str]:
-    """Read ``pyproject.toml`` and return ``(text, lines, table, key)`` for the edited table."""
-    text = file_actions.read_text(ctx, pyproject, sudo=False)
+) -> tuple[file_actions.FileSnapshot, list[str], str, str]:
+    """Read ``pyproject.toml`` and return ``(snapshot, lines, table, key)`` for the edited table."""
+    snapshot = file_actions.read_snapshot(ctx, pyproject, sudo=False)
+    text = snapshot.text(pyproject)
     if not initialized and state != "absent" and group is None:
         _require_project_table(text, pyproject)
     table = "dependency-groups" if group is not None else "project"
     key = group if group is not None else "dependencies"
-    return text, toml_ops.split_lines(text), table, key
+    return snapshot, toml_ops.split_lines(text), table, key
 
 
 def _project_converged(
@@ -454,7 +455,7 @@ def _project_converged(
 def _write_table(
     ctx: TaskContext,
     pyproject: Path,
-    text: str,
+    snapshot: file_actions.FileSnapshot,
     lines: list[str],
     table: str,
     key: str,
@@ -468,7 +469,14 @@ def _write_table(
     if new_text and not new_text.endswith("\n"):
         new_text += toml_ops.newline_of(lines)
     file_actions.apply_text(
-        ctx, pyproject, text, new_text, action="uv.dependencies", summary=summary, data=data, sudo=False
+        ctx,
+        pyproject,
+        new_text,
+        snapshot=snapshot,
+        action="uv.dependencies",
+        summary=summary,
+        data=data,
+        sudo=False,
     )
 
 

@@ -63,17 +63,35 @@ def file(
             )
         )
 
-    info = file_actions.stat(ctx, target, sudo=sudo)
     if content is None:
+        info = file_actions.stat(ctx, target, sudo=sudo)
         if info is not None and info.is_symlink:
             raise TaskFailed(f"refusing to manage symlink as file: {target}")
         if info is not None and info.is_dir:
             raise TaskFailed(f"path is a directory: {target}")
         if info is not None and not info.is_file:
             raise TaskFailed(f"path is not a regular file: {target}")
-        data = file_actions.read_bytes(ctx, target, info, sudo=sudo) if info is not None else b""
-        summary = f"create {target}" if info is None else f"update metadata for {target}"
+        if info is not None:
+            return ctx.changed(
+                file_actions.reconcile_metadata(
+                    ctx,
+                    target,
+                    info,
+                    action="files.file",
+                    mode=mode,
+                    owner=owner,
+                    group=group,
+                    summary=f"update metadata for {target}",
+                    unchanged_summary=f"ensure file {target}",
+                    data={"path": str(target)},
+                    sudo=sudo,
+                )
+            )
+        snapshot = file_actions.FileSnapshot(None)
+        data = b""
+        summary = f"create {target}"
     else:
+        snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
         data = content.encode()
         summary = f"write {target}"
 
@@ -83,6 +101,7 @@ def file(
             ctx,
             target,
             data,
+            snapshot=snapshot,
             action="files.file",
             mode=mode,
             owner=owner,
@@ -123,8 +142,8 @@ def copy(
     source_info = file_actions.stat(ctx, source, sudo=sudo)
     if source_info is None or source_info.is_symlink or not source_info.is_file:
         raise TaskFailed(f"copy source is not a regular file: {source}")
-    target_info = file_actions.stat(ctx, target, sudo=sudo)
-    if target_info is not None and target_info.is_dir:
+    target_snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
+    if target_snapshot.info is not None and target_snapshot.info.is_dir:
         raise TaskFailed(f"destination is a directory: {target}")
 
     file_actions.require_parent(ctx, target, sudo=sudo)
@@ -133,6 +152,7 @@ def copy(
             ctx,
             target,
             file_actions.read_bytes(ctx, source, source_info, sudo=sudo),
+            snapshot=target_snapshot,
             action="files.copy",
             mode=source_info.mode if mode is None else mode,
             owner=owner,
@@ -177,17 +197,18 @@ def move(
     target_info = file_actions.stat(ctx, target, sudo=sudo)
 
     def reconcile(*, unchanged_summary: str | None = None) -> CallResult:
-        return _reconcile_metadata(
+        return file_actions.reconcile_metadata(
             ctx,
             target,
             target_info,
             action="files.move",
-            src=source,
             mode=mode,
             owner=owner,
             group=group,
+            summary=f"update metadata for {target}",
+            unchanged_summary=unchanged_summary or f"ensure metadata for {target}",
+            data={"dest": str(target), "src": str(source)},
             sudo=sudo,
-            unchanged_summary=unchanged_summary,
         )
 
     if source_info is None:
@@ -262,7 +283,8 @@ def line(
         pattern = require_regex(match, "line match")
 
     target = expand_path(path, error=TaskFailed)
-    text = file_actions.read_text(ctx, target, sudo=sudo)
+    snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
+    text = snapshot.text(target)
     lines = text.splitlines(keepends=True)
     desired = line
 
@@ -290,8 +312,8 @@ def line(
         file_actions.apply_text(
             ctx,
             target,
-            text,
             new_text,
+            snapshot=snapshot,
             action="files.line",
             summary=summary,
             unchanged_summary=unchanged_summary,
@@ -318,7 +340,8 @@ def block(
     require_bool(sudo, "block sudo")
 
     target = expand_path(path, error=TaskFailed)
-    text = file_actions.read_text(ctx, target, sudo=sudo)
+    snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
+    text = snapshot.text(target)
     lines = text.splitlines(keepends=True)
     begin = f"# BEGIN {marker}\n"
     end = f"# END {marker}\n"
@@ -355,8 +378,8 @@ def block(
         file_actions.apply_text(
             ctx,
             target,
-            text,
             new_text,
+            snapshot=snapshot,
             action="files.block",
             summary=summary,
             unchanged_summary=unchanged_summary,
@@ -565,14 +588,21 @@ def directory(
         )
         return _directory_result(ctx, target, f"mkdir {target}")
 
-    resolved = info.mode if mode is None else mode
-    if file_actions.metadata_differs(info, resolved, owner, group):
-        if ctx.dry_run:
-            file_actions.resolve_metadata(owner, group)
-            return _directory_result(ctx, target, f"chmod {target}")
-        file_actions.apply_metadata_ctx(ctx, target, resolved, owner, group, sudo=sudo)
-        return _directory_result(ctx, target, f"chmod {target}")
-    return _directory_result(ctx, target, f"ensure directory {target}", changed=False)
+    return ctx.changed(
+        file_actions.reconcile_metadata(
+            ctx,
+            target,
+            info,
+            action="files.directory",
+            mode=mode,
+            owner=owner,
+            group=group,
+            summary=f"chmod {target}",
+            unchanged_summary=f"ensure directory {target}",
+            data={"path": str(target)},
+            sudo=sudo,
+        )
+    )
 
 
 def symlink(
@@ -630,42 +660,6 @@ def _move(ctx: TaskContext, source: Path, target: Path, *, sudo: bool) -> None:
         raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not move {source} to {target}: {exc}") from exc
-
-
-def _reconcile_metadata(
-    ctx: TaskContext,
-    target: Path,
-    info: file_actions.FileInfo | None,
-    *,
-    action: str,
-    src: Path,
-    mode: int | None,
-    owner: str | int | None,
-    group: str | int | None,
-    sudo: bool,
-    unchanged_summary: str | None = None,
-) -> CallResult:
-    data = {"dest": str(target), "src": str(src)}
-    if info is None or (mode is None and owner is None and group is None):
-        return CallResult(
-            action=action,
-            changed=False,
-            summary=unchanged_summary or f"ensure metadata for {target}",
-            **data,
-        )
-    resolved_mode = info.mode if mode is None else mode
-    if not file_actions.metadata_differs(info, resolved_mode, owner, group):
-        return CallResult(
-            action=action,
-            changed=False,
-            summary=unchanged_summary or f"ensure metadata for {target}",
-            **data,
-        )
-    if ctx.dry_run:
-        file_actions.resolve_metadata(owner, group)
-        return CallResult(action=action, changed=True, summary=f"update metadata for {target}", **data)
-    file_actions.apply_metadata_ctx(ctx, target, resolved_mode, owner, group, sudo=sudo)
-    return CallResult(action=action, changed=True, summary=f"update metadata for {target}", **data)
 
 
 def _matching_line(lines: list[str], desired: str, match: re.Pattern[str] | None) -> int | None:

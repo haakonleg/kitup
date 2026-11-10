@@ -270,10 +270,11 @@ def apply_toml_key(
     on a missing file is a no-op. The returned call is not recorded; the caller
     records it with ``ctx.changed``.
     """
-    exists = file_actions.stat(ctx, target, sudo=sudo) is not None
+    snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
+    exists = snapshot.info is not None
     if not create and not exists:
         raise TaskFailed(f"file does not exist and create=False: {target}")
-    text = file_actions.read_text(ctx, target, sudo=sudo)
+    text = snapshot.text(target)
     lines = split_lines(text)
     where = f"[{table}] of {target}" if table is not None else str(target)
     stored: object = value
@@ -319,8 +320,8 @@ def apply_toml_key(
     return file_actions.apply_text(
         ctx,
         target,
-        text,
         new_text,
+        snapshot=snapshot,
         action=action,
         summary=summary,
         data=data,

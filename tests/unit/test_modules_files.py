@@ -259,6 +259,51 @@ def test_privileged_symlink_copy_and_metadata_use_worker(tmp_path):
         ctx.close()
 
 
+class CountingWorker:
+    """Record worker actions while delegating to the real worker."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.actions = []
+
+    def request(self, request):
+        self.actions.append((request.action, request.params.get("path")))
+        return self.inner.request(request)
+
+    def close(self):
+        self.inner.close()
+
+
+def test_file_without_content_reconciles_metadata_without_reading(tmp_path):
+    path = tmp_path / "existing"
+    path.write_text("keep me\n")
+    ctx = privileged_context(tmp_path)
+    worker = CountingWorker(ctx.privileged_worker)
+    ctx.privileged_worker = worker  # type: ignore[assignment]
+
+    try:
+        files.file(ctx, path, mode=0o600, sudo=True)
+    finally:
+        ctx.close()
+
+    assert path.read_text() == "keep me\n"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert "read" not in [action for action, _ in worker.actions]
+
+
+def test_file_without_content_creates_an_empty_file(tmp_path):
+    path = tmp_path / "new"
+    ctx = privileged_context(tmp_path)
+
+    try:
+        files.file(ctx, path, sudo=True)
+    finally:
+        ctx.close()
+
+    assert path.read_text() == ""
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
 class ReadFailureWorker:
     """Simulate a privileged worker whose read action fails."""
 
@@ -1214,6 +1259,23 @@ def test_ini_uses_privileged_worker(tmp_path):
         ctx.close()
 
 
+def test_ini_stats_and_reads_the_target_once(tmp_path):
+    path = tmp_path / "root-owned.conf"
+    path.write_text("[s]\na = 1\n")
+    ctx = privileged_context(tmp_path)
+    worker = CountingWorker(ctx.privileged_worker)
+    ctx.privileged_worker = worker  # type: ignore[assignment]
+
+    try:
+        files.ini(ctx, path, section="s", option="a", value="2", sudo=True)
+    finally:
+        ctx.close()
+
+    target_actions = [action for action, target in worker.actions if target == str(path)]
+    assert target_actions.count("stat") == 1
+    assert target_actions.count("read") == 1
+
+
 def test_ini_validates_arguments_before_touching_the_file(tmp_path):
     ctx = context(tmp_path)
 
@@ -1684,6 +1746,23 @@ def test_toml_uses_privileged_worker(tmp_path):
         assert ctx.sudo.refresh_count > 0
     finally:
         ctx.close()
+
+
+def test_toml_stats_and_reads_the_target_once(tmp_path):
+    path = tmp_path / "root-owned.toml"
+    path.write_text("a = 1\n")
+    ctx = privileged_context(tmp_path)
+    worker = CountingWorker(ctx.privileged_worker)
+    ctx.privileged_worker = worker  # type: ignore[assignment]
+
+    try:
+        files.toml(ctx, path, key="a", value=2, sudo=True)
+    finally:
+        ctx.close()
+
+    target_actions = [action for action, target in worker.actions if target == str(path)]
+    assert target_actions.count("stat") == 1
+    assert target_actions.count("read") == 1
 
 
 def test_toml_validates_arguments_before_touching_the_file(tmp_path):
