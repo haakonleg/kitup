@@ -106,5 +106,4 @@ LOG_LEVEL={{ vars.LOG_LEVEL | default("info") }}
 ## Notes
 
 - Template sources must be regular UTF-8 text files.
-- Very large files are not supported; use [`command`](command.md) for those.
 - Requires the Jinja2 Python library.

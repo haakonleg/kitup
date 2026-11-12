@@ -160,7 +160,8 @@ def config(
     elif value is not None:
         raise TaskFailed("config state 'absent' does not take a value")
 
-    if state == "present" and file_actions.stat(ctx, target, sudo=sudo) is None:
+    snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
+    if state == "present" and snapshot.info is None:
         file_actions.ensure_parent(ctx, target, sudo=sudo)
 
     return ctx.changed(
@@ -175,6 +176,7 @@ def config(
             action="pip.config",
             sudo=sudo,
             option_pattern=ini_ops.canonical_option_re(option),
+            snapshot=snapshot,
         )
     )
 

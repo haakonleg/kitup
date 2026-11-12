@@ -113,7 +113,7 @@ Add, replace, or remove a line.
 - `match=None` compares the full line; otherwise `match` is a regular expression.
 - `state="present"` replaces the first match or appends the line.
 - `state="absent"` removes all matches.
-- `sudo=True` edits the file through the privileged worker.
+- `sudo=True` edits the file as root.
 
 ### Result fields
 
@@ -136,7 +136,7 @@ content
   contain line breaks.
 - `content` — block body. A trailing newline is added when missing.
 - `state="present"` creates or updates the block; `"absent"` removes it.
-- `sudo=True` edits the file through the privileged worker.
+- `sudo=True` edits the file as root.
 
 Malformed or duplicate markers raise a task failure.
 
@@ -169,7 +169,7 @@ Set or remove one option in an INI-style file.
   the whole section when `option=None`.
 - `create=True` creates a missing file with mode `0o644`; `create=False` fails
   when the file does not exist.
-- `sudo=True` edits the file through the privileged worker.
+- `sudo=True` edits the file as root.
 
 With `match` and `state="present"`, a new section is appended only if the new
 `option = value` line itself satisfies `match`; otherwise the call fails. To
@@ -211,7 +211,7 @@ Set or remove one key in a TOML file, table by table.
 - `create=True` creates a missing file with mode `0o644` (parents `0o755`);
   `create=False` fails when the file does not exist. An absent edit on a
   missing file is a no-op.
-- `sudo=True` edits the file through the privileged worker.
+- `sudo=True` edits the file as root.
 
 Array-of-tables (`[[...]]`) cannot be edited and are rejected.
 
@@ -256,7 +256,7 @@ are never replaced.
 
 - `target` — symlink target.
 - `path` — symlink path.
-- `sudo=True` creates the symlink through the privileged worker.
+- `sudo=True` creates the symlink as root.
 
 ### Result fields
 
@@ -272,5 +272,3 @@ are never replaced.
 - Only regular files are read or written. Non-UTF-8 files are rejected when
   editing lines, blocks, or INI options.
 - `sudo=True` runs the operation as root; otherwise it runs as the current user.
-- Very large privileged reads and writes are rejected. Use `command` for very large
-  files.

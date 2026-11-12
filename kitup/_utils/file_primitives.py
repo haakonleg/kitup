@@ -8,6 +8,7 @@ avoid package imports. For context-aware operations, use
 """
 
 import contextlib
+import errno
 import grp
 import hashlib
 import os
@@ -16,7 +17,7 @@ import shutil
 import stat
 import tempfile
 from collections.abc import Callable
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Final
 
 
 def resolve_owner(owner: str | int | None) -> int | None:
@@ -61,10 +62,58 @@ def stat_path(path: str | os.PathLike[str], *, follow: bool = False) -> dict[str
     return result
 
 
-def read_path(path: str | os.PathLike[str]) -> bytes:
-    """Read a file as bytes."""
-    with open(path, "rb") as stream:
+CHUNK_SIZE: Final = 1024 * 1024
+_NOT_REGULAR_ERRNOS: Final = frozenset(
+    {
+        errno.EISDIR,
+        errno.ENOTDIR,
+        errno.ELOOP,
+        errno.ENXIO,
+        errno.ENODEV,
+    }
+)
+
+
+def _open_regular(path: str | os.PathLike[str]) -> BinaryIO:
+    """Open a regular file without following symlinks or blocking on FIFOs."""
+    try:
+        handle = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        if exc.errno in _NOT_REGULAR_ERRNOS:
+            raise ValueError(f"not a regular file: {path}") from exc
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(handle).st_mode):
+            raise ValueError(f"not a regular file: {path}")
+        return os.fdopen(handle, "rb")
+    except BaseException:
+        os.close(handle)
+        raise
+
+
+def read_regular_path(path: str | os.PathLike[str]) -> bytes:
+    """Read a regular file as bytes, rejecting symlinks and special files."""
+    with _open_regular(path) as stream:
         return stream.read()
+
+
+def _streams_equal(left: BinaryIO, right: BinaryIO) -> bool:
+    while True:
+        left_chunk = left.read(CHUNK_SIZE)
+        right_chunk = right.read(CHUNK_SIZE)
+        if left_chunk != right_chunk:
+            return False
+        if not left_chunk:
+            return True
+
+
+def compare_paths(
+    source: str | os.PathLike[str],
+    destination: str | os.PathLike[str],
+) -> bool:
+    """Return whether two regular files have identical content."""
+    with _open_regular(source) as left, _open_regular(destination) as right:
+        return _streams_equal(left, right)
 
 
 def apply_metadata(
@@ -77,7 +126,7 @@ def apply_metadata(
     preserve: bool = False,
 ) -> None:
     """Apply ownership and mode to a path, optionally preserving owner/group."""
-    if info is None:
+    if info is None and (preserve or mode is None):
         info = stat_path(path)
     uid = resolve_owner(owner)
     gid = resolve_group(group)
@@ -116,14 +165,17 @@ def atomic_write_path(
     owner: str | int | None = None,
     group: str | int | None = None,
     default_mode: int = 0o644,
+    info: dict[str, Any] | None = None,
 ) -> None:
     """Atomically replace a path using a callback that writes a binary stream.
 
     Existing metadata is preserved unless overridden. The temporary file is
     created beside the destination and replaced into place after ``writer``
-    returns and the stream is flushed.
+    returns and the stream is flushed. ``info`` is an existing stat result for
+    ``path`` when the caller already has one.
     """
-    info = stat_path(path)
+    if info is None:
+        info = stat_path(path)
     if info is not None and info["is_dir"]:
         raise IsADirectoryError(path)
 
@@ -139,7 +191,6 @@ def atomic_write_path(
         with os.fdopen(handle, "wb") as stream:
             writer(stream)
             stream.flush()
-            os.fsync(stream.fileno())
         _apply_replacement_metadata(path, temp, info, resolved_mode, owner, group)
         os.replace(temp, path)
     except BaseException:
@@ -162,6 +213,46 @@ def write_path(
         stream.write(data)
 
     atomic_write_path(path, write, mode=mode, owner=owner, group=group)
+
+
+def write_stream_path(
+    path: str | os.PathLike[str],
+    source: BinaryIO,
+    *,
+    mode: int | None = None,
+    owner: str | int | None = None,
+    group: str | int | None = None,
+    info: dict[str, Any] | None = None,
+) -> None:
+    """Atomically replace a path with the contents of a binary stream."""
+
+    def write(stream: BinaryIO) -> None:
+        shutil.copyfileobj(source, stream, CHUNK_SIZE)
+
+    atomic_write_path(path, write, mode=mode, owner=owner, group=group, info=info)
+
+
+def copy_path(
+    source: str | os.PathLike[str],
+    destination: str | os.PathLike[str],
+    *,
+    mode: int | None = None,
+    owner: str | int | None = None,
+    group: str | int | None = None,
+) -> None:
+    """Atomically copy a regular file, defaulting to the source mode."""
+    source_info = stat_path(source)
+    if source_info is None or source_info["is_symlink"] or not source_info["is_file"]:
+        raise ValueError(f"copy source is not a regular file: {source}")
+    info = stat_path(destination)
+    if info is not None:
+        if info["is_dir"]:
+            raise IsADirectoryError(destination)
+        if not info["is_symlink"] and not info["is_file"]:
+            raise ValueError(f"copy destination is not a regular file: {destination}")
+    with _open_regular(source) as stream:
+        resolved_mode = stat.S_IMODE(os.fstat(stream.fileno()).st_mode) if mode is None else mode
+        write_stream_path(destination, stream, mode=resolved_mode, owner=owner, group=group, info=info)
 
 
 def move_path(
@@ -249,7 +340,8 @@ def mkdir_path(
 ) -> None:
     """Create one directory and apply metadata."""
     os.mkdir(path)
-    apply_metadata(path, mode, owner, group, preserve=False)
+    if mode is not None or owner is not None or group is not None:
+        apply_metadata(path, mode, owner, group, preserve=False)
 
 
 def symlink_path(target: str, path: str | os.PathLike[str]) -> None:

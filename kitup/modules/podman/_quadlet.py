@@ -93,6 +93,7 @@ def quadlet(
             unchanged_summary=f"ensure quadlet {name} in {path}",
             data={"path": str(path), "container": name},
             sudo=sudo,
+            check_parent=False,
         )
     )
 

@@ -461,7 +461,6 @@ def _write_temp(
         with os.fdopen(handle, "wb") as sink:
             write(sink)
             sink.flush()
-            os.fsync(sink.fileno())
         return temporary
     except BaseException:
         temporary.unlink(missing_ok=True)

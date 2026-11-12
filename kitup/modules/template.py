@@ -62,6 +62,7 @@ def file(
             unchanged_summary=f"ensure {target} from {source}",
             data={"dest": str(target), "src": str(source)},
             sudo=sudo,
+            check_parent=False,
         )
     )
 

@@ -1,4 +1,3 @@
-import base64
 import os
 import stat
 import threading
@@ -8,7 +7,6 @@ import pytest
 from kitup._privileged import PrivilegedWorker
 from kitup._privileged import client as client_module
 from kitup._privileged.protocol import Request, Response
-from kitup._privileged.worker import _read_limited
 from kitup._utils.file_primitives import stat_path
 from kitup.errors import TaskFailed
 from kitup.modules import files
@@ -37,8 +35,8 @@ def test_worker_stays_in_parent_session(ctx):
         worker.close()
 
 
-def test_worker_rejects_oversized_request_before_start(ctx, monkeypatch):
-    monkeypatch.setattr(client_module, "MAX_MESSAGE_BYTES", 10)
+def test_worker_rejects_oversized_header_before_start(ctx, monkeypatch):
+    monkeypatch.setattr(client_module, "MAX_HEADER_BYTES", 10)
     worker = PrivilegedWorker(ctx)
 
     try:
@@ -72,13 +70,19 @@ print('{"error":"fatal boom","fatal":true}', flush=True)
         worker.close()
 
 
-def test_read_limited_rejects_large_file(tmp_path):
-    path = tmp_path / "large"
-    path.write_bytes(b"x" * 1025)
+def test_worker_reports_startup_error(ctx, monkeypatch):
+    monkeypatch.setattr(
+        client_module,
+        "_embedded_script",
+        lambda: 'import sys\nprint(\'{"error":"boom"}\', flush=True)\n',
+    )
+    worker = PrivilegedWorker(ctx)
 
-    with pytest.raises(ValueError, match="too large"):
-        _read_limited(str(path), 1024)
-    assert _read_limited(str(path), 1025) == b"x" * 1025
+    try:
+        with pytest.raises(TaskFailed, match="boom"):
+            worker.start()
+    finally:
+        worker.close()
 
 
 def test_worker_file_actions(ctx, tmp_path):
@@ -92,22 +96,167 @@ def test_worker_file_actions(ctx, tmp_path):
                     "write",
                     {
                         "path": str(path),
-                        "content": base64.b64encode(b"data\n").decode(),
                         "mode": 0o600,
                     },
-                )
-            )
+                    content_length=5,
+                ),
+                content=b"data\n",
+            ).result
             == {}
         )
-        info = worker.request(Request("stat", {"path": str(path)}))
+        info = worker.request(Request("stat", {"path": str(path)})).result
         assert info["exists"] and info["is_file"] and info["mode"] == 0o600
         assert info["size"] == 5 and info["mtime_ns"] > 0
 
         read = worker.request(Request("read", {"path": str(path)}))
-        assert base64.b64decode(read["content"]) == b"data\n"
+        assert read.result["is_file"] is True
+        assert read.content == b"data\n"
 
-        assert worker.request(Request("remove", {"path": str(path)})) == {}
+        assert worker.request(Request("remove", {"path": str(path)})).result == {}
         assert not path.exists()
+    finally:
+        worker.close()
+
+
+def test_worker_reads_and_writes_empty_files(ctx, tmp_path):
+    path = tmp_path / "empty"
+    worker = PrivilegedWorker(ctx)
+
+    try:
+        worker.request(Request("write", {"path": str(path)}, content_length=0), content=b"")
+        read = worker.request(Request("read", {"path": str(path)}))
+        assert read.content == b""
+        assert read.content_length == 0
+    finally:
+        worker.close()
+
+
+def test_worker_round_trips_content_larger_than_the_header_limit(ctx, tmp_path):
+    path = tmp_path / "large"
+    content = b"x" * (2 * 1024 * 1024)
+    worker = PrivilegedWorker(ctx)
+
+    try:
+        worker.request(Request("write", {"path": str(path)}, content_length=len(content)), content=content)
+        read = worker.request(Request("read", {"path": str(path)}))
+        assert read.content == content
+        assert read.content_length == len(content)
+    finally:
+        worker.close()
+
+
+def test_worker_snapshot_skips_content_on_size_mismatch(ctx, tmp_path):
+    path = tmp_path / "file"
+    path.write_bytes(b"data\n")
+    worker = PrivilegedWorker(ctx)
+
+    try:
+        response = worker.request(Request("snapshot", {"path": str(path), "content_size": 5}))
+        assert response.result["is_file"] is True
+        assert response.content == b"data\n"
+
+        skipped = worker.request(Request("snapshot", {"path": str(path), "content_size": 1}))
+        assert skipped.result["is_file"] is True
+        assert skipped.content is None
+
+        forced = worker.request(Request("snapshot", {"path": str(path), "content_size": 1, "diff": True}))
+        assert forced.content == b"data\n"
+
+        missing = worker.request(Request("snapshot", {"path": str(tmp_path / "missing")}))
+        assert missing.result == {"exists": False}
+        assert missing.content is None
+    finally:
+        worker.close()
+
+
+def test_worker_compare_action(ctx, tmp_path):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    same = tmp_path / "same"
+    same.write_text("data\n")
+    different = tmp_path / "different"
+    different.write_text("other\n")
+    link = tmp_path / "link"
+    link.symlink_to(source)
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    worker = PrivilegedWorker(ctx)
+
+    try:
+        result = worker.request(Request("compare", {"source": str(source), "path": str(same)})).result
+        assert result["equal"] is True
+        assert result["source"]["is_file"] is True
+        assert result["target"]["is_file"] is True
+
+        assert (
+            worker.request(Request("compare", {"source": str(source), "path": str(different)})).result["equal"] is False
+        )
+        assert worker.request(Request("compare", {"source": str(source), "path": str(link)})).result["equal"] is False
+        assert (
+            worker.request(Request("compare", {"source": str(source), "path": str(directory)})).result["equal"] is False
+        )
+        missing = worker.request(Request("compare", {"source": str(source), "path": str(tmp_path / "missing")})).result
+        assert missing["equal"] is False
+        assert missing["target"] is None
+    finally:
+        worker.close()
+
+
+def test_worker_compare_rejects_non_regular_sources(ctx, tmp_path):
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(directory)
+    worker = PrivilegedWorker(ctx)
+
+    try:
+        with pytest.raises(TaskFailed, match="regular file"):
+            worker.request(Request("compare", {"source": str(directory), "path": str(tmp_path / "dest")}))
+        with pytest.raises(TaskFailed, match="regular file"):
+            worker.request(Request("compare", {"source": str(link), "path": str(tmp_path / "dest")}))
+    finally:
+        worker.close()
+
+
+def test_worker_copy_action(ctx, tmp_path):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    source.chmod(0o640)
+    destination = tmp_path / "destination"
+    worker = PrivilegedWorker(ctx)
+
+    try:
+        assert worker.request(Request("copy", {"source": str(source), "path": str(destination)})).result == {}
+        assert destination.read_text() == "data\n"
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o640
+
+        worker.request(Request("copy", {"source": str(source), "path": str(destination), "mode": 0o600}))
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+    finally:
+        worker.close()
+
+
+def test_worker_copy_replaces_symlink_and_rejects_directories(ctx, tmp_path):
+    source = tmp_path / "source"
+    source.write_text("new\n")
+    target = tmp_path / "target"
+    target.write_text("old\n")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    worker = PrivilegedWorker(ctx)
+
+    try:
+        worker.request(Request("copy", {"source": str(source), "path": str(link)}))
+        assert not link.is_symlink()
+        assert link.read_text() == "new\n"
+        assert target.read_text() == "old\n"
+
+        with pytest.raises(TaskFailed, match="directory"):
+            worker.request(Request("copy", {"source": str(source), "path": str(directory)}))
+        with pytest.raises(TaskFailed, match="regular file"):
+            worker.request(Request("copy", {"source": str(tmp_path / "missing"), "path": str(tmp_path / "dest")}))
     finally:
         worker.close()
 
@@ -119,7 +268,7 @@ def test_worker_move_action(ctx, tmp_path):
     worker = PrivilegedWorker(ctx)
 
     try:
-        assert worker.request(Request("move", {"source": str(source), "path": str(destination)})) == {}
+        assert worker.request(Request("move", {"source": str(source), "path": str(destination)})).result == {}
         assert not source.exists()
         assert destination.read_text() == "data\n"
     finally:
@@ -132,13 +281,13 @@ def test_worker_directory_metadata_and_symlink(ctx, tmp_path):
     worker = PrivilegedWorker(ctx)
 
     try:
-        assert worker.request(Request("mkdir", {"path": str(directory), "mode": 0o700})) == {}
+        assert worker.request(Request("mkdir", {"path": str(directory), "mode": 0o700})).result == {}
         assert stat.S_IMODE(directory.stat().st_mode) == 0o700
 
-        assert worker.request(Request("metadata", {"path": str(directory), "mode": 0o750})) == {}
+        assert worker.request(Request("metadata", {"path": str(directory), "mode": 0o750})).result == {}
         assert stat.S_IMODE(directory.stat().st_mode) == 0o750
 
-        assert worker.request(Request("symlink", {"path": str(link), "target": "target"})) == {}
+        assert worker.request(Request("symlink", {"path": str(link), "target": "target"})).result == {}
         assert link.is_symlink()
     finally:
         worker.close()
@@ -152,7 +301,7 @@ def test_worker_rejects_unknown_action_and_stays_alive(ctx, tmp_path):
         with pytest.raises(TaskFailed, match="unknown privileged action"):
             worker.request(Request("nope", {}))
 
-        worker.request(Request("write", {"path": str(path), "content": "", "mode": 0o600}))
+        worker.request(Request("write", {"path": str(path), "mode": 0o600}, content_length=0), content=b"")
         assert path.exists()
     finally:
         worker.close()
@@ -165,15 +314,26 @@ def test_worker_reports_malformed_request_lines(ctx):
     assert process is not None and process.stdin is not None
 
     try:
-        process.stdin.write("not json\n")
+        process.stdin.write(b"not json\n")
         process.stdin.flush()
-        response = Response.decode(worker._read_line(worker.timeout))
+        response = worker._read_response(worker.timeout)
         assert response.error is not None
         assert "invalid JSON" in response.error
+        assert response.fatal is True
+    finally:
+        worker.close()
 
-        process.stdin.write("\n")
+
+def test_worker_reports_empty_request_lines(ctx):
+    worker = PrivilegedWorker(ctx)
+    worker.start()
+    process = worker._process
+    assert process is not None and process.stdin is not None
+
+    try:
+        process.stdin.write(b"\n")
         process.stdin.flush()
-        response = Response.decode(worker._read_line(worker.timeout))
+        response = worker._read_response(worker.timeout)
         assert response.error == "empty request line"
         assert response.fatal is True
     finally:
@@ -212,11 +372,17 @@ class CaptureWorker:
     def __init__(self) -> None:
         self.requests: list[Request] = []
 
-    def request(self, request: Request):
+    def request(self, request: Request, *, content=None):
         self.requests.append(request)
         if request.action == "stat":
-            return stat_path(request.params["path"]) or {"exists": False}
-        return {}
+            return Response(result=stat_path(request.params["path"]) or {"exists": False})
+        if request.action == "snapshot":
+            path = request.params["path"]
+            info = stat_path(path)
+            if info is None:
+                return Response(result={"exists": False})
+            return Response(result=info, content_length=0, content=b"")
+        return Response(result={})
 
 
 def test_privileged_files_normalize_relative_paths(tmp_path, monkeypatch):
@@ -268,15 +434,28 @@ def test_worker_rejects_invalid_mode_and_ids(ctx, tmp_path):
 
     try:
         for params in (
-            {"path": str(path), "content": "", "mode": True},
-            {"path": str(path), "content": "", "mode": -1},
-            {"path": str(path), "content": "", "mode": 0o10000},
-            {"path": str(path), "content": "", "owner": -1},
-            {"path": str(path), "content": "", "owner": True},
+            {"path": str(path), "mode": True},
+            {"path": str(path), "mode": -1},
+            {"path": str(path), "mode": 0o10000},
+            {"path": str(path), "owner": -1},
+            {"path": str(path), "owner": True},
         ):
             with pytest.raises(TaskFailed, match=r"mode|owner"):
-                worker.request(Request("write", params))
+                worker.request(Request("write", params, content_length=0), content=b"")
         assert not path.exists()
+    finally:
+        worker.close()
+
+
+def test_worker_rejects_invalid_content_size(ctx, tmp_path):
+    path = tmp_path / "file"
+    path.write_text("data\n")
+    worker = PrivilegedWorker(ctx)
+
+    try:
+        for value in (-1, True, "1", 1.5):
+            with pytest.raises(TaskFailed, match="content_size"):
+                worker.request(Request("snapshot", {"path": str(path), "content_size": value}))
     finally:
         worker.close()
 
@@ -307,7 +486,7 @@ def test_worker_serializes_concurrent_requests(ctx, tmp_path):
     def check(path, expected):
         try:
             for _ in range(10):
-                result = worker.request(Request("stat", {"path": str(path)}))
+                result = worker.request(Request("stat", {"path": str(path)})).result
                 if bool(result.get("exists")) != expected:
                     errors.append((str(path), result))
         except Exception as exc:  # noqa: BLE001 - surface thread failures
@@ -344,7 +523,7 @@ def test_worker_restarts_after_crash(ctx, tmp_path):
         assert worker._process is None
         assert worker._closed is False
 
-        result = worker.request(Request("stat", {"path": str(tmp_path)}))
+        result = worker.request(Request("stat", {"path": str(tmp_path)})).result
         assert result["exists"] is True
         assert worker._process is not first
     finally:

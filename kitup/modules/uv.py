@@ -340,9 +340,6 @@ def config(
     elif value is not None:
         raise TaskFailed("config state 'absent' does not take a value")
 
-    if state == "present" and file_actions.stat(ctx, target, sudo=sudo) is None:
-        file_actions.ensure_parent(ctx, target, sudo=sudo)
-
     return ctx.changed(
         toml_ops.apply_toml_key(
             ctx,

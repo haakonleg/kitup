@@ -7,15 +7,18 @@ import pytest
 from kitup._utils.file_primitives import (
     apply_metadata,
     atomic_write_path,
+    compare_paths,
+    copy_path,
     digest_path,
     mkdir_path,
     move_path,
-    read_path,
+    read_regular_path,
     remove_path,
     replace_path,
     stat_path,
     symlink_path,
     write_path,
+    write_stream_path,
 )
 
 
@@ -32,7 +35,7 @@ def test_write_stat_read_remove(tmp_path):
     assert info["mode"] == 0o600
     assert info["size"] == 5
     assert info["mtime_ns"] > 0
-    assert read_path(path) == b"data\n"
+    assert read_regular_path(path) == b"data\n"
 
     remove_path(path)
     assert stat_path(path) is None
@@ -90,6 +93,113 @@ def test_atomic_write_path_uses_callback_and_preserves_metadata(tmp_path):
 
     assert path.read_bytes() == b"new\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_writes_do_not_call_fsync(tmp_path, monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError("fsync must not be called")
+
+    monkeypatch.setattr(os, "fsync", fail)
+
+    write_path(tmp_path / "file", b"data\n")
+    assert (tmp_path / "file").read_bytes() == b"data\n"
+
+
+def test_read_regular_path_rejects_symlinks_and_directories(tmp_path):
+    target = tmp_path / "target"
+    target.write_bytes(b"data\n")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    directory = tmp_path / "directory"
+    directory.mkdir()
+
+    assert read_regular_path(target) == b"data\n"
+    with pytest.raises(ValueError, match="regular file"):
+        read_regular_path(link)
+    with pytest.raises(ValueError, match="regular file"):
+        read_regular_path(directory)
+
+
+def test_regular_file_errors_propagate_permission_failures(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.write_bytes(b"data\n")
+    destination = tmp_path / "destination"
+    real_open = os.open
+
+    def deny(path, flags, *args, **kwargs):
+        if os.fspath(path) == str(source):
+            raise PermissionError(13, "Permission denied", str(source))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", deny)
+
+    with pytest.raises(PermissionError):
+        read_regular_path(source)
+    with pytest.raises(PermissionError):
+        copy_path(source, destination)
+
+
+def test_read_regular_path_propagates_missing_files(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        read_regular_path(tmp_path / "missing")
+
+
+def test_compare_paths_compares_content(tmp_path):
+    left = tmp_path / "left"
+    left.write_bytes(b"data\n")
+    same = tmp_path / "same"
+    same.write_bytes(b"data\n")
+    different = tmp_path / "different"
+    different.write_bytes(b"other\n")
+
+    assert compare_paths(left, same) is True
+    assert compare_paths(left, different) is False
+
+
+def test_copy_path_copies_content_and_mode(tmp_path):
+    source = tmp_path / "source"
+    source.write_bytes(b"data\n")
+    source.chmod(0o640)
+    destination = tmp_path / "destination"
+
+    copy_path(source, destination)
+
+    assert destination.read_bytes() == b"data\n"
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
+
+
+def test_copy_path_replaces_symlinks_and_rejects_directories(tmp_path):
+    source = tmp_path / "source"
+    source.write_bytes(b"new\n")
+    target = tmp_path / "target"
+    target.write_bytes(b"old\n")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    source_link = tmp_path / "source-link"
+    source_link.symlink_to(source)
+
+    copy_path(source, link)
+
+    assert not link.is_symlink()
+    assert link.read_bytes() == b"new\n"
+    assert target.read_bytes() == b"old\n"
+    with pytest.raises(IsADirectoryError):
+        copy_path(source, directory)
+    with pytest.raises(ValueError, match="regular file"):
+        copy_path(source_link, tmp_path / "destination")
+
+
+def test_write_stream_path_copies_a_stream(tmp_path):
+    source = tmp_path / "source"
+    source.write_bytes(b"data\n")
+    destination = tmp_path / "destination"
+
+    with source.open("rb") as stream:
+        write_stream_path(destination, stream)
+
+    assert destination.read_bytes() == b"data\n"
 
 
 def test_move_path_moves_a_file_and_removes_the_source(tmp_path):

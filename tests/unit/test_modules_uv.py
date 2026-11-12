@@ -7,6 +7,7 @@ from kitup.errors import TaskFailed
 from kitup.modules import uv
 
 from .helpers import (
+    CountingWorker,
     FakeCommandRunner,
     argvs,
     call_data,
@@ -1186,6 +1187,23 @@ def test_config_creates_a_missing_file_with_parents(tmp_path):
 
     assert path.read_text() == "concurrent-downloads = 4\n"
     assert call_data(result)["toml_action"] == "added"
+
+
+def test_config_uses_one_snapshot_without_a_separate_stat(tmp_path):
+    path = tmp_path / "uv.toml"
+    ctx = privileged_context(tmp_path)
+    worker = CountingWorker(ctx.privileged_worker)
+    ctx.privileged_worker = worker  # type: ignore[assignment]
+
+    try:
+        uv.config(ctx, "native-tls", value=True, path=path, sudo=True)
+    finally:
+        ctx.close()
+
+    target_actions = [action for action, target in worker.actions if target == str(path)]
+    assert target_actions.count("snapshot") == 1
+    assert "stat" not in target_actions
+    assert "read" not in target_actions
 
 
 def test_config_normalizes_typed_values(tmp_path):

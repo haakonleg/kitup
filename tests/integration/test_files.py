@@ -22,6 +22,7 @@ DRY_LINK = Path("/etc/kitup-integration-dry.link")
 NONEMPTY_DIR = WORKER_ROOT / "nonempty"
 NONEMPTY_FILE = NONEMPTY_DIR / "keep.conf"
 MOVE_PATH = Path("/etc/kitup-integration-move.conf")
+LARGE_PATH = Path("/etc/kitup-integration-large.conf")
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +33,7 @@ def managed_paths_absent() -> Iterator[None]:
 
 
 def _cleanup() -> None:
-    for path in (MANAGED_PATH, WORKER_ROOT, DRY_FILE, DRY_LINK, MOVE_PATH):
+    for path in (MANAGED_PATH, WORKER_ROOT, DRY_FILE, DRY_LINK, MOVE_PATH, LARGE_PATH):
         run(sudo("rm", "-rf", str(path)), check=False)
 
 
@@ -281,3 +282,57 @@ def test_privileged_directory_requires_force_for_non_empty(tmp_path: Path) -> No
 
     assert run_kitup("apply", root) == 1
     assert exists(NONEMPTY_FILE)
+
+
+def test_privileged_large_file_copy_is_idempotent(tmp_path: Path) -> None:
+    payload = b"x" * (33 * 1024 * 1024) + b"\n"
+    root = write_bundle(
+        tmp_path / "large-copy",
+        "files_large_copy",
+        f"""
+        from kitup.modules import files
+
+        @task("copy a large privileged file")
+        def large(ctx):
+            files.copy(ctx, "large.conf", {str(LARGE_PATH)!r}, mode=0o600, sudo=True)
+        """,
+    )
+    source = root / "bundles" / "files_large_copy" / "files" / "large.conf"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+
+    assert run_kitup("apply", root) == 0
+    before = run(sudo("stat", "-c", "%i|%y|%s|%a", str(LARGE_PATH))).stdout.strip()
+    assert before.split("|")[2] == str(len(payload))
+    assert before.split("|")[3] == "600"
+
+    assert run_kitup("apply", root) == 0
+    assert run(sudo("stat", "-c", "%i|%y|%s|%a", str(LARGE_PATH))).stdout.strip() == before
+
+
+def test_privileged_large_file_line_edit_is_idempotent(tmp_path: Path) -> None:
+    payload = b"x" * (33 * 1024 * 1024) + b"\n"
+    seed = tmp_path / "large.conf"
+    seed.write_bytes(payload)
+    run(sudo("cp", str(seed), str(LARGE_PATH)))
+
+    root = write_bundle(
+        tmp_path / "large-edit",
+        "files_large_edit",
+        f"""
+        from kitup.modules import files
+
+        @task("edit a large privileged file")
+        def large(ctx):
+            files.line(ctx, {str(LARGE_PATH)!r}, "added", sudo=True)
+        """,
+    )
+
+    assert run_kitup("apply", root) == 0
+    before = run(sudo("stat", "-c", "%i|%y|%s|%a", str(LARGE_PATH))).stdout.strip()
+    assert before.split("|")[2] == str(len(payload) + len("added\n"))
+    assert run(sudo("tail", "-n", "1", str(LARGE_PATH))).stdout == "added\n"
+
+    assert run_kitup("apply", root) == 0
+    assert run(sudo("stat", "-c", "%i|%y|%s|%a", str(LARGE_PATH))).stdout.strip() == before
+    assert run(sudo("tail", "-n", "1", str(LARGE_PATH))).stdout == "added\n"

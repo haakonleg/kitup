@@ -4,13 +4,14 @@ import stat
 
 import pytest
 
+from kitup._privileged.protocol import Response
 from kitup._utils import file_actions
 from kitup._utils.file_primitives import stat_path
 from kitup.errors import TaskFailed
 from kitup.modules import files
 from kitup.registry import Bundle
 
-from .helpers import FakeSudo, call_data, make_context, plain_output, privileged_context
+from .helpers import CountingWorker, FakeSudo, call_data, make_context, plain_output, privileged_context
 
 
 def context(tmp_path, *, dry_run=False, diff=False):
@@ -297,19 +298,30 @@ def test_privileged_symlink_copy_and_metadata_use_worker(tmp_path):
         ctx.close()
 
 
-class CountingWorker:
-    """Record worker actions while delegating to the real worker."""
+def test_privileged_copy_uses_compare_and_copy_without_content(tmp_path):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    dest = tmp_path / "dest"
+    ctx = privileged_context(tmp_path)
+    worker = CountingWorker(ctx.privileged_worker)
+    ctx.privileged_worker = worker  # type: ignore[assignment]
 
-    def __init__(self, inner):
-        self.inner = inner
-        self.actions = []
+    try:
+        files.copy(ctx, source, dest, sudo=True)
+        assert dest.read_text() == "data\n"
+        actions = [action for action, _ in worker.actions]
+        assert "compare" in actions
+        assert "copy" in actions
+        assert "read" not in actions
+        assert "write" not in actions
 
-    def request(self, request):
-        self.actions.append((request.action, request.params.get("path")))
-        return self.inner.request(request)
-
-    def close(self):
-        self.inner.close()
+        worker.actions.clear()
+        files.copy(ctx, source, dest, sudo=True)
+        actions = [action for action, _ in worker.actions]
+        assert "compare" in actions
+        assert "copy" not in actions
+    finally:
+        ctx.close()
 
 
 def test_file_without_content_reconciles_metadata_without_reading(tmp_path):
@@ -343,14 +355,14 @@ def test_file_without_content_creates_an_empty_file(tmp_path):
 
 
 class ReadFailureWorker:
-    """Simulate a privileged worker whose read action fails."""
+    """Simulate a privileged worker whose snapshot action fails."""
 
-    def request(self, request):
-        if request.action == "read":
+    def request(self, request, *, content=None):
+        if request.action == "snapshot":
             raise TaskFailed("privileged worker read failed: simulated")
         if request.action == "stat":
-            return stat_path(request.params["path"]) or {"exists": False}
-        return {}
+            return Response(result=stat_path(request.params["path"]) or {"exists": False})
+        return Response(result={})
 
 
 def test_privileged_read_failure_does_not_rewrite_file(tmp_path):
@@ -368,12 +380,12 @@ def test_privileged_read_failure_does_not_rewrite_file(tmp_path):
 class RemoveFailureWorker:
     """Simulate a privileged worker whose remove action fails."""
 
-    def request(self, request):
+    def request(self, request, *, content=None):
         if request.action == "stat":
-            return stat_path(request.params["path"]) or {"exists": False}
+            return Response(result=stat_path(request.params["path"]) or {"exists": False})
         if request.action == "remove":
             raise TaskFailed("privileged worker remove failed: directory not empty")
-        return {}
+        return Response(result={})
 
 
 def test_privileged_remove_reports_a_friendly_error(tmp_path):
@@ -704,6 +716,26 @@ def test_copy_preserves_mode_and_is_idempotent(tmp_path):
     assert ctx.calls[-1].summary == f"ensure {dest} from {source}"
 
 
+def test_copy_reconciles_metadata_when_content_is_equal(tmp_path):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    source.chmod(0o644)
+    dest = tmp_path / "dest"
+    dest.write_text("data\n")
+    dest.chmod(0o600)
+    ctx = context(tmp_path)
+
+    result = files.copy(ctx, source, dest)
+
+    assert result.changed is True
+    assert result.summary == f"copy {source} -> {dest}"
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o644
+
+    result = files.copy(ctx, source, dest)
+    assert result.changed is False
+    assert result.summary == f"ensure {dest} from {source}"
+
+
 def test_copy_replaces_destination_symlink(tmp_path):
     source = tmp_path / "source"
     source.write_text("new\n")
@@ -720,7 +752,7 @@ def test_copy_replaces_destination_symlink(tmp_path):
     assert target.read_text() == "old\n"
 
 
-def test_copy_skips_reading_a_target_with_a_different_size(tmp_path, monkeypatch):
+def test_copy_does_not_read_content_to_compare(tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.write_text("new content\n")
     target = tmp_path / "target"
@@ -730,22 +762,59 @@ def test_copy_skips_reading_a_target_with_a_different_size(tmp_path, monkeypatch
 
     files.copy(ctx, source, target)
 
-    assert reads == [source]
+    assert reads == []
     assert target.read_text() == "new content\n"
 
 
-def test_copy_reads_a_same_size_target_to_compare_content(tmp_path, monkeypatch):
+def test_copy_compares_same_size_targets(tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.write_text("new\n")
     target = tmp_path / "target"
     target.write_text("old\n")
     ctx = context(tmp_path)
-    reads = record_reads(monkeypatch)
+    comparisons = []
+    compare_paths = file_actions.compare_paths
+
+    def compare(left, right):
+        comparisons.append((left, right))
+        return compare_paths(left, right)
+
+    monkeypatch.setattr(file_actions, "compare_paths", compare)
 
     files.copy(ctx, source, target)
 
-    assert reads == [source, target]
+    assert comparisons == [(source, target)]
     assert target.read_text() == "new\n"
+
+
+def test_copy_reports_source_permission_errors(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    dest = tmp_path / "dest"
+    ctx = context(tmp_path)
+    real_open = os.open
+
+    def deny(path, flags, *args, **kwargs):
+        if os.fspath(path) == str(source):
+            raise PermissionError(13, "Permission denied", str(source))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", deny)
+
+    with pytest.raises(TaskFailed, match="could not copy"):
+        files.copy(ctx, source, dest)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_copy_rejects_non_regular_destinations(tmp_path, dry_run):
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    ctx = context(tmp_path, dry_run=dry_run)
+
+    with pytest.raises(TaskFailed, match="destination is not a regular file"):
+        files.copy(ctx, source, fifo)
 
 
 def test_copy_into_directory_with_trailing_slash(tmp_path):
@@ -1338,8 +1407,9 @@ def test_ini_stats_and_reads_the_target_once(tmp_path):
         ctx.close()
 
     target_actions = [action for action, target in worker.actions if target == str(path)]
-    assert target_actions.count("stat") == 1
-    assert target_actions.count("read") == 1
+    assert target_actions.count("snapshot") == 1
+    assert "stat" not in target_actions
+    assert "read" not in target_actions
 
 
 def test_ini_validates_arguments_before_touching_the_file(tmp_path):
@@ -1827,8 +1897,9 @@ def test_toml_stats_and_reads_the_target_once(tmp_path):
         ctx.close()
 
     target_actions = [action for action, target in worker.actions if target == str(path)]
-    assert target_actions.count("stat") == 1
-    assert target_actions.count("read") == 1
+    assert target_actions.count("snapshot") == 1
+    assert "stat" not in target_actions
+    assert "read" not in target_actions
 
 
 def test_toml_validates_arguments_before_touching_the_file(tmp_path):

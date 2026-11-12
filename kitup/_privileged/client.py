@@ -6,52 +6,99 @@ import subprocess
 import sys
 import threading
 from collections import deque
+from dataclasses import replace
 from functools import lru_cache
 from importlib import resources
-from typing import IO, TYPE_CHECKING, Any, override
+from typing import IO, TYPE_CHECKING, override
 
 from .. import PACKAGE_NAME
 from ..errors import TaskFailed
-from .protocol import MAX_MESSAGE_BYTES, READY, Request, Response
+from .protocol import MAX_HEADER_BYTES, READY, Request, Response
 
 if TYPE_CHECKING:
     from ..context import TaskContext
 
 
-class _Reader(threading.Thread):
-    """Read lines from a worker pipe without blocking the request path."""
+class _ResponseReader(threading.Thread):
+    """Read framed responses from the worker without blocking the request path."""
 
-    def __init__(self, stream: IO[str], *, queue_lines: bool) -> None:
+    def __init__(self, stream: IO[bytes]) -> None:
         super().__init__(daemon=True)
         self._stream = stream
-        self._queue: queue.Queue[str | None] | None = queue.Queue() if queue_lines else None
-        self._tail: deque[str] | None = None if queue_lines else deque(maxlen=100)
+        self._queue: queue.Queue[Response | str | None] = queue.Queue()
+        self.done = threading.Event()
+
+    @override
+    def run(self) -> None:
+        try:
+            while True:
+                line = self._stream.readline(MAX_HEADER_BYTES + 1)
+                if not line:
+                    break
+                if len(line) > MAX_HEADER_BYTES:
+                    self._queue.put(Response(error="response header too large", fatal=True))
+                    break
+                text = line.strip()
+                if not text:
+                    self._queue.put(Response(error="empty response header", fatal=True))
+                    break
+                if text == READY.encode():
+                    self._queue.put(READY)
+                    continue
+                try:
+                    response = Response.decode(text)
+                except ValueError as exc:
+                    self._queue.put(Response(error=f"invalid privileged worker response: {exc}", fatal=True))
+                    break
+                if response.content_length is not None:
+                    content = self._read_exact(response.content_length)
+                    if content is None:
+                        self._queue.put(Response(error="truncated privileged worker response", fatal=True))
+                        break
+                    response.content = content
+                self._queue.put(response)
+        except OSError, ValueError:
+            pass
+        finally:
+            self._queue.put(None)
+            self.done.set()
+
+    def _read_exact(self, size: int) -> bytes | None:
+        chunks: list[bytes] = []
+        remaining = size
+        while remaining:
+            chunk = self._stream.read(remaining)
+            if not chunk:
+                return None
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
+    def read(self, timeout: float) -> Response | str | None:
+        return self._queue.get(timeout=timeout)
+
+
+class _LineReader(threading.Thread):
+    """Read stderr lines from the worker and keep a diagnostic tail."""
+
+    def __init__(self, stream: IO[bytes]) -> None:
+        super().__init__(daemon=True)
+        self._stream = stream
+        self._tail: deque[str] = deque(maxlen=100)
         self.done = threading.Event()
 
     @override
     def run(self) -> None:
         try:
             for line in self._stream:
-                if self._tail is not None:
-                    self._tail.append(line)
-                if self._queue is not None:
-                    self._queue.put(line)
+                self._tail.append(line.decode("utf-8", errors="replace"))
         except OSError, ValueError:
             pass
         finally:
-            if self._queue is not None:
-                self._queue.put(None)
             self.done.set()
-
-    def readline(self, timeout: float) -> str | None:
-        if self._queue is None:
-            raise RuntimeError("reader is not configured for line reads")
-        return self._queue.get(timeout=timeout)
 
     @property
     def tail(self) -> str:
-        if self._tail is None:
-            return ""
         return "".join(self._tail)
 
 
@@ -68,18 +115,24 @@ class PrivilegedWorker:
         self.ctx = ctx
         self.timeout = timeout
         self.startup_timeout = startup_timeout
-        self._process: subprocess.Popen[str] | None = None
-        self._stdout: _Reader | None = None
-        self._stderr: _Reader | None = None
+        self._process: subprocess.Popen[bytes] | None = None
+        self._stdout: _ResponseReader | None = None
+        self._stderr: _LineReader | None = None
         self._closed = False
         self._lock = threading.RLock()
 
-    def request(self, request: Request) -> Any:
-        """Send one request and return its result, raising on worker errors."""
-        payload = request.encode()
-        size = len(payload.encode("utf-8")) + 1
-        if size > MAX_MESSAGE_BYTES:
-            raise TaskFailed(f"privileged worker request too large ({size} bytes; limit {MAX_MESSAGE_BYTES})")
+    def request(self, request: Request, *, content: bytes | None = None) -> Response:
+        """Send one request and return its response, raising on worker errors."""
+        if content is not None:
+            request = replace(request, content_length=len(content))
+        elif request.content_length:
+            raise TaskFailed("privileged worker request declares content but none was provided")
+
+        header = request.encode().encode("utf-8") + b"\n"
+        if len(header) > MAX_HEADER_BYTES:
+            raise TaskFailed(
+                f"privileged worker request header too large ({len(header)} bytes; limit {MAX_HEADER_BYTES})"
+            )
 
         with self._lock:
             self._start_locked()
@@ -87,29 +140,25 @@ class PrivilegedWorker:
             if process is None or process.stdin is None:
                 raise TaskFailed("privileged worker is not running")
             try:
-                process.stdin.write(payload + "\n")
+                process.stdin.write(header)
+                if content:
+                    process.stdin.write(content)
                 process.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
                 self._discard_locked()
                 raise TaskFailed(f"privileged worker is not available: {exc}") from exc
 
             try:
-                line = self._read_line(self.timeout)
+                response = self._read_response(self.timeout)
             except TaskFailed:
                 self._discard_locked()
                 raise
-
-            try:
-                response = Response.decode(line)
-            except ValueError as exc:
-                self._discard_locked()
-                raise TaskFailed(f"invalid privileged worker response: {exc}") from exc
 
             if response.error is not None:
                 if response.fatal:
                     self._discard_locked()
                 raise TaskFailed(f"privileged worker {request.action} failed: {response.error}")
-            return response.result
+            return response
 
     def start(self) -> None:
         """Start the worker on first use and wait for its ready token."""
@@ -142,9 +191,6 @@ class PrivilegedWorker:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                bufsize=1,
                 close_fds=True,
                 # Keep the parent session so sudo's tty-based credential cache
                 # remains valid, while still isolating the worker from Ctrl-C.
@@ -158,40 +204,54 @@ class PrivilegedWorker:
             self._discard_locked()
             raise TaskFailed("privileged worker pipes are unavailable")
 
-        self._stdout = _Reader(process.stdout, queue_lines=True)
-        self._stderr = _Reader(process.stderr, queue_lines=False)
+        self._stdout = _ResponseReader(process.stdout)
+        self._stderr = _LineReader(process.stderr)
         self._stdout.start()
         self._stderr.start()
 
         try:
-            line = self._read_line(self.startup_timeout)
+            self._read_ready(self.startup_timeout)
         except TaskFailed:
             self._discard_locked()
             raise
-        if line.strip() != READY:
-            self._discard_locked()
-            raise TaskFailed(f"unexpected privileged worker startup response: {line.strip()!r}")
 
-    def _read_line(self, timeout: float) -> str:
+    def _read_ready(self, timeout: float) -> None:
+        item = self._read_item(timeout)
+        if item == READY:
+            return
+        if isinstance(item, Response) and item.error is not None:
+            raise TaskFailed(f"privileged worker failed to start: {item.error}")
+        raise TaskFailed(f"unexpected privileged worker startup response: {item!r}")
+
+    def _read_response(self, timeout: float) -> Response:
+        item = self._read_item(timeout)
+        if isinstance(item, str):
+            raise TaskFailed(f"unexpected privileged worker response: {item!r}")
+        return item
+
+    def _read_item(self, timeout: float) -> Response | str:
         if self._stdout is None:
             raise TaskFailed("privileged worker is not running")
         try:
-            line = self._stdout.readline(timeout)
+            item = self._stdout.read(timeout)
         except queue.Empty:
             raise TaskFailed(f"timed out waiting for privileged worker after {timeout:g}s") from None
-        if line is None:
-            if self._stderr is not None:
-                self._stderr.done.wait(timeout=0.5)
-            detail = self._stderr.tail.strip() if self._stderr is not None else ""
-            process = self._process
-            code = process.poll() if process is not None else None
-            message = "privileged worker exited unexpectedly"
-            if code is not None:
-                message = f"{message} (exit code {code})"
-            if detail:
-                message = f"{message}: {detail}"
-            raise TaskFailed(message)
-        return line
+        if item is None:
+            raise self._exit_error()
+        return item
+
+    def _exit_error(self) -> TaskFailed:
+        if self._stderr is not None:
+            self._stderr.done.wait(timeout=0.5)
+        detail = self._stderr.tail.strip() if self._stderr is not None else ""
+        process = self._process
+        code = process.poll() if process is not None else None
+        message = "privileged worker exited unexpectedly"
+        if code is not None:
+            message = f"{message} (exit code {code})"
+        if detail:
+            message = f"{message}: {detail}"
+        return TaskFailed(message)
 
     def close(self) -> None:
         """Close stdin and reap the worker, falling back to signals."""

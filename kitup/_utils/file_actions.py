@@ -5,24 +5,25 @@ These helpers build on :mod:`kitup._utils.file_primitives` and add
 ``CallResult`` construction. They are not embedded in the worker.
 """
 
-import base64
 import difflib
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from .._privileged.protocol import Request
+from .._privileged.protocol import Request, Response
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
 from . import ini as ini_ops
 from .file_primitives import (
     apply_metadata,
+    compare_paths,
+    copy_path,
     mkdir_path,
-    read_path,
+    read_regular_path,
     remove_path,
     resolve_group,
     resolve_owner,
@@ -73,13 +74,21 @@ class FileSnapshot:
             raise TaskFailed(f"not a UTF-8 text file: {path}") from exc
 
 
+@dataclass(frozen=True, slots=True)
+class CompareResult:
+    """Metadata and content equality for a source and destination pair."""
+
+    source: FileInfo
+    target: FileInfo | None
+    equal: bool
+
+
 def privileged(ctx: TaskContext, *, sudo: bool) -> bool:
     """Return whether an operation should use the privileged worker."""
     return sudo and not ctx.sudo.is_root
 
 
-def worker_request(ctx: TaskContext, action: str, **params: Any) -> dict[str, Any]:
-    """Send a worker request, normalizing path parameters to absolute paths."""
+def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
     for key in ("path", "source"):
         if key not in params:
             continue
@@ -87,7 +96,29 @@ def worker_request(ctx: TaskContext, action: str, **params: Any) -> dict[str, An
         if not os.path.isabs(value):
             value = os.path.join(os.getcwd(), value)
         params[key] = value
-    return cast(dict[str, Any], ctx.privileged_worker.request(Request(action, params)))
+    return params
+
+
+def _worker_response(
+    ctx: TaskContext,
+    action: str,
+    params: dict[str, Any],
+    *,
+    content: bytes | None = None,
+) -> Response:
+    return ctx.privileged_worker.request(Request(action, params), content=content)
+
+
+def worker_request(ctx: TaskContext, action: str, *, content: bytes | None = None, **params: Any) -> dict[str, Any]:
+    """Send a worker request, normalizing path parameters to absolute paths."""
+    response = _worker_response(ctx, action, _normalize_params(params), content=content)
+    return cast(dict[str, Any], response.result)
+
+
+def worker_read(ctx: TaskContext, action: str, **params: Any) -> tuple[dict[str, Any], bytes | None]:
+    """Send a worker request that may return a raw content payload."""
+    response = _worker_response(ctx, action, _normalize_params(params))
+    return cast(dict[str, Any], response.result), response.content
 
 
 def stat(ctx: TaskContext, path: Path, *, sudo: bool, follow: bool = False) -> FileInfo | None:
@@ -223,12 +254,14 @@ def read_bytes(
     if info is None:
         return b""
     if privileged(ctx, sudo=sudo):
-        result = worker_request(ctx, "read", path=str(path))
+        result, content = worker_read(ctx, "read", path=str(path))
         if not result.get("exists"):
             return b""
-        return base64.b64decode(result.get("content", ""))
+        return content or b""
     try:
-        return read_path(path)
+        return read_regular_path(path)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not read {path}: {exc}") from exc
 
@@ -246,12 +279,129 @@ def read_snapshot(
     When it differs from the existing size the content is known to differ, so
     the read is skipped unless a diff was requested.
     """
+    if privileged(ctx, sudo=sudo):
+        result, content = worker_read(
+            ctx,
+            "snapshot",
+            path=str(path),
+            content_size=content_size,
+            diff=ctx.diff,
+        )
+        if not result.get("exists"):
+            return FileSnapshot(None)
+        existing_info = _file_info(result)
+        if not existing_info.is_file:
+            return FileSnapshot(existing_info)
+        return FileSnapshot(existing_info, content)
     info = stat(ctx, path, sudo=sudo)
     if info is None or not info.is_file:
         return FileSnapshot(info)
     if content_size is not None and info.size != content_size and not ctx.diff:
         return FileSnapshot(info)
     return FileSnapshot(info, read_bytes(ctx, path, info, sudo=sudo))
+
+
+def compare(ctx: TaskContext, source: Path, target: Path, *, sudo: bool) -> CompareResult:
+    """Compare a source and destination, using the worker when needed."""
+    if privileged(ctx, sudo=sudo):
+        result = worker_request(ctx, "compare", source=str(source), path=str(target))
+        target_data = result.get("target")
+        return CompareResult(
+            source=_file_info(result["source"]),
+            target=_file_info(target_data) if target_data else None,
+            equal=bool(result.get("equal")),
+        )
+
+    source_info = stat_local(source)
+    if source_info is None or not source_info.is_file:
+        raise TaskFailed(f"copy source is not a regular file: {source}")
+    target_info = stat_local(target)
+    equal = False
+    if target_info is not None and target_info.is_file and source_info.size == target_info.size:
+        try:
+            equal = compare_paths(source, target)
+        except ValueError as exc:
+            raise TaskFailed(str(exc)) from exc
+        except OSError as exc:
+            raise TaskFailed(f"could not compare {source} and {target}: {exc}") from exc
+    return CompareResult(source_info, target_info, equal)
+
+
+def copy_file(
+    ctx: TaskContext,
+    source: Path,
+    target: Path,
+    *,
+    mode: int | None,
+    owner: str | int | None,
+    group: str | int | None,
+    sudo: bool,
+) -> None:
+    """Copy a regular file, using the worker when needed."""
+    if privileged(ctx, sudo=sudo):
+        worker_request(
+            ctx,
+            "copy",
+            source=str(source),
+            path=str(target),
+            mode=mode,
+            owner=owner,
+            group=group,
+        )
+        return
+    try:
+        copy_path(source, target, mode=mode, owner=owner, group=group)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
+    except OSError as exc:
+        raise TaskFailed(f"could not copy {source} to {target}: {exc}") from exc
+
+
+def validate_destination(path: Path, info: FileInfo | None, *, label: str = "path") -> None:
+    """Reject directories and non-regular destinations, allowing symlinks.
+
+    Symlinks are allowed because writes replace the link itself instead of
+    following it.
+    """
+    if info is None:
+        return
+    if info.is_dir and not info.is_symlink:
+        raise TaskFailed(f"{label} is a directory: {path}")
+    if not info.is_symlink and not info.is_file:
+        raise TaskFailed(f"{label} is not a regular file: {path}")
+
+
+def apply_change(
+    ctx: TaskContext,
+    path: Path,
+    *,
+    action: str,
+    summary: str,
+    data: dict[str, object],
+    sudo: bool,
+    old: bytes | None,
+    new: bytes | None,
+    write: Callable[[], None],
+    owner: str | int | None = None,
+    group: str | int | None = None,
+    check_parent: bool = True,
+) -> CallResult:
+    """Emit a diff, honor a dry run, then perform a write and return its call.
+
+    ``write`` performs the actual mutation. ``check_parent`` verifies that the
+    destination's parent exists before writing. A dry run returns before the
+    parent check, matching :func:`apply_bytes`; callers that need the check in a
+    dry run must perform it themselves.
+    """
+    if new is not None:
+        emit_diff(ctx, path, old, new)
+    if ctx.dry_run:
+        resolve_metadata(owner, group)
+        return CallResult(action=action, changed=True, summary=summary, **data)
+    if check_parent:
+        require_parent(ctx, path, sudo=sudo)
+    write()
+    return CallResult(action=action, changed=True, summary=summary, **data)
 
 
 def apply_bytes(
@@ -268,6 +418,7 @@ def apply_bytes(
     sudo: bool,
     unchanged_summary: str | None = None,
     snapshot: FileSnapshot | None = None,
+    check_parent: bool = True,
 ) -> CallResult:
     """Write bytes idempotently, returning the resulting call.
 
@@ -276,16 +427,14 @@ def apply_bytes(
     ``unchanged_summary`` describes the desired state when nothing changes.
     ``snapshot`` is the stat and content the caller already read for ``path``;
     when omitted, the path is stat'ed and read only when its size does not
-    already prove the content differs.
+    already prove the content differs. ``check_parent=False`` skips the parent
+    existence check when the caller already performed it.
     """
     if snapshot is None:
         snapshot = read_snapshot(ctx, path, sudo=sudo, content_size=len(content))
     info = snapshot.info
     is_link = info is not None and info.is_symlink
-    if info is not None and info.is_dir and not is_link:
-        raise TaskFailed(f"path is a directory: {path}")
-    if info is not None and not is_link and not info.is_file:
-        raise TaskFailed(f"path is not a regular file: {path}")
+    validate_destination(path, info)
 
     old = snapshot.content
     content_differs = is_link or old != content
@@ -307,14 +456,24 @@ def apply_bytes(
     resolved = mode
     if resolved is None:
         resolved = info.mode if info is not None and not is_link else 0o644
-    _emit_diff(ctx, path, old, content)
-    if ctx.dry_run:
-        resolve_metadata(owner, group)
-        return CallResult(action=action, changed=True, summary=summary, **data)
 
-    require_parent(ctx, path, sudo=sudo)
-    _write_bytes(ctx, path, content, resolved, owner, group, sudo=sudo)
-    return CallResult(action=action, changed=True, summary=summary, **data)
+    def write() -> None:
+        _write_bytes(ctx, path, content, resolved, owner, group, sudo=sudo)
+
+    return apply_change(
+        ctx,
+        path,
+        action=action,
+        summary=summary,
+        data=data,
+        sudo=sudo,
+        old=old,
+        new=content,
+        write=write,
+        owner=owner,
+        group=group,
+        check_parent=check_parent,
+    )
 
 
 def apply_text(
@@ -371,6 +530,7 @@ def apply_ini(
     action: str,
     sudo: bool,
     option_pattern: re.Pattern[str] | None = None,
+    snapshot: FileSnapshot | None = None,
 ) -> CallResult:
     """Apply one INI edit to ``target`` and return the resulting call.
 
@@ -379,12 +539,15 @@ def apply_ini(
     ``value`` is the canonical value to write — a single line or, for
     appendable options, a sequence of lines rendered as continuation lines —
     and when it is ``None`` the ``option`` line — or the whole ``section``
-    when ``option`` is also ``None`` — is removed instead. The returned call
-    is not recorded; the caller records it with ``ctx.changed``.
+    when ``option`` is also ``None`` — is removed instead. ``snapshot`` is the
+    stat and content the caller already read for ``target``; when omitted, the
+    target is read here. The returned call is not recorded; the caller records
+    it with ``ctx.changed``.
     """
     if value is not None and option is None:
         raise TaskFailed("ini value requires an option")
-    snapshot = read_snapshot(ctx, target, sudo=sudo)
+    if snapshot is None:
+        snapshot = read_snapshot(ctx, target, sudo=sudo)
     if not create and snapshot.info is None:
         raise TaskFailed(f"file does not exist and create=False: {target}")
     text = snapshot.text(target)
@@ -563,14 +726,13 @@ def _write_bytes(
             ctx,
             "write",
             path=str(path),
-            content=base64.b64encode(content).decode(),
+            content=content,
             mode=mode,
             owner=owner,
             group=group,
         )
         return
 
-    require_parent(ctx, path, sudo=False)
     try:
         write_path(path, content, mode=mode, owner=owner, group=group)
     except ValueError as exc:
@@ -579,7 +741,7 @@ def _write_bytes(
         raise TaskFailed(f"could not write {path}: {exc}") from exc
 
 
-def _emit_diff(ctx: TaskContext, path: Path, old: bytes | None, new: bytes) -> None:
+def emit_diff(ctx: TaskContext, path: Path, old: bytes | None, new: bytes) -> None:
     if not ctx.diff or ctx.output is None:
         return
     try:

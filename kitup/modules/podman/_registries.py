@@ -101,6 +101,7 @@ def registry(
             unchanged_summary=f"ensure registry {name} in {target}",
             data={"path": str(target), "registry": name},
             sudo=sudo,
+            check_parent=False,
         )
     )
 

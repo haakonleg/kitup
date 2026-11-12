@@ -7,6 +7,7 @@ from kitup.errors import TaskFailed
 from kitup.modules import pip
 
 from .helpers import (
+    CountingWorker,
     FakeCommandRunner,
     FakeSudo,
     argvs,
@@ -14,6 +15,7 @@ from .helpers import (
     completed,
     local_sudo_context,
     make_context,
+    privileged_context,
     response,
 )
 
@@ -681,6 +683,23 @@ def test_config_creates_a_missing_file_with_parents(tmp_path):
     assert path.read_text() == "[global]\ntimeout = 60\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
     assert call_data(result)["ini_action"] == "added"
+
+
+def test_config_uses_one_snapshot_without_a_separate_stat(tmp_path):
+    path = tmp_path / "pip.conf"
+    ctx = privileged_context(tmp_path)
+    worker = CountingWorker(ctx.privileged_worker)
+    ctx.privileged_worker = worker  # type: ignore[assignment]
+
+    try:
+        pip.config(ctx, "timeout", 30, path=path, sudo=True)
+    finally:
+        ctx.close()
+
+    target_actions = [action for action, target in worker.actions if target == str(path)]
+    assert target_actions.count("snapshot") == 1
+    assert "stat" not in target_actions
+    assert "read" not in target_actions
 
 
 def test_config_matches_and_writes_canonical_option_names(tmp_path):

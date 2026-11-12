@@ -6,7 +6,16 @@ from kitup.errors import TaskFailed
 from kitup.modules import podman
 from kitup.registry import Bundle
 
-from .helpers import FakeCommandRunner, FakeSudo, argvs, call_data, make_context, response
+from .helpers import (
+    CountingWorker,
+    FakeCommandRunner,
+    FakeSudo,
+    argvs,
+    call_data,
+    make_context,
+    privileged_context,
+    response,
+)
 
 PODMAN = "/usr/bin/podman"
 IMAGE = "localhost/example:latest"
@@ -1011,6 +1020,27 @@ def test_file_backed_functions_do_not_require_podman(tmp_path, monkeypatch):
 
     assert (tmp_path / "example.conf").exists()
     assert (tmp_path / f"{CONTAINER}.container").exists()
+
+
+def test_file_backed_writes_do_not_repeat_the_parent_check(tmp_path):
+    ctx = privileged_context(tmp_path)
+    worker = CountingWorker(ctx.privileged_worker)
+    ctx.privileged_worker = worker  # type: ignore[assignment]
+
+    try:
+        podman.registry(
+            ctx,
+            "example",
+            location="docker.io",
+            scope="system",
+            path=tmp_path / "example.conf",
+        )
+        podman.quadlet(ctx, CONTAINER, image=IMAGE, scope="system", dest=tmp_path)
+    finally:
+        ctx.close()
+
+    parent_actions = [action for action, path in worker.actions if path == str(tmp_path)]
+    assert parent_actions.count("stat") == 2
 
 
 def test_dry_run_does_not_write_files(tmp_path):

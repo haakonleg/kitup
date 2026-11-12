@@ -110,6 +110,7 @@ def file(
             unchanged_summary=f"ensure file {target}",
             data={"path": str(target)},
             sudo=sudo,
+            check_parent=False,
         )
     )
 
@@ -139,29 +140,66 @@ def copy(
     target = expand_path(dest, error=TaskFailed)
     if str(dest).endswith("/"):
         target /= source.name
-    source_info = file_actions.stat(ctx, source, sudo=sudo)
-    if source_info is None or source_info.is_symlink or not source_info.is_file:
-        raise TaskFailed(f"copy source is not a regular file: {source}")
-    content = file_actions.read_bytes(ctx, source, source_info, sudo=sudo)
-    target_snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo, content_size=len(content))
-    if target_snapshot.info is not None and target_snapshot.info.is_dir:
-        raise TaskFailed(f"destination is a directory: {target}")
 
-    file_actions.require_parent(ctx, target, sudo=sudo)
-    return ctx.changed(
-        file_actions.apply_bytes(
+    comparison = file_actions.compare(ctx, source, target, sudo=sudo)
+    source_info = comparison.source
+    target_info = comparison.target
+    file_actions.validate_destination(target, target_info, label="destination")
+
+    resolved_mode = source_info.mode if mode is None else mode
+    data: dict[str, object] = {"path": str(target), "src": str(source)}
+    if comparison.equal:
+        return ctx.changed(
+            file_actions.reconcile_metadata(
+                ctx,
+                target,
+                target_info,
+                action="files.copy",
+                mode=resolved_mode,
+                owner=owner,
+                group=group,
+                summary=f"copy {source} -> {target}",
+                unchanged_summary=f"ensure {target} from {source}",
+                data=data,
+                sudo=sudo,
+            )
+        )
+
+    source_content: bytes | None = None
+    target_content: bytes | None = None
+    if ctx.diff:
+        source_content = file_actions.read_bytes(ctx, source, source_info, sudo=sudo)
+        if target_info is not None and target_info.is_file:
+            target_content = file_actions.read_bytes(ctx, target, target_info, sudo=sudo)
+
+    if target_info is None:
+        file_actions.require_parent(ctx, target, sudo=sudo)
+
+    def write() -> None:
+        file_actions.copy_file(
             ctx,
+            source,
             target,
-            content,
-            snapshot=target_snapshot,
-            action="files.copy",
-            mode=source_info.mode if mode is None else mode,
+            mode=resolved_mode,
             owner=owner,
             group=group,
-            summary=f"copy {source} -> {target}",
-            unchanged_summary=f"ensure {target} from {source}",
-            data={"path": str(target), "src": str(source)},
             sudo=sudo,
+        )
+
+    return ctx.changed(
+        file_actions.apply_change(
+            ctx,
+            target,
+            action="files.copy",
+            summary=f"copy {source} -> {target}",
+            data=data,
+            sudo=sudo,
+            old=target_content,
+            new=source_content,
+            write=write,
+            owner=owner,
+            group=group,
+            check_parent=False,
         )
     )
 

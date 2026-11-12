@@ -71,6 +71,21 @@ def argvs(command: FakeCommandRunner) -> list[list[str]]:
     return [argv for argv, _ in command.calls]
 
 
+class CountingWorker:
+    """Record worker actions while delegating to the real worker."""
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+        self.actions: list[tuple[str, str | None]] = []
+
+    def request(self, request: Any, *, content: bytes | None = None) -> Any:
+        self.actions.append((request.action, request.params.get("path")))
+        return self.inner.request(request, content=content)
+
+    def close(self) -> None:
+        self.inner.close()
+
+
 def plain_output() -> Output:
     """Return a non-interactive output sink for rendering assertions."""
     return Output(StringIO(), no_color=True)

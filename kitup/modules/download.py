@@ -298,7 +298,6 @@ def _download_to_temp(
                     display=display,
                 )
             stream.flush()
-            os.fsync(stream.fileno())
         return temporary, checksum_dest
     except BaseException:
         with contextlib.suppress(OSError):
