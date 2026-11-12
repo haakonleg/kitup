@@ -3,11 +3,13 @@
 import math
 import re
 import subprocess
+import unicodedata
 from collections.abc import Collection, Iterable
 from pathlib import Path
 from typing import Final, Literal
 
 from ..errors import TaskFailed
+from .text import LINE_BREAKS
 
 type State = Literal["present", "absent"]
 
@@ -104,9 +106,23 @@ def require_timeout(value: float, label: str = "timeout") -> None:
         raise TaskFailed(f"{label} must be a positive number")
 
 
+def has_control_characters(value: str, *, allow: str = "") -> bool:
+    r"""Return whether ``value`` contains a non-printable character or line break.
+
+    This covers Unicode category ``C`` (controls, format characters, surrogates,
+    private use, and unassigned code points) plus every line boundary that
+    :func:`str.splitlines` recognises. ``allow`` lists characters exempt from
+    the check, such as ``"\t"`` for header values.
+    """
+    return any(
+        character not in allow and (unicodedata.category(character).startswith("C") or character in LINE_BREAKS)
+        for character in value
+    )
+
+
 def require_single_line(value: str, label: str) -> None:
-    """Reject text containing line breaks."""
-    if "\n" in value or "\r" in value:
+    """Reject text containing any Unicode line break."""
+    if any(character in LINE_BREAKS for character in value):
         raise TaskFailed(f"{label} must not contain line breaks")
 
 

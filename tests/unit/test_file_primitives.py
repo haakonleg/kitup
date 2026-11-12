@@ -15,6 +15,7 @@ from kitup._utils.file_primitives import (
     compare_paths,
     copy_path,
     digest_path,
+    hasher_for,
     mkdir_path,
     move_path,
     read_regular_path,
@@ -326,6 +327,15 @@ def test_replace_path_rejects_invalid_sources_and_destinations(tmp_path):
         replace_path(tmp_path, tmp_path / "destination")
     with pytest.raises(IsADirectoryError):
         replace_path(source, tmp_path)
+
+
+def test_hasher_for_rejects_unsupported_algorithms():
+    assert hasher_for("sha256").hexdigest() == hashlib.sha256().hexdigest()
+    with pytest.raises(ValueError, match="unsupported checksum algorithm"):
+        hasher_for("not-a-real-algorithm")
+    # Variable-length digests have no fixed size, so they cannot be verified.
+    with pytest.raises(ValueError, match="unsupported checksum algorithm"):
+        hasher_for("shake_128")
 
 
 def test_digest_path_streams_file_content(tmp_path):

@@ -37,7 +37,7 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..results import CallResult
+from ..results import CallResult, format_items
 
 type UvState = Literal["present", "absent", "latest"]
 
@@ -144,9 +144,10 @@ def dependencies(
     if initialized:
         parts.append(f"init project {project_path}")
     if state == "absent":
-        parts.extend(f"-{entry}" for entry in removed)
-    else:
-        parts.extend(f"+{requirement}" for requirement in added)
+        if removed:
+            parts.append(format_items(removed, sign="-"))
+    elif added:
+        parts.append(format_items(added, sign="+"))
     parts.append(f"sync {project_path}")
     data = _call_data("dependencies", wanted, state, project=str(project_path), added=added, removed=removed)
     result = CallResult(action="uv.dependencies", changed=True, summary="; ".join(parts), **data)

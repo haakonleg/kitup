@@ -1,8 +1,9 @@
 """Result and call-tracking data structures used by the runner."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from ._utils.mapping import AttrDict
 from .registry import Task
@@ -43,6 +44,11 @@ class CallResult(AttrDict):
     def summary(self) -> str:
         """Short human-readable description of the call."""
         return str(self["summary"])
+
+
+def format_items(items: Iterable[str], *, sign: Literal["+", "-"]) -> str:
+    """Format ``items`` as space-separated tokens prefixed with ``sign``."""
+    return " ".join(f"{sign}{item}" for item in items)
 
 
 class Status(StrEnum):

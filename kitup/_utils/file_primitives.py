@@ -18,7 +18,10 @@ import stat
 import tempfile
 from collections.abc import Callable
 from functools import cache
-from typing import Any, BinaryIO, Final
+from typing import TYPE_CHECKING, Any, BinaryIO, Final
+
+if TYPE_CHECKING:
+    from _hashlib import HASH
 
 
 @cache
@@ -344,16 +347,22 @@ def _apply_replacement_metadata(
     apply_metadata(temp, mode, owner, group)
 
 
-def digest_path(path: str | os.PathLike[str], algorithm: str) -> str:
-    """Return a hex digest for a file, streaming its contents."""
+def hasher_for(algorithm: str) -> HASH:
+    """Return a hasher for ``algorithm``, rejecting unsupported algorithms."""
     try:
-        digest = hashlib.new(algorithm)
+        hasher = hashlib.new(algorithm)
     except ValueError as exc:
         raise ValueError(f"unsupported checksum algorithm: {algorithm}") from exc
-    if digest.digest_size <= 0:
+    if hasher.digest_size <= 0:
         raise ValueError(f"unsupported checksum algorithm: {algorithm}")
+    return hasher
+
+
+def digest_path(path: str | os.PathLike[str], algorithm: str) -> str:
+    """Return a hex digest for a file, streaming its contents."""
+    digest = hasher_for(algorithm)
     with open(path, "rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
             digest.update(chunk)
     return digest.hexdigest()
 

@@ -17,7 +17,7 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..results import CallResult
+from ..results import CallResult, format_items
 
 
 def remote(
@@ -131,7 +131,7 @@ def packages(
         call = CallResult(
             action="flatpak.packages",
             changed=True,
-            summary=" ".join(f"+{name}" for name in missing),
+            summary=format_items(missing, sign="+"),
             added=missing,
             scope=scope,
         )
@@ -167,7 +167,7 @@ def packages(
     call = CallResult(
         action="flatpak.packages",
         changed=True,
-        summary=" ".join(f"-{name}" for name in targets),
+        summary=format_items(targets, sign="-"),
         removed=targets,
         scope=scope,
     )

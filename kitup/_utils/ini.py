@@ -10,8 +10,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Final, Literal, NamedTuple
 
 from ..errors import TaskFailed
-from .text import LINE_BREAKS, line_body
-from .validation import require_collection, require_encodable, require_regex, require_text
+from .text import line_body
+from .validation import has_control_characters, require_collection, require_encodable, require_regex, require_text
 
 
 class OptionEntry(NamedTuple):
@@ -25,9 +25,6 @@ class OptionEntry(NamedTuple):
 
 # A header line needs a closing bracket on the same line; section_re() agrees.
 _HEADER_RE: Final = re.compile(r"^\s*\[[^\]\n]*\]")
-_SECTION_FORBIDDEN: Final = "[]" + LINE_BREAKS + "\0"
-_OPTION_FORBIDDEN: Final = "=[]" + LINE_BREAKS + "\0"
-_VALUE_FORBIDDEN: Final = LINE_BREAKS + "\0"
 
 
 def parse_option(line: str) -> tuple[str, str] | None:
@@ -296,8 +293,8 @@ def require_ini_section(section: str) -> str:
         raise TaskFailed("ini section must be a string")
     require_text(section, "ini section")
     require_encodable(section, "ini section")
-    if any(char in section for char in _SECTION_FORBIDDEN):
-        raise TaskFailed("ini section must not contain brackets, null bytes, or line breaks")
+    if any(char in section for char in "[]") or has_control_characters(section, allow="\t"):
+        raise TaskFailed("ini section must not contain brackets or control characters")
     return section.strip()
 
 
@@ -307,8 +304,8 @@ def require_ini_option(option: str) -> str:
         raise TaskFailed("ini option must be a string")
     require_text(option, "ini option")
     require_encodable(option, "ini option")
-    if any(char in option for char in _OPTION_FORBIDDEN):
-        raise TaskFailed("ini option must not contain '=', brackets, null bytes, or line breaks")
+    if any(char in option for char in "=[]") or has_control_characters(option, allow="\t"):
+        raise TaskFailed("ini option must not contain '=', brackets, or control characters")
     stripped = option.strip()
     if stripped.startswith(("#", ";")):
         raise TaskFailed("ini option must not start with a comment character")
@@ -321,8 +318,8 @@ def require_ini_value(value: str) -> str:
         raise TaskFailed("ini value must be a string")
     require_text(value, "ini value")
     require_encodable(value, "ini value")
-    if any(char in value for char in _VALUE_FORBIDDEN):
-        raise TaskFailed("ini value must not contain line breaks or null bytes")
+    if has_control_characters(value, allow="\t"):
+        raise TaskFailed("ini value must not contain control characters")
     return value.strip()
 
 
@@ -352,8 +349,8 @@ def require_ini_values(values: Iterable[str]) -> list[str]:
             raise TaskFailed("ini value list items must be strings")
         require_text(item, "ini value list item")
         require_encodable(item, "ini value list item")
-        if any(char in item for char in _VALUE_FORBIDDEN):
-            raise TaskFailed("ini value list items must not contain line breaks or null bytes")
+        if has_control_characters(item, allow="\t"):
+            raise TaskFailed("ini value list items must not contain control characters")
         stripped = item.strip()
         if stripped.startswith(("#", ";")):
             raise TaskFailed("ini value list items must not start with a comment character")

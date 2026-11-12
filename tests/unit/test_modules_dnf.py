@@ -717,7 +717,7 @@ def test_config_validates_arguments_before_touching_the_file(tmp_path):
         dnf.config(ctx, "  ", "1", path=missing)
     with pytest.raises(TaskFailed, match="config path must not be empty"):
         dnf.config(ctx, "best", "1", path="")
-    with pytest.raises(TaskFailed, match="line breaks"):
+    with pytest.raises(TaskFailed, match="control characters"):
         dnf.config(ctx, "best", "a\nb", path=missing)
     with pytest.raises(TaskFailed, match="unsupported config value type"):
         dnf.config(ctx, "best", 1.5, path=missing)

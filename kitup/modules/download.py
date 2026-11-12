@@ -16,11 +16,11 @@ from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
 from .._utils import file_actions
 from .._utils.file_actions import PathPolicy, require_path_kind
-from .._utils.file_primitives import TempFileError, digest_path, replace_path, stage_path
+from .._utils.file_primitives import TempFileError, digest_path, hasher_for, replace_path, stage_path
 from .._utils.http import open_url, read_response
 from .._utils.paths import expand_path
 from .._utils.timing import timed
-from .._utils.validation import require_bool, require_mode, require_path, require_timeout
+from .._utils.validation import has_control_characters, require_bool, require_mode, require_path, require_timeout
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
@@ -393,7 +393,7 @@ def _validate_url(url: str) -> tuple[str, SplitResult]:
     url = url.strip()
     if not url:
         raise TaskFailed("URL must not be empty")
-    if any(ord(character) < 32 or ord(character) == 127 for character in url):
+    if has_control_characters(url):
         raise TaskFailed("URL must not contain control characters")
     if any(character.isspace() for character in url):
         raise TaskFailed("URL must not contain whitespace")
@@ -432,11 +432,9 @@ def _parse_checksum(value: str | None) -> _Checksum | None:
     algorithm = algorithm.lower()
     digest = digest.lower()
     try:
-        hasher = hashlib.new(algorithm)
+        hasher = hasher_for(algorithm)
     except ValueError as exc:
         raise TaskFailed(f"unsupported checksum algorithm: {algorithm}") from exc
-    if hasher.digest_size <= 0:
-        raise TaskFailed(f"unsupported checksum algorithm: {algorithm}")
     if len(digest) != hasher.digest_size * 2 or _HEX_DIGEST.fullmatch(digest) is None:
         raise TaskFailed(f"invalid {algorithm} checksum digest: {digest}")
     return _Checksum(algorithm, digest)
@@ -454,7 +452,7 @@ def _build_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
                 raise TaskFailed(f"invalid header name: {name!r}")
             if not isinstance(value, str):
                 raise TaskFailed(f"header {name!r} value must be a string")
-            if any(ord(character) < 32 and character != "\t" for character in value) or "\x7f" in value:
+            if has_control_characters(value, allow="\t"):
                 raise TaskFailed(f"header {name!r} value must not contain control characters")
             values[name] = value
     if not any(name.lower() == "accept-encoding" for name in values):

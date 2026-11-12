@@ -5,13 +5,12 @@ import io
 import ssl
 from collections.abc import Callable, Mapping
 from functools import cache
-from typing import Any, BinaryIO, Final
+from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPSHandler, Request, build_opener
 
 from ..errors import TaskFailed
-
-_CHUNK_SIZE: Final = 1024 * 1024
+from .file_primitives import CHUNK_SIZE
 
 
 def open_url(
@@ -64,7 +63,7 @@ def read_response(
     total = 0
     while True:
         try:
-            chunk = response.read(_CHUNK_SIZE)
+            chunk = response.read(CHUNK_SIZE)
         except TimeoutError as exc:
             raise TaskFailed(f"{label} timed out while reading: {context}") from exc
         except http.client.IncompleteRead as exc:

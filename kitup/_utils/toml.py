@@ -17,8 +17,8 @@ from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
 from . import file_actions
-from .text import LINE_BREAKS, line_body
-from .validation import require_text
+from .text import line_body
+from .validation import has_control_characters, require_text
 
 type TomlValue = str | bool | int | float | Iterable[str]
 type _KeyAction = Literal["added", "replaced", "unchanged"]
@@ -112,8 +112,8 @@ def require_toml_key(key: str, label: str = "toml key") -> str:
     if not isinstance(key, str):
         raise TaskFailed(f"{label} must be a string")
     require_text(key, label)
-    if any(char in key for char in LINE_BREAKS) or "\0" in key:
-        raise TaskFailed(f"{label} must not contain line breaks or null bytes")
+    if has_control_characters(key):
+        raise TaskFailed(f"{label} must not contain control characters")
     parts: list[str] = []
     for part in key.split("."):
         stripped = part.strip()

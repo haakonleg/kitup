@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 
 from .._utils.http import open_url, read_bytes
-from .._utils.validation import require_text, require_timeout
+from .._utils.validation import has_control_characters, require_text, require_timeout
 from ..context import TaskContext
 from ..errors import TaskFailed
 
@@ -341,7 +341,7 @@ def _memo_key(
 
 
 def _has_whitespace_or_control(value: str) -> bool:
-    return any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
+    return any(character.isspace() for character in value) or has_control_characters(value)
 
 
 def _http_error_message(exc: HTTPError, label: str) -> str:

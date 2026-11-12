@@ -1,11 +1,11 @@
 """System-level host settings through systemd tools."""
 
-import unicodedata
 from collections.abc import Mapping
 from typing import Final, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .._utils.validation import (
+    has_control_characters,
     require_bool,
     require_choice,
     require_collection,
@@ -314,7 +314,7 @@ def _require_hostname(value: str) -> str:
 
 
 def _require_pretty(value: str) -> str:
-    if _has_control_characters(value):
+    if has_control_characters(value):
         raise TaskFailed("pretty hostname must not contain control characters")
     return value.strip()
 
@@ -323,9 +323,5 @@ def _require_token(value: str, label: str) -> None:
     require_text(value, label)
     if any(char.isspace() for char in value):
         raise TaskFailed(f"{label} must not contain whitespace")
-    if _has_control_characters(value):
+    if has_control_characters(value):
         raise TaskFailed(f"{label} must not contain control characters")
-
-
-def _has_control_characters(value: str) -> bool:
-    return any(unicodedata.category(char).startswith("C") for char in value)

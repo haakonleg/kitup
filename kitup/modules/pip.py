@@ -26,7 +26,7 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..results import CallResult
+from ..results import CallResult, format_items
 
 type PipState = Literal["present", "absent", "latest"]
 type VenvState = Literal["exists", "created", "would-create", "missing"]
@@ -211,7 +211,7 @@ def _ensure_present(
     prefix = f"create venv {venv}; " if venv_state in ("created", "would-create") else ""
     result = _packages_result(
         changed=True,
-        summary=prefix + " ".join(f"+{name}" for name in pending),
+        summary=prefix + format_items(pending, sign="+"),
         wanted=wanted,
         venv=venv,
         added=pending,
@@ -255,7 +255,7 @@ def _ensure_absent(
 
     result = _packages_result(
         changed=True,
-        summary=" ".join(f"-{name}" for name in targets),
+        summary=format_items(targets, sign="-"),
         wanted=wanted,
         venv=venv,
         removed=targets,

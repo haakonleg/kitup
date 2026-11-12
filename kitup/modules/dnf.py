@@ -24,7 +24,7 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
-from ..results import CallResult
+from ..results import CallResult, format_items
 
 _DEFAULT_CONFIG_PATH: Final = Path("/etc/dnf/dnf.conf")
 _MISSING_PACKAGE: Final = re.compile(r"^package (.+) is not installed$")
@@ -132,7 +132,7 @@ def _ensure_absent(
     result = CallResult(
         action="dnf.packages",
         changed=True,
-        summary=" ".join(f"-{name}" for name in removed),
+        summary=format_items(removed, sign="-"),
         removed=removed,
         groups=installed_groups,
         packages=installed_packages,
@@ -171,7 +171,7 @@ def autoremove(ctx: TaskContext) -> CallResult:
             removed=[],
         )
 
-    summary = " ".join(f"-{name}" for name in unneeded)
+    summary = format_items(unneeded, sign="-")
     call = CallResult(action="dnf.autoremove", changed=True, summary=summary, removed=unneeded)
     if ctx.dry_run:
         return ctx.changed(call)
@@ -411,7 +411,7 @@ def _ensure_present(
     result = CallResult(
         action="dnf.packages",
         changed=True,
-        summary=" ".join(f"+{name}" for name in added),
+        summary=format_items(added, sign="+"),
         added=added,
         groups=missing_groups,
         packages=missing_packages,
