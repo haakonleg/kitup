@@ -5,6 +5,7 @@ import inspect
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from functools import cached_property
 from itertools import count
 from pathlib import Path
 from types import ModuleType
@@ -120,6 +121,7 @@ class Bundle:
 
         self._frozen = False
         self._tasks: list[Task] = []
+        self._task_ids: set[str] = set()
         self.id = name or ""
         self.name = name or ""
         self.description = description
@@ -139,7 +141,7 @@ class Bundle:
             raise AttributeError(f"bundle {self.id!r} is immutable after discovery")
         super().__setattr__(name, value)
 
-    @property
+    @cached_property
     def tasks(self) -> tuple[Task, ...]:
         """Tasks owned by this bundle, in declaration order."""
         return tuple(self._tasks)
@@ -224,9 +226,12 @@ class Bundle:
         if self._frozen:
             raise BundleError(f"bundle {self.id!r} is immutable after discovery")
         task = Task(spec=spec, bundle=self, bundle_path=self.path)
-        if any(existing.id == task.id for existing in self.tasks):
-            raise BundleError(f"duplicate task id {task.id!r}")
+        task_id = task.id
+        if task_id in self._task_ids:
+            raise BundleError(f"duplicate task id {task_id!r}")
         self._tasks.append(task)
+        self._task_ids.add(task_id)
+        self.__dict__.pop("tasks", None)
 
     def _normalize_dependencies(self, depends_on: Sequence[str | Bundle]) -> tuple[str | Bundle, ...]:
         if isinstance(depends_on, (str, Bundle)):

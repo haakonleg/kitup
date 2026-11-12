@@ -387,3 +387,11 @@ def test_file_accepts_path_objects_and_numeric_metadata(tmp_path):
     template.file(ctx, source, dest, owner=os.getuid(), group=os.getgid())
 
     assert dest.read_text() == "value\n"
+
+
+def test_jinja_environment_is_cached():
+    template._jinja_environment.cache_clear()
+    try:
+        assert template._jinja_environment() is template._jinja_environment()
+    finally:
+        template._jinja_environment.cache_clear()

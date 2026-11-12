@@ -11,6 +11,7 @@ import zlib
 from collections.abc import Mapping
 from compression import zstd
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any, BinaryIO, Final, Protocol
 from urllib.error import HTTPError
@@ -207,7 +208,7 @@ def to_file(
             size = temporary.stat().st_size
         except OSError as exc:
             raise TaskFailed(f"could not inspect downloaded file: {exc}") from exc
-        if info is not None and info.size == size and _content_matches(target, checksum_dest):
+        if info is not None and info.size == size and _content_matches(target, info, checksum_dest):
             return ctx.changed(
                 _reconcile_metadata(
                     ctx,
@@ -488,6 +489,12 @@ def _validate_destination_info(target: Path, info: file_actions.FileInfo | None)
         raise TaskFailed(f"download destination is not a regular file: {target}")
 
 
+@cache
+def _digest(path: Path, _mtime_ns: int, _size: int, algorithm: str) -> str:
+    """Hash a file whose metadata identifies the content being hashed."""
+    return digest_path(path, algorithm)
+
+
 def _needs_download(
     target: Path,
     info: file_actions.FileInfo | None,
@@ -500,14 +507,14 @@ def _needs_download(
     if checksum is None:
         return False
     try:
-        return digest_path(target, checksum.algorithm) != checksum.digest
+        return _digest(target, info.mtime_ns, info.size, checksum.algorithm) != checksum.digest
     except (OSError, ValueError) as exc:
         raise TaskFailed(f"could not checksum {target}: {exc}") from exc
 
 
-def _content_matches(target: Path, checksum_dest: str) -> bool:
+def _content_matches(target: Path, info: file_actions.FileInfo, checksum_dest: str) -> bool:
     try:
-        return digest_path(target, "sha256") == checksum_dest
+        return _digest(target, info.mtime_ns, info.size, "sha256") == checksum_dest
     except (OSError, ValueError) as exc:
         raise TaskFailed(f"could not checksum downloaded file: {exc}") from exc
 

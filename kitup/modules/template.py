@@ -104,11 +104,7 @@ def _render(
     variables: Mapping[str, Any],
 ) -> str:
     jinja2 = _load_jinja2()
-    environment = jinja2.Environment(
-        undefined=jinja2.StrictUndefined,
-        keep_trailing_newline=True,
-        autoescape=False,
-    )
+    environment = _jinja_environment()
     context = {
         "vars": dict(vars(ctx.vars)),
         "facts": dict(ctx.facts),
@@ -135,3 +131,14 @@ def _load_jinja2() -> Any:
     except ImportError as exc:  # pragma: no cover - packaging guarantees the dependency
         raise TaskFailed("the template module requires Jinja2; install it or use the standalone kitup build") from exc
     return jinja2
+
+
+@cache
+def _jinja_environment() -> Any:
+    """Return the shared Jinja2 environment used for every template render."""
+    jinja2 = _load_jinja2()
+    return jinja2.Environment(
+        undefined=jinja2.StrictUndefined,
+        keep_trailing_newline=True,
+        autoescape=False,
+    )

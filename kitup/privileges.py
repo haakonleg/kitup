@@ -23,7 +23,7 @@ class PrivilegeManager:
     the cached credentials expired, the caller prompts and retries once.
     """
 
-    @property
+    @cached_property
     def is_root(self) -> bool:
         """Return whether the current process is running as root."""
         return os.geteuid() == 0

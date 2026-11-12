@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import http.server
+import os
 import stat
 import zlib
 from compression import zstd
@@ -269,6 +270,41 @@ def test_to_file_checksum_mismatch_replaces_file(tmp_path, http_server):
     assert target.read_bytes() == state.payload
     assert state.requests == 1
     assert len(ctx.changes) == 1
+
+
+def test_to_file_hashes_a_same_size_target_once(tmp_path, http_server, monkeypatch):
+    state, base = http_server
+    state.payload = b"changed\n"
+    target = tmp_path / "file.txt"
+    target.write_bytes(b"content\n")
+    checksum = f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
+    calls = []
+    original = download.digest_path
+
+    def counting(path, algorithm):
+        calls.append((path, algorithm))
+        return original(path, algorithm)
+
+    monkeypatch.setattr(download, "digest_path", counting)
+    download._digest.cache_clear()
+
+    download.to_file(make_context(tmp_path), f"{base}/file.txt", target, checksum=checksum)
+
+    assert target.read_bytes() == state.payload
+    assert len(calls) == 1
+
+
+def test_digest_cache_invalidates_when_file_changes(tmp_path):
+    path = tmp_path / "file"
+    path.write_bytes(b"one")
+    info = os.stat(path)
+    first = download._digest(path, info.st_mtime_ns, info.st_size, "sha256")
+
+    path.write_bytes(b"two")
+    os.utime(path, ns=(1, 1))
+    info = os.stat(path)
+
+    assert download._digest(path, info.st_mtime_ns, info.st_size, "sha256") != first
 
 
 def test_to_file_bad_checksum_leaves_destination_untouched(tmp_path, http_server):

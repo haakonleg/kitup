@@ -1,5 +1,7 @@
+import grp
 import hashlib
 import os
+import pwd
 import stat
 
 import pytest
@@ -15,6 +17,8 @@ from kitup._utils.file_primitives import (
     read_regular_path,
     remove_path,
     replace_path,
+    resolve_group,
+    resolve_owner,
     stat_path,
     symlink_path,
     write_path,
@@ -288,3 +292,89 @@ def test_digest_path_streams_file_content(tmp_path):
     assert digest_path(path, "sha256") == hashlib.sha256(b"data\n").hexdigest()
     with pytest.raises(ValueError, match="unsupported checksum algorithm"):
         digest_path(path, "not-a-real-algorithm")
+
+
+def test_resolve_owner_caches_successful_lookups(monkeypatch):
+    calls = []
+
+    class Entry:
+        pw_uid = 1234
+
+    def fake_getpwnam(name):
+        calls.append(name)
+        return Entry()
+
+    monkeypatch.setattr(pwd, "getpwnam", fake_getpwnam)
+    resolve_owner.cache_clear()
+    try:
+        assert resolve_owner("alice") == 1234
+        assert resolve_owner("alice") == 1234
+        assert calls == ["alice"]
+    finally:
+        resolve_owner.cache_clear()
+
+
+def test_resolve_owner_does_not_cache_failures(monkeypatch):
+    calls = []
+
+    class Entry:
+        pw_uid = 1234
+
+    def fake_getpwnam(name):
+        calls.append(name)
+        if len(calls) == 1:
+            raise KeyError(name)
+        return Entry()
+
+    monkeypatch.setattr(pwd, "getpwnam", fake_getpwnam)
+    resolve_owner.cache_clear()
+    try:
+        with pytest.raises(ValueError, match="unknown user: alice"):
+            resolve_owner("alice")
+        assert resolve_owner("alice") == 1234
+        assert calls == ["alice", "alice"]
+    finally:
+        resolve_owner.cache_clear()
+
+
+def test_resolve_group_caches_successful_lookups(monkeypatch):
+    calls = []
+
+    class Entry:
+        gr_gid = 4321
+
+    def fake_getgrnam(name):
+        calls.append(name)
+        return Entry()
+
+    monkeypatch.setattr(grp, "getgrnam", fake_getgrnam)
+    resolve_group.cache_clear()
+    try:
+        assert resolve_group("staff") == 4321
+        assert resolve_group("staff") == 4321
+        assert calls == ["staff"]
+    finally:
+        resolve_group.cache_clear()
+
+
+def test_resolve_group_does_not_cache_failures(monkeypatch):
+    calls = []
+
+    class Entry:
+        gr_gid = 4321
+
+    def fake_getgrnam(name):
+        calls.append(name)
+        if len(calls) == 1:
+            raise KeyError(name)
+        return Entry()
+
+    monkeypatch.setattr(grp, "getgrnam", fake_getgrnam)
+    resolve_group.cache_clear()
+    try:
+        with pytest.raises(ValueError, match="unknown group: staff"):
+            resolve_group("staff")
+        assert resolve_group("staff") == 4321
+        assert calls == ["staff", "staff"]
+    finally:
+        resolve_group.cache_clear()

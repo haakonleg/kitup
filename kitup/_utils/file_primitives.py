@@ -17,9 +17,11 @@ import shutil
 import stat
 import tempfile
 from collections.abc import Callable
+from functools import cache
 from typing import Any, BinaryIO, Final
 
 
+@cache
 def resolve_owner(owner: str | int | None) -> int | None:
     """Resolve an optional user name to a numeric UID."""
     if owner is None or isinstance(owner, int):
@@ -30,6 +32,7 @@ def resolve_owner(owner: str | int | None) -> int | None:
         raise ValueError(f"unknown user: {owner}") from exc
 
 
+@cache
 def resolve_group(group: str | int | None) -> int | None:
     """Resolve an optional group name to a numeric GID."""
     if group is None or isinstance(group, int):

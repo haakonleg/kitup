@@ -131,6 +131,21 @@ def test_sudo_lookup_is_cached(monkeypatch):
     assert lookups == ["sudo"]
 
 
+def test_is_root_caches_the_effective_uid(monkeypatch):
+    calls = []
+
+    def fake_geteuid():
+        calls.append(True)
+        return 0
+
+    monkeypatch.setattr("os.geteuid", fake_geteuid)
+    manager = PrivilegeManager()
+
+    assert manager.is_root is True
+    assert manager.is_root is True
+    assert calls == [True]
+
+
 def test_require_available_rejects_missing_sudo(monkeypatch):
     monkeypatch.setattr("os.geteuid", lambda: 1000)
     monkeypatch.setattr("shutil.which", lambda name: None)

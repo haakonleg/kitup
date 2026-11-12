@@ -435,6 +435,26 @@ def test_dependency_ids_are_stripped():
     assert bundle.depends_on == ("other",)
 
 
+def test_bundle_tasks_are_cached_and_invalidated_on_add():
+    bundle = Bundle("Base")
+
+    def first(ctx):
+        pass
+
+    def second(ctx):
+        pass
+
+    bundle.task(first)
+    cached = bundle.tasks
+
+    assert bundle.tasks is cached
+
+    bundle.task(second)
+
+    assert bundle.tasks is not cached
+    assert [task.func.__name__ for task in bundle.tasks] == ["first", "second"]
+
+
 def test_duplicate_task_ids_are_rejected():
     bundle = Bundle("Base")
 

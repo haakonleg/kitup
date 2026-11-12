@@ -4,6 +4,7 @@ import http.client
 import io
 import ssl
 from collections.abc import Callable, Mapping
+from functools import cache
 from typing import Any, BinaryIO, Final
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPSHandler, Request, build_opener
@@ -105,7 +106,9 @@ def read_bytes(
     return buffer.getvalue()
 
 
+@cache
 def _ssl_context(*, validate_certs: bool) -> ssl.SSLContext:
+    """Return a reusable SSL context for the requested certificate policy."""
     if validate_certs:
         return ssl.create_default_context()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
