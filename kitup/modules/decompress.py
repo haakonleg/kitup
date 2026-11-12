@@ -12,20 +12,22 @@ import tempfile
 import zipfile
 import zlib
 from collections.abc import Callable, Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, closing, contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import IO, Any, Final
+from typing import IO, Any, Final, Literal
 
 from .._utils import file_actions
 from .._utils.file_primitives import (
+    CHUNK_SIZE,
     apply_metadata,
+    compare_paths,
     mkdir_path,
     replace_path,
     symlink_path,
 )
 from .._utils.paths import expand_path
-from .._utils.validation import normalize_strings, require_mode, require_path, require_text
+from .._utils.validation import normalize_strings, require_mode, require_non_negative_int, require_path, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
@@ -35,7 +37,9 @@ try:
 except ImportError:  # pragma: no cover - Python builds without zstd support
     zstd = None  # type: ignore[assignment]
 
-_CHUNK_SIZE: Final = 1024 * 1024
+type _Archive = tarfile.TarFile | zipfile.ZipFile
+type _MemberKind = Literal["dir", "symlink", "file"]
+
 _COMPRESSION_SUFFIXES: Final = (".zst", ".zstd", ".gz", ".bz2", ".xz")
 
 _DECOMPRESSION_ERRORS: Final[tuple[type[BaseException], ...]] = (
@@ -62,11 +66,11 @@ class _Member:
     """One selected archive member."""
 
     name: str
-    kind: str
-    size: int  # file size; unused for directories and symlinks
-    mode: int | None
-    link: str | None
+    kind: _MemberKind
     raw: Any
+    size: int = 0  # file size; unused for directories and symlinks
+    mode: int | None = None
+    link: str | None = None
 
 
 def archive(
@@ -92,7 +96,7 @@ def archive(
     require_path(src, "archive source")
     require_path(dest, "archive destination")
     require_mode(mode)
-    strip = _require_strip_components(strip_components)
+    require_non_negative_int(strip_components, "strip_components")
     includes = _require_patterns(include, "include")
     excludes = _require_patterns(exclude, "exclude")
 
@@ -113,15 +117,14 @@ def archive(
                 _archive_result(
                     source,
                     target,
-                    changed=False,
+                    changes=0,
                     files=[],
                     size=_directory_size(target),
                 )
             )
 
-    opened = _open_archive(source)
-    try:
-        entries = _select_entries(opened, strip, includes, excludes)
+    with closing(_open_archive(source)) as opened:
+        entries = _select_entries(opened, strip_components, includes, excludes)
         files = _archive_files(entries)
         changed = _reconcile(
             ctx,
@@ -131,17 +134,14 @@ def archive(
             target_info,
             mode=mode,
         )
-    finally:
-        opened.close()
 
     return ctx.changed(
         _archive_result(
             source,
             target,
-            changed=bool(changed),
+            changes=changed,
             files=files,
             size=_directory_size(target),
-            extracted=changed,
         )
     )
 
@@ -168,9 +168,6 @@ def file(
     source = ctx.resolve_source(src)
     _require_source(source, "compressed source")
     _reject_archive(source)
-    # Validate the compression format even when a dry run skips decompression.
-    with _translate_decompression_errors(source), _decompressed_stream(source):
-        pass
     target, info = _single_destination(source, dest)
     if info is not None:
         if info.is_symlink:
@@ -184,6 +181,9 @@ def file(
 
     if ctx.dry_run:
         if info is None:
+            # Validate the compression format without decompressing.
+            with _translate_decompression_errors(source), _decompressed_stream(source):
+                pass
             changed = True
         else:
             with _translate_decompression_errors(source), _decompressed_stream(source) as stream:
@@ -192,16 +192,18 @@ def file(
     else:
         # Decompress once into a staged file, then compare it with the target so
         # a rewrite never decompresses the source a second time.
-        with _translate_decompression_errors(source):
-            temporary = _decompress_to_temp(source, target.parent)
-        try:
+        with (
+            _translate_decompression_errors(source),
+            _staged(
+                target.parent,
+                lambda: _decompressed_stream(source),
+            ) as temporary,
+        ):
             if info is not None and _files_match(target, temporary):
                 changed = _reconcile_metadata(target, info, mode=mode, dry_run=False)
             else:
                 _install_temp(temporary, target, mode=mode, default_mode=0o644)
                 changed = True
-        finally:
-            temporary.unlink(missing_ok=True)
     return ctx.changed(_file_change(target, source, changed=changed))
 
 
@@ -209,15 +211,14 @@ def _archive_result(
     source: Path,
     target: Path,
     *,
-    changed: bool,
+    changes: int,
     files: list[str],
     size: int,
-    extracted: int = 0,
 ) -> CallResult:
-    summary = f"extract {extracted} paths from {source} -> {target}" if changed else f"ensure {target} from {source}"
+    summary = f"extract {changes} paths from {source} -> {target}" if changes else f"ensure {target} from {source}"
     return CallResult(
         action="decompress.archive",
-        changed=changed,
+        changed=bool(changes),
         summary=summary,
         src=str(source),
         dest=str(target),
@@ -239,7 +240,7 @@ def _file_change(target: Path, source: Path, *, changed: bool) -> CallResult:
 
 def _reconcile(
     ctx: TaskContext,
-    archive: tarfile.TarFile | zipfile.ZipFile,
+    archive: _Archive,
     entries: dict[str, _Member],
     target: Path,
     target_info: file_actions.FileInfo | None,
@@ -324,7 +325,7 @@ def _ensure_directory(
 
 
 def _ensure_file(
-    archive: tarfile.TarFile | zipfile.ZipFile,
+    archive: _Archive,
     member: _Member,
     path: Path,
     *,
@@ -335,20 +336,41 @@ def _ensure_file(
     if info is not None and info.is_dir:
         raise TaskFailed(f"refusing to replace directory with file: {path}")
 
-    if _member_matches(archive, member, path, info):
-        return _reconcile_metadata(path, info, mode=mode, dry_run=dry_run)
-
     if dry_run:
+        if _member_matches(archive, member, path, info):
+            return _reconcile_metadata(path, info, mode=mode, dry_run=True)
         return True
 
+    # Stage the member once, then compare the staged copy with the target. This
+    # avoids reopening the member, which would rewind a compressed archive
+    # stream and decompress it from the start a second time.
     try:
-        temporary = _materialize(archive, member, path.parent)
+        with _staged(path.parent, lambda: _open_member(archive, member)) as temporary:
+            if _same_contents(path, info, temporary, member):
+                return _reconcile_metadata(path, info, mode=mode, dry_run=False)
+            _install_temp(temporary, path, mode=mode, default_mode=member.mode or 0o644)
+            return True
     except TaskFailed:
         raise
     except _ARCHIVE_ERRORS as exc:
         raise TaskFailed(f"could not extract {member.name!r}: {exc}") from exc
-    _install_temp(temporary, path, mode=mode, default_mode=member.mode or 0o644)
-    return True
+
+
+def _same_contents(
+    path: Path,
+    info: file_actions.FileInfo | None,
+    temporary: Path,
+    member: _Member,
+) -> bool:
+    """Return whether the target already holds the member's contents."""
+    if not _same_size_regular(info, member.size):
+        return False
+    return _files_match(path, temporary)
+
+
+def _same_size_regular(info: file_actions.FileInfo | None, size: int) -> bool:
+    """Return whether ``info`` describes a regular file of ``size`` bytes."""
+    return info is not None and not info.is_symlink and info.is_file and info.size == size
 
 
 def _ensure_symlink(
@@ -376,14 +398,12 @@ def _ensure_symlink(
 
 
 def _member_matches(
-    archive: tarfile.TarFile | zipfile.ZipFile,
+    archive: _Archive,
     member: _Member,
     path: Path,
     info: file_actions.FileInfo | None,
 ) -> bool:
-    if info is None or info.is_symlink or not info.is_file:
-        return False
-    if info.size != member.size:
+    if not _same_size_regular(info, member.size):
         return False
     try:
         with _open_member(archive, member) as stream:
@@ -397,10 +417,11 @@ def _member_matches(
 def _files_match(path: Path, other: Path) -> bool:
     """Return whether two regular files have identical contents."""
     try:
-        with other.open("rb") as stream:
-            return _stream_matches(path, stream)
+        return compare_paths(path, other)
+    except ValueError as exc:
+        raise TaskFailed(str(exc)) from exc
     except OSError as exc:
-        raise TaskFailed(f"could not read {other}: {exc}") from exc
+        raise TaskFailed(f"could not compare {path} and {other}: {exc}") from exc
 
 
 def _stream_matches(path: Path, stream: Any) -> bool:
@@ -411,11 +432,11 @@ def _stream_matches(path: Path, stream: Any) -> bool:
     with existing:
         while True:
             try:
-                current = existing.read(_CHUNK_SIZE)
+                current = existing.read(CHUNK_SIZE)
             except OSError as exc:
                 raise TaskFailed(f"could not read {path}: {exc}") from exc
             # Stream errors belong to the source and are reported by callers.
-            incoming = stream.read(_CHUNK_SIZE)
+            incoming = stream.read(CHUNK_SIZE)
             if current != incoming:
                 return False
             if not current:
@@ -424,7 +445,7 @@ def _stream_matches(path: Path, stream: Any) -> bool:
 
 @contextmanager
 def _open_member(
-    archive: tarfile.TarFile | zipfile.ZipFile,
+    archive: _Archive,
     member: _Member,
 ) -> Iterator[Any]:
     if isinstance(archive, tarfile.TarFile):
@@ -467,28 +488,40 @@ def _write_temp(
         raise
 
 
-def _materialize(
-    archive: tarfile.TarFile | zipfile.ZipFile,
-    member: _Member,
+def _stage(
     directory: Path,
+    open_stream: Callable[[], AbstractContextManager[Any]],
 ) -> Path:
+    """Write a stream to a temporary file beside its destination."""
+
     def write(sink: IO[bytes]) -> None:
-        with _open_member(archive, member) as source:
-            shutil.copyfileobj(source, sink, _CHUNK_SIZE)
+        with open_stream() as source:
+            shutil.copyfileobj(source, sink, CHUNK_SIZE)
 
     return _write_temp(directory, write)
 
 
+@contextmanager
+def _staged(
+    directory: Path,
+    open_stream: Callable[[], AbstractContextManager[Any]],
+) -> Iterator[Path]:
+    """Stage a stream beside its destination, removing it on exit."""
+    temporary = _stage(directory, open_stream)
+    try:
+        yield temporary
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _install_temp(temporary: Path, path: Path, *, mode: int | None, default_mode: int) -> None:
-    """Replace ``path`` with a staged temporary file and always clean it up."""
+    """Replace ``path`` with a staged temporary file."""
     try:
         replace_path(temporary, path, mode=mode, default_mode=default_mode)
     except ValueError as exc:
         raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not write {path}: {exc}") from exc
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def _reconcile_metadata(
@@ -512,11 +545,24 @@ def _apply_mode(path: Path, mode: int) -> None:
         raise TaskFailed(f"could not update metadata for {path}: {exc}") from exc
 
 
-def _open_archive(path: Path) -> tarfile.TarFile | zipfile.ZipFile:
+def _archive_kind(path: Path) -> Literal["zip", "tar"] | None:
+    """Return the archive format detected from ``path``, if any."""
     try:
         if zipfile.is_zipfile(path):
-            return zipfile.ZipFile(path)
+            return "zip"
         if tarfile.is_tarfile(path):
+            return "tar"
+    except OSError as exc:
+        raise TaskFailed(f"could not read {path}: {exc}") from exc
+    return None
+
+
+def _open_archive(path: Path) -> _Archive:
+    kind = _archive_kind(path)
+    try:
+        if kind == "zip":
+            return zipfile.ZipFile(path)
+        if kind == "tar":
             return tarfile.open(path, mode="r:*")
     except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
         raise TaskFailed(f"could not open archive {path}: {exc}") from exc
@@ -524,7 +570,7 @@ def _open_archive(path: Path) -> tarfile.TarFile | zipfile.ZipFile:
 
 
 def _select_entries(
-    archive: tarfile.TarFile | zipfile.ZipFile,
+    archive: _Archive,
     strip_components: int,
     include: tuple[str, ...],
     exclude: tuple[str, ...],
@@ -574,36 +620,21 @@ def _directory_size(path: Path) -> int:
 
 
 def _iter_members(
-    archive: tarfile.TarFile | zipfile.ZipFile,
+    archive: _Archive,
 ) -> Iterator[_Member]:
     if isinstance(archive, tarfile.TarFile):
         for info in archive.getmembers():
             if info.isdir():
-                yield _Member(
-                    info.name,
-                    "dir",
-                    0,
-                    _archive_mode(info.mode, 0o755),
-                    None,
-                    info,
-                )
+                yield _Member(info.name, "dir", info, mode=_archive_mode(info.mode, 0o755))
             elif info.issym():
-                yield _Member(
-                    info.name,
-                    "symlink",
-                    0,
-                    None,
-                    _require_link(info.linkname, info.name),
-                    info,
-                )
+                yield _Member(info.name, "symlink", info, link=_require_link(info.linkname, info.name))
             elif info.isreg():
                 yield _Member(
                     info.name,
                     "file",
-                    info.size,
-                    _archive_mode(info.mode, 0o644),
-                    None,
                     info,
+                    size=info.size,
+                    mode=_archive_mode(info.mode, 0o644),
                 )
             else:
                 raise TaskFailed(f"unsupported archive member type for {info.name!r}")
@@ -612,32 +643,22 @@ def _iter_members(
     for zip_info in archive.infolist():
         raw_mode = (zip_info.external_attr >> 16) & 0xFFFF
         if zip_info.is_dir() or stat.S_ISDIR(raw_mode):
-            yield _Member(
-                zip_info.filename,
-                "dir",
-                0,
-                _archive_mode(raw_mode, 0o755),
-                None,
-                zip_info,
-            )
+            yield _Member(zip_info.filename, "dir", zip_info, mode=_archive_mode(raw_mode, 0o755))
         elif stat.S_ISLNK(raw_mode):
             link = archive.read(zip_info).decode("utf-8", "surrogateescape")
             yield _Member(
                 zip_info.filename,
                 "symlink",
-                0,
-                None,
-                _require_link(link, zip_info.filename),
                 zip_info,
+                link=_require_link(link, zip_info.filename),
             )
         elif (raw_mode & 0o170000) in (0, stat.S_IFREG):
             yield _Member(
                 zip_info.filename,
                 "file",
-                zip_info.file_size,
-                _archive_mode(raw_mode, 0o644),
-                None,
                 zip_info,
+                size=zip_info.file_size,
+                mode=_archive_mode(raw_mode, 0o644),
             )
         else:
             raise TaskFailed(f"unsupported archive member type for {zip_info.filename!r}")
@@ -691,12 +712,6 @@ def _archive_mode(value: int | None, default: int) -> int:
         return default
     resolved = value & 0o777
     return resolved or default
-
-
-def _require_strip_components(value: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise TaskFailed("strip_components must be a non-negative integer")
-    return value
 
 
 def _require_patterns(
@@ -753,11 +768,7 @@ def _decompressed_name(source: Path) -> str:
 
 
 def _reject_archive(path: Path) -> None:
-    try:
-        is_archive = zipfile.is_zipfile(path) or tarfile.is_tarfile(path)
-    except OSError as exc:
-        raise TaskFailed(f"could not read {path}: {exc}") from exc
-    if is_archive:
+    if _archive_kind(path) is not None:
         raise TaskFailed(f"source is an archive, not a single compressed file: {path}; use decompress.archive()")
 
 
@@ -796,11 +807,3 @@ def _decompressed_stream(path: Path) -> Iterator[Any]:
             raise TaskFailed(f"unsupported compression format: {path}")
     finally:
         raw.close()
-
-
-def _decompress_to_temp(source: Path, directory: Path) -> Path:
-    def write(sink: IO[bytes]) -> None:
-        with _decompressed_stream(source) as stream:
-            shutil.copyfileobj(stream, sink, _CHUNK_SIZE)
-
-    return _write_temp(directory, write)

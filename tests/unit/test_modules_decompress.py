@@ -207,6 +207,40 @@ def test_archive_processes_members_in_archive_order(tmp_path, monkeypatch):
     assert readers[0].rewinds <= 2
 
 
+def test_archive_reads_changed_same_size_members_once(tmp_path, monkeypatch):
+    archive = tmp_path / "changed.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        for index in range(8):
+            _tar_entry(tar, f"app/file{index}.txt", b"original\n")
+    dest = tmp_path / "dest"
+    decompress.archive(make_context(tmp_path), archive, dest)
+    for index in range(8):
+        (dest / f"app/file{index}.txt").write_bytes(b"modified\n")
+
+    readers: list[_CountingStream] = []
+
+    def counting_open(path):
+        raw = path.open("rb")
+        reader = _CountingStream(gzip.GzipFile(fileobj=raw, mode="rb"), raw)
+        readers.append(reader)
+        return tarfile.open(fileobj=reader, mode="r:")
+
+    monkeypatch.setattr(decompress, "_open_archive", counting_open)
+    try:
+        ctx = make_context(tmp_path)
+        decompress.archive(ctx, archive, dest)
+    finally:
+        for reader in readers:
+            reader.close()
+
+    assert len(ctx.changes) == 1
+    for index in range(8):
+        assert (dest / f"app/file{index}.txt").read_bytes() == b"original\n"
+    # Staging reads each member once. Reopening a changed member would rewind the
+    # compressed stream and decompress it from the start again.
+    assert readers[0].rewinds <= 2
+
+
 def test_archive_extracts_zip(tmp_path):
     archive = _write_zip(tmp_path / "app.zip")
     dest = tmp_path / "dest"
