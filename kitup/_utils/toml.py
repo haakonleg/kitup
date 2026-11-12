@@ -1,15 +1,9 @@
 """Line-based TOML editing helpers shared by task modules.
 
-The pure functions operate on line lists produced by :func:`split_lines` and never
-touch the filesystem: a small scanner classifies table headers and key/value
-entries (including multi-line arrays and strings), and the editors change one key
-— or remove a whole table — while preserving unrelated lines and comments.
-Dotted keys resolve against existing sub-table headers, and every edit is
-re-parsed with ``tomllib`` before it is returned, so an edit can never produce
-invalid TOML. Array-of-tables (``[[...]]``) cannot be edited line-based and are
-rejected with a clear error. :func:`apply_toml_key` is the context-aware wrapper
-for modules that edit TOML files, handling file creation, dry-run, and
-privileges.
+Operate on :func:`split_lines` output without touching the filesystem. Edits
+preserve unrelated lines and are re-parsed with ``tomllib`` before being
+returned. Array-of-tables targets are rejected; :func:`apply_toml_key` wraps
+the editors with file creation, dry-run, and privilege handling.
 """
 
 import json
@@ -62,11 +56,9 @@ class _ValueState(NamedTuple):
 
 
 def split_lines(text: str) -> list[str]:
-    r"""Split ``text`` into lines on ``\n`` only, keeping the line endings.
+    r"""Split ``text`` on ``\n`` only, keeping line endings.
 
-    Unlike ``str.splitlines``, Unicode line separators (U+2028, U+0085, ...)
-    are not treated as breaks, so they can appear raw in TOML strings and
-    comments without producing phantom entries.
+    Unlike ``str.splitlines``, Unicode line separators stay inside lines.
     """
     if not text:
         return []
@@ -91,13 +83,7 @@ def toml_string(value: str) -> str:
 
 
 def toml_value(value: object) -> str:
-    """Render a typed value as TOML value text.
-
-    Strings render as basic strings (via :func:`toml_string`), booleans as
-    ``true``/``false``, integers and floats in decimal form, and sequences of
-    strings as a single-line array (``[]`` when empty). Anything else is
-    rejected.
-    """
+    """Render a typed value (including string arrays) as TOML value text."""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
@@ -138,11 +124,16 @@ def require_toml_key(key: str, label: str = "toml key") -> str:
 
 
 def array_items(lines: list[str], table: str | None, key: str) -> list[str] | None:
-    """Return the string items of the array at ``table``/``key``, or ``None`` when absent.
+    """Return the string items at ``table``/``key``, or ``None`` when absent.
 
-    Raise ``TaskFailed`` when the entry exists but is not an array of strings.
+    Raise ``TaskFailed`` when the entry is not an array of strings.
     """
     _, entries, table, key = _scan_resolved(lines, table, key)
+    return _array_items(entries, table, key)
+
+
+def _array_items(entries: list[_Entry], table: str | None, key: str) -> list[str] | None:
+    """Return the array items for ``table``/``key`` from an existing scan."""
     entry = _find_entry(entries, table, key)
     if entry is None:
         return None
@@ -150,16 +141,25 @@ def array_items(lines: list[str], table: str | None, key: str) -> list[str] | No
 
 
 def set_key(lines: list[str], table: str | None, key: str, value_text: str) -> tuple[list[str], _KeyAction]:
-    """Set ``key`` to the rendered ``value_text`` in ``table`` of ``lines``.
+    """Set ``key`` to ``value_text`` in ``table`` and return ``(lines, action)``.
 
-    An existing entry with an equal parsed value is kept as-is (``"unchanged"``);
-    otherwise the first matching entry is replaced (duplicates are dropped) and a
-    missing entry is inserted at the end of the table, creating the table — or the
-    file — when needed. A dotted ``key`` resolves against sub-table headers and
-    top-level dotted entries when present, so the edit never collides with an
-    existing table form. Returns ``(new_lines, action)``.
+    Keep an equal existing entry; otherwise replace the first match and drop
+    duplicates, or insert at the end of the table. Dotted keys resolve against
+    existing sub-table and dotted-key forms.
     """
     headers, entries, table, key = _scan_resolved(lines, table, key)
+    return _set_key_scanned(lines, headers, entries, table, key, value_text)
+
+
+def _set_key_scanned(
+    lines: list[str],
+    headers: list[_Header],
+    entries: list[_Entry],
+    table: str | None,
+    key: str,
+    value_text: str,
+) -> tuple[list[str], _KeyAction]:
+    """Set a key using an existing header and entry scan."""
     span = _table_span(lines, headers, table)
     matches = [entry for entry in entries if entry.table == table and entry.key == key]
     rendered = f"{key} = {value_text}{newline_of(lines)}"
@@ -191,12 +191,10 @@ def remove_key(lines: list[str], table: str | None, key: str) -> list[str]:
 
 
 def remove_table(lines: list[str], table: str) -> list[str]:
-    """Return ``lines`` without the whole ``table``, unchanged when absent.
+    """Return ``lines`` without ``table``, unchanged when absent.
 
-    Removes the ``[table]`` header and every line up to the next header —
-    comments inside the span go with it — or, for a table declared only
-    through top-level dotted keys (``tool.uv.x = ...``), those entries.
-    Array-of-tables (``[[...]]``) targets are rejected.
+    Remove the header span, or top-level dotted keys that declare the table.
+    Array-of-tables targets are rejected.
     """
     headers, entries = _scan(lines)
     span = _table_span(lines, headers, table)  # rejects array-of-tables targets
@@ -219,13 +217,24 @@ def remove_table(lines: list[str], table: str) -> list[str]:
 
 
 def set_array(lines: list[str], table: str | None, key: str, items: list[str]) -> tuple[list[str], _KeyAction]:
-    """Set the string array at ``table``/``key`` to ``items`` (verbatim strings).
+    """Set the string array at ``table``/``key`` to ``items``.
 
-    The rendered entries use TOML basic strings. An existing entry whose parsed
-    items already equal ``items`` is kept as-is; a modified entry keeps its
-    original single- or multi-line style. Returns ``(new_lines, action)``.
+    Keep an equal existing entry; otherwise preserve its single- or multi-line
+    style. Return ``(lines, action)``.
     """
     headers, entries, table, key = _scan_resolved(lines, table, key)
+    return _set_array_scanned(lines, headers, entries, table, key, items)
+
+
+def _set_array_scanned(
+    lines: list[str],
+    headers: list[_Header],
+    entries: list[_Entry],
+    table: str | None,
+    key: str,
+    items: list[str],
+) -> tuple[list[str], _KeyAction]:
+    """Set an array using an existing header and entry scan."""
     span = _table_span(lines, headers, table)
     entry = _find_entry(entries, table, key)
     rendered_items = [toml_string(item) for item in items]
@@ -256,19 +265,12 @@ def apply_toml_key(
     create: bool = True,
     rendered: str | None = None,
 ) -> CallResult:
-    """Apply one TOML edit to ``target`` and return the resulting call.
+    """Apply one TOML edit to ``target`` and return the call.
 
-    ``value`` is the typed value to write (rendered with :func:`toml_value`), or
-    ``None`` to remove. With ``value=None`` and a ``key``, the key is removed;
-    with ``value=None`` and no ``key``, the whole ``table`` is removed.
-    ``rendered`` optionally passes the value already rendered by
-    :func:`toml_value`, so callers that validate before touching the filesystem
-    do not render twice. ``table`` is the dotted table path, or ``None`` for
-    top-level keys. Sequence values are written with :func:`set_array`, keeping
-    a multi-line array's layout. A missing file is created (parents ``0o755``,
-    file ``0o644``) unless ``create=False``, which fails instead; an absent edit
-    on a missing file is a no-op. The returned call is not recorded; the caller
-    records it with ``ctx.changed``.
+    ``value=None`` removes ``key``, or the whole ``table`` when ``key`` is also
+    ``None``. ``rendered`` avoids rendering twice. Sequence values keep an
+    existing array's layout. Missing files are created unless ``create=False``.
+    The caller records the returned call with ``ctx.changed``.
     """
     snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
     exists = snapshot.info is not None
@@ -338,17 +340,16 @@ def _set_array_value(
 ) -> tuple[list[str], _KeyAction]:
     """Set an array value, keeping an existing array entry's layout.
 
-    A missing key is written single-line via :func:`set_key`; an existing
-    array entry keeps its single- or multi-line style via :func:`set_array`.
-    A non-array entry is simply replaced.
+    A missing or non-array entry is written via :func:`set_key`.
     """
+    headers, entries, table, key = _scan_resolved(lines, table, key)
     try:
-        existing = array_items(lines, table, key)
+        existing = _array_items(entries, table, key)
     except TaskFailed:
         existing = None  # a non-array entry is replaced wholesale
     if existing is None:
-        return set_key(lines, table, key, value_text)
-    return set_array(lines, table, key, items)
+        return _set_key_scanned(lines, headers, entries, table, key, value_text)
+    return _set_array_scanned(lines, headers, entries, table, key, items)
 
 
 def _quote_run(text: str, index: int) -> int:
@@ -408,9 +409,8 @@ def _scan_chunk(text: str, state: _ValueState) -> _ValueState:
 def _scan(lines: list[str]) -> tuple[list[_Header], list[_Entry]]:
     """Classify ``lines`` into table headers and key/value entries.
 
-    Entry values may span several lines (multi-line arrays, inline tables,
-    triple-quoted strings); the scanner consumes those continuation lines so a
-    bracket inside a value is never mistaken for a table header.
+    Values may span lines (arrays, inline tables, triple-quoted strings); the
+    scanner consumes continuation lines so brackets in values are not headers.
     """
     headers: list[_Header] = []
     entries: list[_Entry] = []
@@ -477,10 +477,9 @@ def _entry_indices(entries: Iterable[_Entry]) -> set[int]:
 
 
 def _table_span(lines: list[str], headers: list[_Header], table: str | None) -> tuple[int, int] | None:
-    """Return the body span ``(start, end)`` of ``table``, or ``None`` when absent.
+    """Return the body span ``(start, end)`` of ``table``, or ``None``.
 
-    ``table=None`` selects the top-level preamble before the first header. An
-    array-of-tables header for ``table`` raises ``TaskFailed``.
+    ``table=None`` selects the preamble; an array-of-tables header raises.
     """
     if table is None:
         first = headers[0].line_index if headers else len(lines)
@@ -575,12 +574,10 @@ def _resolve_target(
     table: str | None,
     key: str,
 ) -> tuple[str | None, str]:
-    """Resolve a dotted ``key`` against existing sub-table headers and top-level dotted entries.
+    """Resolve a dotted ``key`` against existing sub-tables and dotted keys.
 
-    Setting ``pip.no-cache`` in ``tool.uv`` targets ``no-cache`` in an existing
-    ``[tool.uv.pip]`` table when present; a ``tool.uv`` table declared through
-    top-level dotted keys (``tool.uv.x = ...``) is edited in that form rather
-    than by adding a colliding ``[tool.uv]`` header.
+    For example, ``pip.no-cache`` in ``tool.uv`` targets an existing
+    ``[tool.uv.pip]`` table when present.
     """
     prefix = table.split(".") if table is not None else []
     names = {header.name for header in headers if not header.is_array}
@@ -615,11 +612,9 @@ def _validate_edit(
     *,
     present: bool,
 ) -> None:
-    """Assert that an edited document parses and holds ``key`` at ``table`` as expected.
+    """Assert that an edited document parses and holds ``key`` as expected.
 
-    Every editor result is checked with stdlib ``tomllib`` before it can be
-    written: a line-based edit that would produce invalid TOML (e.g. a dotted
-    key colliding with a table header) raises instead of corrupting the file.
+    A line-based edit that would produce invalid TOML raises instead of writing.
     """
     text = "".join(new_lines)
     try:

@@ -7,6 +7,7 @@ from pathlib import Path
 from .._utils import file_actions
 from .._utils import ini as ini_ops
 from .._utils import toml as toml_ops
+from .._utils.file_actions import PathPolicy, require_path_kind
 from .._utils.file_primitives import move_path, symlink_path
 from .._utils.paths import expand_path
 from .._utils.validation import (
@@ -49,8 +50,7 @@ def file(
     target = expand_path(path, error=TaskFailed)
     if state == "absent":
         info = file_actions.stat(ctx, target, sudo=sudo)
-        if info is not None and info.is_dir and not info.is_symlink:
-            raise TaskFailed(f"path is a directory: {target}")
+        require_path_kind(target, info, policy=PathPolicy.NOT_DIRECTORY)
         return ctx.changed(
             file_actions.remove(
                 ctx,
@@ -65,12 +65,7 @@ def file(
 
     if content is None:
         info = file_actions.stat(ctx, target, sudo=sudo)
-        if info is not None and info.is_symlink:
-            raise TaskFailed(f"refusing to manage symlink as file: {target}")
-        if info is not None and info.is_dir:
-            raise TaskFailed(f"path is a directory: {target}")
-        if info is not None and not info.is_file:
-            raise TaskFailed(f"path is not a regular file: {target}")
+        require_path_kind(target, info, policy=PathPolicy.FILE)
         if info is not None:
             return ctx.changed(
                 file_actions.reconcile_metadata(
@@ -144,7 +139,7 @@ def copy(
     comparison = file_actions.compare(ctx, source, target, sudo=sudo)
     source_info = comparison.source
     target_info = comparison.target
-    file_actions.validate_destination(target, target_info, label="destination")
+    require_path_kind(target, target_info, policy=PathPolicy.REPLACEABLE, label="destination")
 
     resolved_mode = source_info.mode if mode is None else mode
     data: dict[str, object] = {"path": str(target), "src": str(source)}
@@ -254,12 +249,8 @@ def move(
         if target_info is not None and not target_info.is_dir and not target_info.is_symlink:
             return ctx.changed(reconcile(unchanged_summary=f"ensure {target} is moved from {source}"))
         raise TaskFailed(f"move source does not exist: {source}")
-    if source_info.is_symlink or not source_info.is_file:
-        raise TaskFailed(f"move source is not a regular file: {source}")
-    if target_info is not None and target_info.is_dir and not target_info.is_symlink:
-        raise TaskFailed(f"destination is a directory: {target}")
-    if target_info is not None and target_info.is_symlink:
-        raise TaskFailed(f"refusing to replace symlink: {target}")
+    require_path_kind(source, source_info, policy=PathPolicy.FILE, label="move source")
+    require_path_kind(target, target_info, policy=PathPolicy.FILE, label="destination")
     if source.absolute() == target.absolute():
         return ctx.changed(reconcile())
 
@@ -592,8 +583,7 @@ def directory(
                 f"ensure directory {target} is absent",
                 changed=False,
             )
-        if info.is_symlink or not info.is_dir:
-            raise TaskFailed(f"path is not a directory: {target}")
+        require_path_kind(target, info, policy=PathPolicy.DIRECTORY)
         return ctx.changed(
             file_actions.remove(
                 ctx,
@@ -607,10 +597,7 @@ def directory(
         )
 
     info = file_actions.stat(ctx, target, sudo=sudo)
-    if info is not None and info.is_symlink:
-        raise TaskFailed(f"refusing to manage symlink as directory: {target}")
-    if info is not None and not info.is_dir:
-        raise TaskFailed(f"path exists and is not a directory: {target}")
+    require_path_kind(target, info, policy=PathPolicy.DIRECTORY)
 
     if info is None:
         file_actions.require_parent(ctx, target, sudo=sudo)
@@ -666,8 +653,7 @@ def symlink(
             path=str(link),
             target=desired,
         )
-    if info is not None and info.is_dir and not info.is_symlink:
-        raise TaskFailed(f"refusing to replace a directory with a symlink: {link}")
+    require_path_kind(link, info, policy=PathPolicy.NOT_DIRECTORY)
 
     file_actions.require_parent(ctx, link, sudo=sudo)
     result = CallResult(

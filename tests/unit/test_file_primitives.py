@@ -1,12 +1,15 @@
+import errno
 import grp
 import hashlib
 import os
 import pwd
 import stat
+from pathlib import Path
 
 import pytest
 
 from kitup._utils.file_primitives import (
+    TempFileError,
     apply_metadata,
     atomic_write_path,
     compare_paths,
@@ -19,6 +22,7 @@ from kitup._utils.file_primitives import (
     replace_path,
     resolve_group,
     resolve_owner,
+    stage_path,
     stat_path,
     symlink_path,
     write_path,
@@ -97,6 +101,45 @@ def test_atomic_write_path_uses_callback_and_preserves_metadata(tmp_path):
 
     assert path.read_bytes() == b"new\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_stage_path_writes_a_temporary_file(tmp_path):
+    def writer(stream):
+        stream.write(b"staged\n")
+
+    temporary = Path(stage_path(tmp_path, writer, prefix=".test-"))
+
+    assert temporary.parent == tmp_path
+    assert temporary.name.startswith(".test-")
+    assert temporary.name.endswith(".tmp")
+    assert temporary.read_bytes() == b"staged\n"
+
+
+def test_stage_path_removes_the_file_when_the_writer_fails(tmp_path):
+    def writer(stream):
+        stream.write(b"partial")
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        stage_path(tmp_path, writer, prefix=".test-")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_stage_path_reports_a_missing_directory(tmp_path):
+    with pytest.raises(TempFileError, match="could not create a temporary file"):
+        stage_path(tmp_path / "missing", lambda stream: None)
+
+
+def test_stage_path_propagates_write_errors(tmp_path):
+    def writer(stream):
+        raise OSError(errno.ENOSPC, "no space")
+
+    with pytest.raises(OSError, match="no space") as failure:
+        stage_path(tmp_path, writer, prefix=".test-")
+
+    assert not isinstance(failure.value, TempFileError)
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_writes_do_not_call_fsync(tmp_path, monkeypatch):

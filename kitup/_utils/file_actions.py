@@ -10,10 +10,11 @@ import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
 
-from .._privileged.protocol import Request, Response
+from .._privileged.protocol import Request
 from ..context import TaskContext
 from ..errors import TaskFailed
 from ..results import CallResult
@@ -47,6 +48,54 @@ class FileInfo:
     link: str | None = None
 
 
+class PathPolicy(StrEnum):
+    """Allowed kind for an existing path."""
+
+    FILE = "file"
+    DIRECTORY = "directory"
+    REPLACEABLE = "replaceable"
+    NOT_DIRECTORY = "not_directory"
+
+
+def require_path_kind(
+    path: Path,
+    info: FileInfo | None,
+    *,
+    policy: PathPolicy,
+    label: str = "path",
+    missing_ok: bool = True,
+) -> None:
+    """Raise ``TaskFailed`` when an existing path violates ``policy``.
+
+    ``info`` is the result of :func:`stat`. Missing paths pass unless
+    ``missing_ok`` is false. Symlinks are rejected unless the policy allows
+    replacing them, so callers never follow a link by accident.
+    """
+    if info is None:
+        if missing_ok:
+            return
+        raise TaskFailed(f"{label} does not exist: {path}")
+    if policy is PathPolicy.FILE:
+        if info.is_symlink:
+            raise TaskFailed(f"{label} is a symlink: {path}")
+        if info.is_dir:
+            raise TaskFailed(f"{label} is a directory: {path}")
+        if not info.is_file:
+            raise TaskFailed(f"{label} is not a regular file: {path}")
+    elif policy is PathPolicy.DIRECTORY:
+        if info.is_symlink:
+            raise TaskFailed(f"{label} is a symlink: {path}")
+        if not info.is_dir:
+            raise TaskFailed(f"{label} is not a directory: {path}")
+    elif policy is PathPolicy.REPLACEABLE:
+        if info.is_dir and not info.is_symlink:
+            raise TaskFailed(f"{label} is a directory: {path}")
+        if not info.is_symlink and not info.is_file:
+            raise TaskFailed(f"{label} is not a regular file: {path}")
+    elif policy is PathPolicy.NOT_DIRECTORY and info.is_dir and not info.is_symlink:
+        raise TaskFailed(f"{label} is a directory: {path}")
+
+
 @dataclass(frozen=True, slots=True)
 class FileSnapshot:
     """Metadata and content read once for a path.
@@ -61,13 +110,7 @@ class FileSnapshot:
 
     def text(self, path: Path) -> str:
         """Return the content as UTF-8 text, validating that it is a regular file."""
-        if self.info is not None:
-            if self.info.is_dir:
-                raise TaskFailed(f"path is a directory: {path}")
-            if self.info.is_symlink:
-                raise TaskFailed(f"refusing to edit symlink: {path}")
-            if not self.info.is_file:
-                raise TaskFailed(f"path is not a regular file: {path}")
+        require_path_kind(path, self.info, policy=PathPolicy.FILE)
         try:
             return (self.content or b"").decode("utf-8-sig")
         except UnicodeDecodeError as exc:
@@ -99,25 +142,15 @@ def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
     return params
 
 
-def _worker_response(
-    ctx: TaskContext,
-    action: str,
-    params: dict[str, Any],
-    *,
-    content: bytes | None = None,
-) -> Response:
-    return ctx.privileged_worker.request(Request(action, params), content=content)
-
-
 def worker_request(ctx: TaskContext, action: str, *, content: bytes | None = None, **params: Any) -> dict[str, Any]:
     """Send a worker request, normalizing path parameters to absolute paths."""
-    response = _worker_response(ctx, action, _normalize_params(params), content=content)
+    response = ctx.privileged_worker.request(Request(action, _normalize_params(params)), content=content)
     return cast(dict[str, Any], response.result)
 
 
 def worker_read(ctx: TaskContext, action: str, **params: Any) -> tuple[dict[str, Any], bytes | None]:
     """Send a worker request that may return a raw content payload."""
-    response = _worker_response(ctx, action, _normalize_params(params))
+    response = ctx.privileged_worker.request(Request(action, _normalize_params(params)))
     return cast(dict[str, Any], response.result), response.content
 
 
@@ -313,8 +346,9 @@ def compare(ctx: TaskContext, source: Path, target: Path, *, sudo: bool) -> Comp
         )
 
     source_info = stat_local(source)
-    if source_info is None or not source_info.is_file:
-        raise TaskFailed(f"copy source is not a regular file: {source}")
+    if source_info is None:
+        raise TaskFailed(f"copy source does not exist: {source}")
+    require_path_kind(source, source_info, policy=PathPolicy.FILE, label="copy source")
     target_info = stat_local(target)
     equal = False
     if target_info is not None and target_info.is_file and source_info.size == target_info.size:
@@ -355,20 +389,6 @@ def copy_file(
         raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not copy {source} to {target}: {exc}") from exc
-
-
-def validate_destination(path: Path, info: FileInfo | None, *, label: str = "path") -> None:
-    """Reject directories and non-regular destinations, allowing symlinks.
-
-    Symlinks are allowed because writes replace the link itself instead of
-    following it.
-    """
-    if info is None:
-        return
-    if info.is_dir and not info.is_symlink:
-        raise TaskFailed(f"{label} is a directory: {path}")
-    if not info.is_symlink and not info.is_file:
-        raise TaskFailed(f"{label} is not a regular file: {path}")
 
 
 def apply_change(
@@ -434,7 +454,7 @@ def apply_bytes(
         snapshot = read_snapshot(ctx, path, sudo=sudo, content_size=len(content))
     info = snapshot.info
     is_link = info is not None and info.is_symlink
-    validate_destination(path, info)
+    require_path_kind(path, info, policy=PathPolicy.REPLACEABLE)
 
     old = snapshot.content
     content_differs = is_link or old != content
@@ -626,6 +646,34 @@ def apply_metadata_ctx(
         raise TaskFailed(f"could not update metadata for {path}: {exc}") from exc
 
 
+def reconcile_metadata_changed(
+    ctx: TaskContext,
+    path: Path,
+    info: FileInfo | None,
+    *,
+    mode: int | None,
+    owner: str | int | None = None,
+    group: str | int | None = None,
+    sudo: bool,
+) -> bool:
+    """Apply metadata when it differs and return whether anything changed.
+
+    ``info`` is the result of :func:`stat`; ``None`` means the path is missing,
+    which is reported as no change. A dry run reports the change without
+    applying it.
+    """
+    if info is None:
+        return False
+    resolved = info.mode if mode is None else mode
+    if not metadata_differs(info, resolved, owner, group):
+        return False
+    if ctx.dry_run:
+        resolve_metadata(owner, group)
+    else:
+        apply_metadata_ctx(ctx, path, resolved, owner, group, sudo=sudo)
+    return True
+
+
 def reconcile_metadata(
     ctx: TaskContext,
     path: Path,
@@ -646,14 +694,8 @@ def reconcile_metadata(
     which is reported as no change. ``summary`` describes the changed state and
     ``unchanged_summary`` the desired state when nothing changes.
     """
-    if info is not None:
-        resolved = info.mode if mode is None else mode
-        if metadata_differs(info, resolved, owner, group):
-            if ctx.dry_run:
-                resolve_metadata(owner, group)
-                return CallResult(action=action, changed=True, summary=summary, **data)
-            apply_metadata_ctx(ctx, path, resolved, owner, group, sudo=sudo)
-            return CallResult(action=action, changed=True, summary=summary, **data)
+    if reconcile_metadata_changed(ctx, path, info, mode=mode, owner=owner, group=group, sudo=sudo):
+        return CallResult(action=action, changed=True, summary=summary, **data)
     return CallResult(action=action, changed=False, summary=unchanged_summary or summary, **data)
 
 
@@ -678,8 +720,8 @@ def remove(
     desired state when the path is already absent.
     """
     is_dir = info is not None and info.is_dir and not info.is_symlink
-    if info is not None and is_dir and not allow_directory:
-        raise TaskFailed(f"path is a directory: {path}")
+    if not allow_directory:
+        require_path_kind(path, info, policy=PathPolicy.NOT_DIRECTORY)
     operation = "rmdir" if is_dir and not force else "remove"
     if data is None:
         data = {"path": str(path)}

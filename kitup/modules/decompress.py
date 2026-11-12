@@ -8,7 +8,6 @@ import os
 import shutil
 import stat
 import tarfile
-import tempfile
 import zipfile
 import zlib
 from collections.abc import Callable, Iterable, Iterator
@@ -18,12 +17,15 @@ from pathlib import Path
 from typing import IO, Any, Final, Literal
 
 from .._utils import file_actions
+from .._utils.file_actions import PathPolicy, require_path_kind
 from .._utils.file_primitives import (
     CHUNK_SIZE,
+    TempFileError,
     apply_metadata,
     compare_paths,
     mkdir_path,
     replace_path,
+    stage_path,
     symlink_path,
 )
 from .._utils.paths import expand_path
@@ -104,8 +106,7 @@ def archive(
     _require_source(source, "archive source")
     target = expand_path(dest, error=TaskFailed)
     target_info = file_actions.stat_local(target)
-    if target_info is not None and not target_info.is_dir:
-        raise TaskFailed(f"archive destination is not a directory: {target}")
+    require_path_kind(target, target_info, policy=PathPolicy.DIRECTORY, label="archive destination")
     if target_info is None:
         file_actions.require_parent_local(target)
     if creates is not None:
@@ -169,14 +170,8 @@ def file(
     _require_source(source, "compressed source")
     _reject_archive(source)
     target, info = _single_destination(source, dest)
-    if info is not None:
-        if info.is_symlink:
-            raise TaskFailed(f"refusing to replace symlink destination: {target}")
-        if info.is_dir:
-            raise TaskFailed(f"decompressed destination is a directory: {target}")
-        if not info.is_file:
-            raise TaskFailed(f"decompressed destination is not a regular file: {target}")
-    else:
+    require_path_kind(target, info, policy=PathPolicy.FILE, label="decompressed destination")
+    if info is None:
         file_actions.require_parent_local(target)
 
     if ctx.dry_run:
@@ -188,7 +183,7 @@ def file(
         else:
             with _translate_decompression_errors(source), _decompressed_stream(source) as stream:
                 matches = _stream_matches(target, stream)
-            changed = not matches or _reconcile_metadata(target, info, mode=mode, dry_run=True)
+            changed = not matches or file_actions.reconcile_metadata_changed(ctx, target, info, mode=mode, sudo=False)
     else:
         # Decompress once into a staged file, then compare it with the target so
         # a rewrite never decompresses the source a second time.
@@ -200,7 +195,7 @@ def file(
             ) as temporary,
         ):
             if info is not None and _files_match(target, temporary):
-                changed = _reconcile_metadata(target, info, mode=mode, dry_run=False)
+                changed = file_actions.reconcile_metadata_changed(ctx, target, info, mode=mode, sudo=False)
             else:
                 _install_temp(temporary, target, mode=mode, default_mode=0o644)
                 changed = True
@@ -256,23 +251,18 @@ def _reconcile(
     # Process members in archive order: compressed tar streams decompress
     # sequentially, so revisiting an earlier member restarts from the beginning.
     # Missing parents are created on demand instead of sorting by depth.
+    known: set[Path] = set()
     created: set[Path] = set()
     for member in entries.values():
         parts = member.name.split("/")
-        changed += _ensure_parents(target, parts[:-1], created=created, dry_run=dry_run)
+        changed += _ensure_parents(target, parts[:-1], known=known, created=created, dry_run=dry_run)
         path = target.joinpath(*parts)
         if member.kind == "dir":
-            changed += _ensure_directory(path, member, created=created, dry_run=dry_run)
+            changed += _ensure_directory(path, member, known=known, created=created, dry_run=dry_run)
         elif member.kind == "symlink":
             changed += _ensure_symlink(path, member, dry_run=dry_run)
         else:
-            changed += _ensure_file(
-                archive,
-                member,
-                path,
-                dry_run=dry_run,
-                mode=mode,
-            )
+            changed += _ensure_file(ctx, archive, member, path, mode=mode)
     return changed
 
 
@@ -280,6 +270,7 @@ def _ensure_parents(
     target: Path,
     parts: list[str],
     *,
+    known: set[Path],
     created: set[Path],
     dry_run: bool,
 ) -> int:
@@ -287,17 +278,18 @@ def _ensure_parents(
     current = target
     for part in parts:
         current = current / part
-        if current in created:
+        if current in known:
             continue
         info = file_actions.stat_local(current)
         if info is None:
             if not dry_run:
                 _mkdir(current, 0o755)
+            known.add(current)
             created.add(current)
             count += 1
             continue
-        if not info.is_dir:
-            raise TaskFailed(f"refusing to traverse non-directory: {current}")
+        require_path_kind(current, info, policy=PathPolicy.DIRECTORY)
+        known.add(current)
     return count
 
 
@@ -305,6 +297,7 @@ def _ensure_directory(
     path: Path,
     member: _Member,
     *,
+    known: set[Path],
     created: set[Path],
     dry_run: bool,
 ) -> bool:
@@ -313,32 +306,34 @@ def _ensure_directory(
         if not dry_run and member.mode is not None:
             _apply_mode(path, member.mode)
         return False
+    if path in known:
+        return False
     info = file_actions.stat_local(path)
     if info is None:
         if not dry_run:
             _mkdir(path, member.mode or 0o755)
+        known.add(path)
         created.add(path)
         return True
-    if not info.is_dir:
-        raise TaskFailed(f"refusing to replace non-directory with directory: {path}")
+    require_path_kind(path, info, policy=PathPolicy.DIRECTORY)
+    known.add(path)
     return False
 
 
 def _ensure_file(
+    ctx: TaskContext,
     archive: _Archive,
     member: _Member,
     path: Path,
     *,
-    dry_run: bool,
     mode: int | None,
 ) -> bool:
     info = file_actions.stat_local(path)
-    if info is not None and info.is_dir:
-        raise TaskFailed(f"refusing to replace directory with file: {path}")
+    require_path_kind(path, info, policy=PathPolicy.NOT_DIRECTORY)
 
-    if dry_run:
+    if ctx.dry_run:
         if _member_matches(archive, member, path, info):
-            return _reconcile_metadata(path, info, mode=mode, dry_run=True)
+            return file_actions.reconcile_metadata_changed(ctx, path, info, mode=mode, sudo=False)
         return True
 
     # Stage the member once, then compare the staged copy with the target. This
@@ -347,7 +342,7 @@ def _ensure_file(
     try:
         with _staged(path.parent, lambda: _open_member(archive, member)) as temporary:
             if _same_contents(path, info, temporary, member):
-                return _reconcile_metadata(path, info, mode=mode, dry_run=False)
+                return file_actions.reconcile_metadata_changed(ctx, path, info, mode=mode, sudo=False)
             _install_temp(temporary, path, mode=mode, default_mode=member.mode or 0o644)
             return True
     except TaskFailed:
@@ -383,11 +378,9 @@ def _ensure_symlink(
     if link is None:
         raise TaskFailed(f"missing symlink target in archive: {member.name!r}")
     info = file_actions.stat_local(path)
-    if info is not None:
-        if info.is_dir:
-            raise TaskFailed(f"refusing to replace directory with symlink: {path}")
-        if info.is_symlink and info.link == link:
-            return False
+    require_path_kind(path, info, policy=PathPolicy.NOT_DIRECTORY)
+    if info is not None and info.is_symlink and info.link == link:
+        return False
     if dry_run:
         return True
     try:
@@ -464,50 +457,21 @@ def _open_member(
         yield stream
 
 
-def _write_temp(
-    directory: Path,
-    write: Callable[[IO[bytes]], None],
-) -> Path:
-    """Write a temporary file beside its destination and return its path."""
-    try:
-        handle, name = tempfile.mkstemp(
-            dir=directory,
-            prefix=".kitup-decompress-",
-            suffix=".tmp",
-        )
-    except OSError as exc:
-        raise TaskFailed(f"could not create a temporary file in {directory}: {exc}") from exc
-    temporary = Path(name)
-    try:
-        with os.fdopen(handle, "wb") as sink:
-            write(sink)
-            sink.flush()
-        return temporary
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
-
-
-def _stage(
-    directory: Path,
-    open_stream: Callable[[], AbstractContextManager[Any]],
-) -> Path:
-    """Write a stream to a temporary file beside its destination."""
-
-    def write(sink: IO[bytes]) -> None:
-        with open_stream() as source:
-            shutil.copyfileobj(source, sink, CHUNK_SIZE)
-
-    return _write_temp(directory, write)
-
-
 @contextmanager
 def _staged(
     directory: Path,
     open_stream: Callable[[], AbstractContextManager[Any]],
 ) -> Iterator[Path]:
     """Stage a stream beside its destination, removing it on exit."""
-    temporary = _stage(directory, open_stream)
+
+    def write(sink: IO[bytes]) -> None:
+        with open_stream() as source:
+            shutil.copyfileobj(source, sink, CHUNK_SIZE)
+
+    try:
+        temporary = Path(stage_path(directory, write, prefix=".kitup-decompress-"))
+    except TempFileError as exc:
+        raise TaskFailed(str(exc)) from exc
     try:
         yield temporary
     finally:
@@ -522,20 +486,6 @@ def _install_temp(temporary: Path, path: Path, *, mode: int | None, default_mode
         raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not write {path}: {exc}") from exc
-
-
-def _reconcile_metadata(
-    path: Path,
-    info: file_actions.FileInfo | None,
-    *,
-    mode: int | None,
-    dry_run: bool,
-) -> bool:
-    if info is None or mode is None or info.mode == mode:
-        return False
-    if not dry_run:
-        _apply_mode(path, mode)
-    return True
 
 
 def _apply_mode(path: Path, mode: int) -> None:
@@ -732,11 +682,7 @@ def _require_patterns(
 
 
 def _require_source(path: Path, label: str) -> None:
-    info = file_actions.stat_local(path)
-    if info is None:
-        raise TaskFailed(f"{label} does not exist: {path}")
-    if info.is_symlink or not info.is_file:
-        raise TaskFailed(f"{label} is not a regular file: {path}")
+    require_path_kind(path, file_actions.stat_local(path), policy=PathPolicy.FILE, label=label, missing_ok=False)
 
 
 def _mkdir(path: Path, mode: int) -> None:

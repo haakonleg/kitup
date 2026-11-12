@@ -149,6 +149,50 @@ def test_present_matches_normalized_names(tmp_path):
     assert 'dependencies = ["charset-normalizer"]' in pyproject.read_text()
 
 
+def test_diff_dependencies_parses_current_entries_once(monkeypatch):
+    current = ["requests>=2", "flask", "https://example.com/pkg.whl"]
+    wanted = [uv._try_parse_requirement("requests>=3"), uv._try_parse_requirement("flask")]
+    calls = []
+    original = uv._try_parse_requirement
+
+    def counting(item):
+        calls.append(item)
+        return original(item)
+
+    monkeypatch.setattr(uv, "_try_parse_requirement", counting)
+
+    desired, added, removed = uv._diff_dependencies(current, wanted, state="present")
+
+    assert calls == current
+    assert desired == ["requests>=3", "flask", "https://example.com/pkg.whl"]
+    assert added == ["requests>=3"]
+    assert removed == []
+
+    calls.clear()
+    uv._diff_dependencies(current, wanted, state="absent")
+    assert calls == current
+
+
+def test_diff_dependencies_reconciles_duplicate_names():
+    wanted = [uv._try_parse_requirement("requests>=3")]
+
+    desired, added, removed = uv._diff_dependencies(["requests>=1", "flask", "Requests>=2"], wanted, state="present")
+
+    assert desired == ["requests>=3", "flask"]
+    assert added == ["requests>=3"]
+    assert removed == []
+
+
+def test_diff_dependencies_applies_the_last_duplicate_wanted_entry():
+    wanted = [uv._try_parse_requirement("requests>=2"), uv._try_parse_requirement("requests>=3")]
+
+    desired, added, removed = uv._diff_dependencies(["requests>=1"], wanted, state="present")
+
+    assert desired == ["requests>=3"]
+    assert added == ["requests>=2", "requests>=3"]
+    assert removed == []
+
+
 def test_present_keeps_the_multi_line_layout_of_the_table(tmp_path):
     project = tmp_path / "proj"
     pyproject = project / "pyproject.toml"
@@ -315,7 +359,7 @@ def test_symlinked_project_directory_is_followed_but_a_symlinked_pyproject_is_re
 
     (real / "pyproject.toml").unlink()
     (real / "pyproject.toml").symlink_to(tmp_path / "elsewhere.toml")
-    with pytest.raises(TaskFailed, match="refusing to edit symlink"):
+    with pytest.raises(TaskFailed, match="symlink"):
         uv.dependencies(ctx, ["requests"], project=real)
 
 

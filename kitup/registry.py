@@ -125,7 +125,7 @@ class Bundle:
         self.id = name or ""
         self.name = name or ""
         self.description = description
-        self.path = _resolve_path(Path(path)) if path is not None else None
+        self.path = expand_path(Path(path), error=BundleError, resolve=True) if path is not None else None
         self.var_paths: tuple[Path, ...] = ()
         self.depends_on = self._normalize_dependencies(depends_on)
 
@@ -560,7 +560,3 @@ def _make_task_spec(
         declared_in=declared_in,
         order=next(_ORDER),
     )
-
-
-def _resolve_path(path: Path) -> Path:
-    return expand_path(path, error=BundleError, resolve=True)

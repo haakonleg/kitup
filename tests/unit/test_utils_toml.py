@@ -366,6 +366,23 @@ def test_apply_toml_key_writes_arrays_with_set_array_layout(tmp_path):
     assert call_data(result)["toml_action"] == "unchanged"
 
 
+def test_array_edits_scan_the_file_once(tmp_path, monkeypatch):
+    path = tmp_path / "pyproject.toml"
+    path.write_text('[project]\ndependencies = [\n    "a",\n]\n')
+    ctx = make_context(tmp_path)
+    calls = []
+    original = toml._scan
+
+    def counting(lines):
+        calls.append(lines)
+        return original(lines)
+
+    monkeypatch.setattr(toml, "_scan", counting)
+    toml.apply_toml_key(ctx, path, table="project", key="dependencies", value=["b"], action="uv.config", sudo=False)
+
+    assert len(calls) == 1
+
+
 def test_apply_toml_key_create_false_rejects_a_missing_file(tmp_path):
     ctx = make_context(tmp_path)
     missing = tmp_path / "missing.toml"

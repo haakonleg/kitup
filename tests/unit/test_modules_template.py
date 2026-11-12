@@ -209,7 +209,7 @@ def test_file_requires_regular_source(tmp_path):
 
     directory = tmp_path / "source-dir"
     directory.mkdir()
-    with pytest.raises(TaskFailed, match="not a regular file"):
+    with pytest.raises(TaskFailed, match="directory"):
         template.file(ctx, directory, dest)
 
     source = tmp_path / "source.j2"

@@ -102,6 +102,29 @@ def test_span_matches():
     assert not ini.span_matches(lines("# a = 1\n"), 0, 1, {"a": "1"})
 
 
+def test_edits_scan_the_file_once(monkeypatch):
+    body = lines("[a]\nx = 1\n[a]\ny = 2\n[a]\nz = 3\n")
+    calls = []
+    original = ini._scan
+
+    def counting(lines):
+        calls.append(lines)
+        return original(lines)
+
+    monkeypatch.setattr(ini, "_scan", counting)
+
+    ini.set_option(body, "a", "x", "9", {"y": "2"})
+    assert len(calls) == 1
+
+    calls.clear()
+    ini.remove_option(body, "a", "x", {"y": "2"})
+    assert len(calls) == 1
+
+    calls.clear()
+    ini.remove_section(body, "a", {"y": "2"})
+    assert len(calls) == 1
+
+
 def test_set_option_updates_existing_section():
     original = lines("[s]\na = 1\n\n# trailing comment\n[t]\nb = 2\n")
     new_lines, action = ini.set_option(original, "s", "c", "3", None)

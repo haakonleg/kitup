@@ -1,5 +1,6 @@
 import pytest
 
+from kitup import resolver
 from kitup.errors import BundleError, ResolutionError
 from kitup.registry import Bundle
 from kitup.resolver import filter_plan, resolve
@@ -151,6 +152,29 @@ def test_filter_plan_empty_include_selects_nothing():
     base = Bundle("base")
 
     assert ids(filter_plan(resolve([base]), include=frozenset())) == []
+
+
+def test_filter_plan_memoizes_transitive_dependencies(monkeypatch):
+    base = Bundle("base")
+    one = Bundle("one", depends_on=[base])
+    two = Bundle("two", depends_on=[base])
+    extra = Bundle("extra")
+    other = Bundle("other")
+    plan = resolve([one, two, extra, other])
+
+    calls = []
+    original = resolver._transitive_dependencies
+
+    def counting(bundle, by_id):
+        calls.append(bundle)
+        return original(bundle, by_id)
+
+    monkeypatch.setattr(resolver, "_transitive_dependencies", counting)
+
+    filtered = filter_plan(plan, exclude={"extra", "other"})
+
+    assert ids(filtered) == ["base", "one", "two"]
+    assert sorted(bundle.id for bundle in calls) == ["base", "one", "two"]
 
 
 def test_filter_plan_without_filters_returns_the_same_plan():

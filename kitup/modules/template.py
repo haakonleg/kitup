@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from .._utils import file_actions
+from .._utils.file_actions import PathPolicy, require_path_kind
 from .._utils.paths import expand_path
 from .._utils.validation import require_bool, require_metadata, require_mode, require_path
 from ..context import TaskContext
@@ -84,12 +85,7 @@ def _require_variables(variables: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def _read_template(ctx: TaskContext, source: Path) -> str:
     info = file_actions.stat_local(source)
-    if info is None:
-        raise TaskFailed(f"template source does not exist: {source}")
-    if info.is_symlink:
-        raise TaskFailed(f"refusing to read symlink template: {source}")
-    if not info.is_file:
-        raise TaskFailed(f"template source is not a regular file: {source}")
+    require_path_kind(source, info, policy=PathPolicy.FILE, label="template source", missing_ok=False)
     data = file_actions.read_bytes(ctx, source, info, sudo=False)
     try:
         return data.decode("utf-8")

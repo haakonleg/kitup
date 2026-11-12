@@ -160,6 +160,38 @@ def _resolve_file_mode(
     return default
 
 
+class TempFileError(OSError):
+    """Raised when a staging temporary file cannot be created."""
+
+
+def stage_path(
+    directory: str | os.PathLike[str],
+    writer: Callable[[BinaryIO], None],
+    *,
+    prefix: str = ".kitup-",
+    suffix: str = ".tmp",
+) -> str:
+    """Write a temporary file in ``directory`` and return its path.
+
+    The caller owns the returned path and must install or remove it. The file is
+    removed when ``writer`` raises. ``TempFileError`` reports a directory that
+    cannot hold the temporary file; write errors propagate unchanged.
+    """
+    try:
+        handle, temp_name = tempfile.mkstemp(dir=directory, prefix=prefix, suffix=suffix)
+    except OSError as exc:
+        raise TempFileError(f"could not create a temporary file in {directory}: {exc}") from exc
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            writer(stream)
+            stream.flush()
+        return temp_name
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name)
+        raise
+
+
 def atomic_write_path(
     path: str | os.PathLike[str],
     writer: Callable[[BinaryIO], None],
@@ -184,16 +216,8 @@ def atomic_write_path(
 
     resolved_mode = _resolve_file_mode(info, mode, default=default_mode)
     parent = os.path.dirname(path) or "."
-    handle, temp_name = tempfile.mkstemp(
-        dir=parent,
-        prefix=f".{os.path.basename(path)}.",
-        suffix=".tmp",
-    )
-    temp = temp_name
+    temp = stage_path(parent, writer, prefix=f".{os.path.basename(path)}.", suffix=".tmp")
     try:
-        with os.fdopen(handle, "wb") as stream:
-            writer(stream)
-            stream.flush()
         _apply_replacement_metadata(path, temp, info, resolved_mode, owner, group)
         os.replace(temp, path)
     except BaseException:

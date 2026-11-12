@@ -965,9 +965,9 @@ def test_move_rejects_directories_and_symlinks(tmp_path):
     dest_link.symlink_to(tmp_path / "target")
     ctx = context(tmp_path)
 
-    with pytest.raises(TaskFailed, match="not a regular file"):
+    with pytest.raises(TaskFailed, match="directory"):
         files.move(ctx, source_dir, tmp_path / "dest.conf")
-    with pytest.raises(TaskFailed, match="not a regular file"):
+    with pytest.raises(TaskFailed, match="symlink"):
         files.move(ctx, source_link, tmp_path / "dest.conf")
     with pytest.raises(TaskFailed, match="destination is a directory"):
         files.move(ctx, source, dest_dir)

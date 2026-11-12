@@ -120,7 +120,12 @@ def image_exists(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool
 
 def image_id(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool) -> str:
     """Return an image ID, failing when the image cannot be inspected."""
-    return _inspect_image_id(ctx, podman_command, name, sudo=sudo)
+    result = ctx.probe(
+        [podman_command, "image", "inspect", "--format", "{{.Id}}", name],
+        sudo=sudo,
+    )
+    require_success(result, f"could not inspect image: {name}")
+    return result.stdout.strip()
 
 
 def image_id_or_none(
@@ -133,17 +138,7 @@ def image_id_or_none(
     """Return an image ID, or ``None`` when the image is missing."""
     if not image_exists(ctx, podman_command, name, sudo=sudo):
         return None
-    return _inspect_image_id(ctx, podman_command, name, sudo=sudo)
-
-
-def _inspect_image_id(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool) -> str:
-    """Inspect an image and return its ID."""
-    result = ctx.probe(
-        [podman_command, "image", "inspect", "--format", "{{.Id}}", name],
-        sudo=sudo,
-    )
-    require_success(result, f"could not inspect image: {name}")
-    return result.stdout.strip()
+    return image_id(ctx, podman_command, name, sudo=sudo)
 
 
 def container_status(

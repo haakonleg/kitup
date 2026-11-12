@@ -1,12 +1,9 @@
 """Remote file download over HTTP(S)."""
 
-import contextlib
 import hashlib
 import io
-import os
 import posixpath
 import re
-import tempfile
 import zlib
 from collections.abc import Mapping
 from compression import zstd
@@ -18,7 +15,8 @@ from urllib.error import HTTPError
 from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
 from .._utils import file_actions
-from .._utils.file_primitives import digest_path, replace_path
+from .._utils.file_actions import PathPolicy, require_path_kind
+from .._utils.file_primitives import TempFileError, digest_path, replace_path, stage_path
 from .._utils.http import open_url, read_response
 from .._utils.paths import expand_path
 from .._utils.timing import timed
@@ -165,7 +163,7 @@ def to_file(
     require_bool(force, "force")
 
     target, info = _resolve_destination(dest, parts)
-    _validate_destination_info(target, info)
+    require_path_kind(target, info, policy=PathPolicy.FILE, label="download destination")
     display = _display_url(parts)
 
     if not _needs_download(target, info, force=force, checksum=expected):
@@ -279,31 +277,25 @@ def _download_to_temp(
     *,
     validate_certs: bool,
 ) -> tuple[Path, str]:
+    """Download ``url`` to a staged file beside ``directory``."""
+    checksum_dest = ""
+
+    def write(stream: BinaryIO) -> None:
+        nonlocal checksum_dest
+        with _open_url(url, display, headers, timeout, validate_certs=validate_certs) as response:
+            checksum_dest = _read_response(
+                response,
+                stream,
+                expected=expected,
+                max_bytes=None,
+                display=display,
+            )
+
     try:
-        handle, name = tempfile.mkstemp(
-            dir=directory,
-            prefix=".kitup-download-",
-            suffix=".tmp",
-        )
-    except OSError as exc:
-        raise TaskFailed(f"could not create a temporary file in {directory}: {exc}") from exc
-    temporary = Path(name)
-    try:
-        with os.fdopen(handle, "wb") as stream:
-            with _open_url(url, display, headers, timeout, validate_certs=validate_certs) as response:
-                checksum_dest = _read_response(
-                    response,
-                    stream,
-                    expected=expected,
-                    max_bytes=None,
-                    display=display,
-                )
-            stream.flush()
-        return temporary, checksum_dest
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(name)
-        raise
+        temporary = stage_path(directory, write, prefix=".kitup-download-")
+    except TempFileError as exc:
+        raise TaskFailed(str(exc)) from exc
+    return Path(temporary), checksum_dest
 
 
 def _open_url(
@@ -478,17 +470,6 @@ def _validate_max_bytes(max_bytes: int | None) -> int | None:
     return max_bytes
 
 
-def _validate_destination_info(target: Path, info: file_actions.FileInfo | None) -> None:
-    if info is None:
-        return
-    if info.is_symlink:
-        raise TaskFailed(f"refusing to replace symlink destination: {target}")
-    if info.is_dir:
-        raise TaskFailed(f"download destination is a directory: {target}")
-    if not info.is_file:
-        raise TaskFailed(f"download destination is not a regular file: {target}")
-
-
 @cache
 def _digest(path: Path, _mtime_ns: int, _size: int, algorithm: str) -> str:
     """Hash a file whose metadata identifies the content being hashed."""
@@ -531,22 +512,24 @@ def _reconcile_metadata(
     size: int | None = None,
     unchanged_summary: str | None = None,
 ) -> CallResult:
-    if info is None or mode is None or info.mode == mode:
-        changed = False
-        summary = unchanged_summary or f"ensure metadata for {target}"
-    else:
-        if not ctx.dry_run:
-            file_actions.apply_metadata_ctx(ctx, target, mode, None, None, sudo=False)
-        changed = True
-        summary = f"update metadata for {target}"
-    return _download_result(
-        display,
+    return file_actions.reconcile_metadata(
+        ctx,
         target,
-        changed=changed,
-        summary=summary,
-        checksum_dest=checksum_dest,
-        duration=duration,
-        size=_file_size(target) if size is None else size,
+        info,
+        action="download.to_file",
+        mode=mode,
+        owner=None,
+        group=None,
+        summary=f"update metadata for {target}",
+        unchanged_summary=unchanged_summary or f"ensure metadata for {target}",
+        data=_download_data(
+            display,
+            target,
+            checksum_dest=checksum_dest,
+            duration=duration,
+            size=_file_size(target) if size is None else size,
+        ),
+        sudo=False,
     )
 
 
@@ -583,12 +566,25 @@ def _download_result(
         action="download.to_file",
         changed=changed,
         summary=summary,
-        url=display,
-        dest=str(target),
-        checksum_dest=None if checksum_dest is None else f"sha256:{checksum_dest}",
-        duration=duration,
-        size=size,
+        **_download_data(display, target, checksum_dest=checksum_dest, duration=duration, size=size),
     )
+
+
+def _download_data(
+    display: str,
+    target: Path,
+    *,
+    checksum_dest: str | None,
+    duration: float,
+    size: int,
+) -> dict[str, object]:
+    return {
+        "url": display,
+        "dest": str(target),
+        "checksum_dest": None if checksum_dest is None else f"sha256:{checksum_dest}",
+        "duration": duration,
+        "size": size,
+    }
 
 
 def _file_size(path: Path) -> int:

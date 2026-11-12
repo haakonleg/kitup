@@ -1,5 +1,7 @@
 """Local user and group management."""
 
+import grp
+import pwd
 import re
 import subprocess
 from dataclasses import dataclass
@@ -75,7 +77,7 @@ def user(
         if state == "absent":
             raise TaskFailed("password is only supported when state is 'present'")
 
-    current = _probe_user(ctx, name)
+    current = _probe_user(name)
     if state == "absent":
         if current is None:
             return ctx.changed(
@@ -93,7 +95,7 @@ def user(
         if ctx.dry_run:
             return ctx.changed(call)
         ctx.run(["userdel", name], sudo=True)
-        if _probe_user(ctx, name) is not None:
+        if _probe_user(name) is not None:
             raise TaskFailed(f"user still exists after removal: {name}")
         return ctx.changed(call)
 
@@ -140,7 +142,7 @@ def group(
     if gid is not None:
         require_non_negative_int(gid, "gid")
 
-    current = _probe_group(ctx, name)
+    current = _probe_group(name)
     if state == "absent":
         if current is None:
             return ctx.changed(
@@ -158,7 +160,7 @@ def group(
         if ctx.dry_run:
             return ctx.changed(call)
         ctx.run(["groupdel", name], sudo=True)
-        if _probe_group(ctx, name) is not None:
+        if _probe_group(name) is not None:
             raise TaskFailed(f"group still exists after removal: {name}")
         return ctx.changed(call)
 
@@ -176,7 +178,7 @@ def group(
         if ctx.dry_run:
             return ctx.changed(call)
         ctx.run(command, sudo=True)
-        created = _probe_group(ctx, name)
+        created = _probe_group(name)
         if created is None:
             raise TaskFailed(f"group was not created: {name}")
         if gid is not None and created.gid != gid:
@@ -205,10 +207,10 @@ def membership(
     _require_name(user, "user name")
     _require_name(group, "group name")
 
-    account = _probe_user(ctx, user)
+    account = _probe_user(user)
     if account is None:
         raise TaskFailed(f"user does not exist: {user}")
-    target = _probe_group(ctx, group)
+    target = _probe_group(group)
     if target is None:
         raise TaskFailed(f"group does not exist: {group}")
 
@@ -243,7 +245,7 @@ def membership(
         if ctx.dry_run:
             return ctx.changed(call)
         ctx.run(["gpasswd", "-a", user, group], sudo=True)
-        updated = _probe_group(ctx, group)
+        updated = _probe_group(group)
         if updated is None or user not in updated.members:
             raise TaskFailed(f"{user} is still not a member of group {group}")
         return ctx.changed(call)
@@ -266,7 +268,7 @@ def membership(
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(["gpasswd", "-d", user, group], sudo=True)
-    updated = _probe_group(ctx, group)
+    updated = _probe_group(group)
     if updated is None or user in updated.members:
         raise TaskFailed(f"{user} is still a member of group {group}")
     return ctx.changed(call)
@@ -309,7 +311,7 @@ def _create_user(
         return call
     ctx.run(command, sudo=True)
 
-    created = _probe_user(ctx, name)
+    created = _probe_user(name)
     if created is None:
         raise TaskFailed(f"user was not created: {name}")
     _verify_user(created, uid=uid, gid=gid, home=home, shell=shell)
@@ -369,7 +371,7 @@ def _modify_user(
     if fields:
         command.append(current.name)
         ctx.run(command, sudo=True)
-        updated = _probe_user(ctx, current.name)
+        updated = _probe_user(current.name)
         if updated is None:
             raise TaskFailed(f"user disappeared after modification: {current.name}")
         _verify_user(
@@ -415,26 +417,36 @@ def _verify_user(
         raise TaskFailed(f"user {account.name} has shell {account.shell}, expected {shell}")
 
 
-def _probe_user(ctx: TaskContext, name: str) -> _User | None:
-    result = ctx.probe(["getent", "passwd", name], sudo=False)
-    entry = f"passwd entry for {name}"
-    fields = _getent_fields(result, lookup=f"user {name}", entry=entry, count=7)
-    if fields is None:
+def _probe_user(name: str) -> _User | None:
+    try:
+        entry = pwd.getpwnam(name)
+    except KeyError:
         return None
-    uid = _parse_int(fields[2], entry, result)
-    gid = _parse_int(fields[3], entry, result)
-    return _User(name=fields[0], uid=uid, gid=gid, home=fields[5], shell=fields[6])
+    except OSError as exc:
+        raise TaskFailed(f"could not look up user {name}: {exc}") from exc
+    return _User(name=entry.pw_name, uid=entry.pw_uid, gid=entry.pw_gid, home=entry.pw_dir, shell=entry.pw_shell)
 
 
-def _probe_group(ctx: TaskContext, value: str | int) -> _Group | None:
-    result = ctx.probe(["getent", "group", str(value)], sudo=False)
-    entry = f"group entry for {value}"
-    fields = _getent_fields(result, lookup=f"group {value}", entry=entry, count=4)
-    if fields is None:
+def _probe_group(value: str | int) -> _Group | None:
+    try:
+        entry = _group_entry(value)
+    except KeyError, OverflowError:
         return None
-    gid = _parse_int(fields[2], entry, result)
-    members = tuple(member for member in fields[3].split(",") if member)
-    return _Group(gid=gid, members=members)
+    except OSError as exc:
+        raise TaskFailed(f"could not look up group {value}: {exc}") from exc
+    return _Group(gid=entry.gr_gid, members=tuple(member for member in entry.gr_mem if member))
+
+
+def _group_entry(value: str | int) -> grp.struct_group:
+    """Return a group entry, resolving a numeric name as a GID like ``getent``."""
+    if isinstance(value, int):
+        return grp.getgrgid(value)
+    try:
+        return grp.getgrnam(value)
+    except KeyError:
+        if not value.isdigit():
+            raise
+        return grp.getgrgid(int(value))
 
 
 def _probe_shadow(ctx: TaskContext, name: str) -> str | None:
@@ -453,27 +465,6 @@ def _probe_shadow(ctx: TaskContext, name: str) -> str | None:
     return fields[1]
 
 
-def _getent_fields(
-    result: subprocess.CompletedProcess[str],
-    *,
-    lookup: str,
-    entry: str,
-    count: int,
-) -> tuple[str, ...] | None:
-    line = _getent_line(result, lookup)
-    if line is None:
-        return None
-    fields = tuple(line.split(":"))
-    if len(fields) != count:
-        raise TaskFailed(
-            f"could not parse {entry}",
-            command=result.args,
-            stdout=result.stdout,
-            stderr=result.stderr,
-        )
-    return fields
-
-
 def _getent_line(result: subprocess.CompletedProcess[str], label: str) -> str | None:
     if result.returncode == 2:
         return None
@@ -488,20 +479,8 @@ def _getent_line(result: subprocess.CompletedProcess[str], label: str) -> str | 
     return line or None
 
 
-def _parse_int(value: str, entry: str, result: subprocess.CompletedProcess[str]) -> int:
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise TaskFailed(
-            f"could not parse {entry}",
-            command=result.args,
-            stdout=result.stdout,
-            stderr=result.stderr,
-        ) from exc
-
-
 def _resolve_primary_gid(ctx: TaskContext, group: str | int) -> int | None:
-    target = _probe_group(ctx, group)
+    target = _probe_group(group)
     if target is None:
         if ctx.dry_run:
             return None

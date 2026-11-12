@@ -1,9 +1,7 @@
 """Pure INI-style line editing helpers shared by task modules.
 
-All functions operate on line lists produced by ``str.splitlines(keepends=True)``
-and never touch the filesystem or the task context. Option values are either a
-single line or, for appendable options, several lines rendered as indented
-continuation lines (standard INI multi-line syntax).
+Operate on ``str.splitlines(keepends=True)`` output; multi-line option values
+use indented continuation lines. No filesystem access.
 """
 
 import re
@@ -35,10 +33,8 @@ _VALUE_FORBIDDEN: Final = LINE_BREAKS + "\0"
 def parse_option(line: str) -> tuple[str, str] | None:
     """Parse an active option line into a stripped ``(name, value)`` pair.
 
-    Return ``None`` for blank lines, comments (``#`` or ``;``), section
-    headers, and lines without a delimiter. Both ``=`` and ``:`` are
-    delimiters. The value is everything after the first
-    delimiter, stripped; inline comments stay part of the value.
+    Return ``None`` for blanks, comments, headers, and lines without a
+    delimiter. ``=`` and ``:`` both delimit; inline comments stay in the value.
     """
     text = line_body(line)
     stripped = text.strip()
@@ -55,17 +51,10 @@ def parse_option(line: str) -> tuple[str, str] | None:
 
 
 def _scan(lines: list[str]) -> tuple[list[int], list[OptionEntry]]:
-    """Classify ``lines`` into section headers and option entries.
+    """Classify ``lines`` into section header indices and option entries.
 
-    Return ``(headers, entries)``: ``headers`` holds the indices of section
-    header lines and each entry is an :class:`OptionEntry` with ``line_index`` the
-    option line's position and ``end`` just past its continuation lines. A
-    line indented deeper than the preceding option or header line continues
-    that entry's value (so an indented ``[::1]`` item is a value, not a
-    header); otherwise a bracket line starts a section and any other line
-    with a separator starts a new option, however deeply the key itself is
-    indented. Blank and comment lines never start an entry and do not end
-    one either.
+    Return ``(headers, entries)``. A line indented deeper than the preceding
+    entry continues its value, so an indented ``[::1]`` item is not a header.
     """
     headers: list[int] = []
     entries: list[OptionEntry] = []
@@ -102,15 +91,13 @@ def _scan(lines: list[str]) -> tuple[list[int], list[OptionEntry]]:
 
 
 def option_entries(lines: list[str], start: int, end: int) -> list[OptionEntry]:
-    """Return the active option entries in ``lines[start:end]``.
-
-    Each entry's ``line_index`` is the option line's position in ``lines``,
-    ``value_lines`` is the option's value split into stripped lines (the text
-    after the delimiter on the option line, plus any deeper-indented
-    continuation lines), and ``end`` is the index just past the entry. Blank
-    lines, comments, and section headers never start an entry.
-    """
+    """Return the option entries whose option line falls in ``lines[start:end]``."""
     _, entries = _scan(lines)
+    return _entries_in(entries, start, end)
+
+
+def _entries_in(entries: list[OptionEntry], start: int, end: int) -> list[OptionEntry]:
+    """Return the entries whose option line falls in ``[start, end)``."""
     return [entry for entry in entries if start <= entry.line_index < end]
 
 
@@ -125,11 +112,10 @@ def option_re(option: str) -> re.Pattern[str]:
 
 
 def canonical_option_re(option: str) -> re.Pattern[str]:
-    """Return a regex matching ``option`` lines in any normalized form.
+    """Return a regex matching ``option`` in pip's normalized forms.
 
-    pip reads config keys case-insensitively, treats runs of ``-``, ``_``, and
-    ``.`` within a name as equivalent, and accepts both ``=`` and ``:`` as
-    delimiters (standard INI semantics plus pip's own key normalization).
+    Runs of ``-``, ``_``, and ``.`` are equivalent, matching is
+    case-insensitive, and both ``=`` and ``:`` delimit.
     """
     parts = option.split("-")
     body = r"[-_.]+".join(re.escape(part) for part in parts)
@@ -137,12 +123,9 @@ def canonical_option_re(option: str) -> re.Pattern[str]:
 
 
 def render_option(option: str, value: str | Sequence[str]) -> str:
-    """Return the canonical ``option = value`` line(s), newline included.
+    """Render ``option = value`` line(s), newline included.
 
-    A single-line value renders as ``option = value``. A multi-line value
-    (appendable options such as pip's ``find-links``) renders as an
-    ``option =`` header followed by one indented continuation line per item,
-    matching standard INI multi-line syntax.
+    Multi-line values render as an ``option =`` header plus indented lines.
     """
     value_lines = [value] if isinstance(value, str) else list(value)
     if len(value_lines) == 1:
@@ -151,14 +134,16 @@ def render_option(option: str, value: str | Sequence[str]) -> str:
 
 
 def section_spans(lines: list[str], section: str | None) -> list[tuple[int, int]]:
-    """Return the body spans ``(start, end)`` of all sections named ``section``.
+    """Return the body spans ``(start, end)`` of sections named ``section``.
 
-    A span ends at the next section header or at the end of the file. With
-    ``section=None`` the single span is the preamble before the first header.
-    Header detection rule: a bracket line indented deeper than the preceding
-    option line is a continuation value, not a header.
+    A span ends at the next header or EOF; ``section=None`` selects the preamble.
     """
     headers, _ = _scan(lines)
+    return _spans_for(headers, lines, section)
+
+
+def _spans_for(headers: list[int], lines: list[str], section: str | None) -> list[tuple[int, int]]:
+    """Return section spans from an existing header scan."""
     if section is None:
         return [(0, headers[0] if headers else len(lines))]
     header = section_re(section)
@@ -173,23 +158,31 @@ def section_spans(lines: list[str], section: str | None) -> list[tuple[int, int]
 
 
 def span_matches(lines: list[str], start: int, end: int, match: Mapping[str, str]) -> bool:
-    """Return whether every ``match`` pair is satisfied within the span.
+    """Return whether every ``match`` pair matches an entry in the span.
 
-    Both the key and the value of a pair are regular expressions applied with
-    ``re.search`` to the stripped option name and value of the same active
-    option entry; a multi-line value is matched as its lines joined with
-    newlines.
+    Keys and values are regexes; multi-line values are joined with newlines.
     """
-    parsed = [(entry.name, "\n".join(entry.value_lines)) for entry in option_entries(lines, start, end)]
-    for key, value in match.items():
-        key_pattern = re.compile(key)
-        value_pattern = re.compile(value)
-        if not any(
-            key_pattern.search(name) is not None and value_pattern.search(entry_value) is not None
-            for name, entry_value in parsed
-        ):
-            return False
-    return True
+    _, entries = _scan(lines)
+    return _match_entries(entries, start, end, _compile_match(match))
+
+
+def _compile_match(match: Mapping[str, str]) -> list[tuple[re.Pattern[str], re.Pattern[str]]]:
+    """Compile every ``match`` pair once for reuse across spans."""
+    return [(re.compile(key), re.compile(value)) for key, value in match.items()]
+
+
+def _match_entries(
+    entries: list[OptionEntry],
+    start: int,
+    end: int,
+    patterns: list[tuple[re.Pattern[str], re.Pattern[str]]],
+) -> bool:
+    """Return whether compiled ``patterns`` match the entries in ``[start, end)``."""
+    parsed = [(entry.name, "\n".join(entry.value_lines)) for entry in _entries_in(entries, start, end)]
+    return all(
+        any(key.search(name) is not None and value.search(entry_value) is not None for name, entry_value in parsed)
+        for key, value in patterns
+    )
 
 
 type _SetAction = Literal["added", "replaced", "unchanged"]
@@ -205,32 +198,16 @@ def set_option(
 ) -> tuple[list[str], _SetAction]:
     """Set ``option`` to ``value`` in the selected section of ``lines``.
 
-    ``value`` is a single line or, for appendable options, a sequence of lines
-    rendered as indented continuation lines (see :func:`render_option`).
-
-    The selected section is the first span whose body satisfies ``match``, or
-    the first same-named span when ``match`` is ``None``. An existing option
-    entry whose value lines already equal ``value`` is kept as-is; otherwise
-    the first matching entry is replaced with the canonical rendered block
-    and duplicate matching entries (including their continuation lines) are
-    dropped. A missing option is inserted after the last non-blank,
-    non-comment line of the section, and a missing section is appended at the
-    end of the file.
-
-    When ``match`` is given and no span matches, the new section is appended
-    only if the new rendered option block itself satisfies ``match`` —
-    otherwise the section could not be found on the next run and would be
-    duplicated every time, so ``TaskFailed`` is raised instead.
-
-    Returns ``(new_lines, action)`` where ``action`` is ``"added"`` when the
-    pair was newly inserted (including a newly appended section),
-    ``"replaced"`` when existing lines were rewritten, and ``"unchanged"``
-    when there was nothing to do; in the last case the input list is
-    returned as-is.
+    Select the first span satisfying ``match``, or the first same-named span.
+    Keep an equal existing entry; otherwise replace the first match and drop
+    duplicates. Insert a missing option at the end of the section, or append a
+    new section. With ``match``, a new section must satisfy the match or
+    ``TaskFailed`` is raised. Return ``(new_lines, action)``.
     """
     value_lines = [value.strip()] if isinstance(value, str) else [item.strip() for item in value]
-    spans = section_spans(lines, section)
-    selected = _select_span(lines, spans, match)
+    headers, entries = _scan(lines)
+    spans = _spans_for(headers, lines, section)
+    selected = _select_span(entries, spans, match)
     if selected is None:
         rendered = render_option(option, value_lines)
         rendered_lines = rendered.splitlines(keepends=True)
@@ -251,15 +228,15 @@ def set_option(
         return new_lines, "added"
     start, end = selected
     pattern = option_pattern if option_pattern is not None else option_re(option)
-    entries = [
-        entry for entry in option_entries(lines, start, end) if pattern.match(lines[entry.line_index]) is not None
+    matches = [
+        entry for entry in _entries_in(entries, start, end) if pattern.match(lines[entry.line_index]) is not None
     ]
-    if entries:
-        first = entries[0]
-        if first.value_lines == value_lines and len(entries) == 1:
+    if matches:
+        first = matches[0]
+        if first.value_lines == value_lines and len(matches) == 1:
             return lines, "unchanged"
         drop: set[int] = set()
-        for entry in entries:
+        for entry in matches:
             drop.update(range(entry.line_index, entry.end))
         block = render_option(option, value_lines).splitlines(keepends=True)
         new_lines = [line for index, line in enumerate(lines) if index not in drop]
@@ -285,20 +262,16 @@ def remove_option(
     match: Mapping[str, str] | None,
     option_pattern: re.Pattern[str] | None = None,
 ) -> list[str]:
-    """Return ``lines`` without the active ``option`` entries in the selected section.
-
-    Continuation lines of a removed option are removed together with its
-    option line. The input list is returned unchanged when there is nothing
-    to remove.
-    """
-    spans = section_spans(lines, section)
-    selected = _select_span(lines, spans, match)
+    """Return ``lines`` without the selected ``option`` entries and continuations."""
+    headers, entries = _scan(lines)
+    spans = _spans_for(headers, lines, section)
+    selected = _select_span(entries, spans, match)
     if selected is None:
         return lines
     start, end = selected
     pattern = option_pattern if option_pattern is not None else option_re(option)
     drop: set[int] = set()
-    for entry in option_entries(lines, start, end):
+    for entry in _entries_in(entries, start, end):
         if pattern.match(lines[entry.line_index]) is not None:
             drop.update(range(entry.line_index, entry.end))
     if not drop:
@@ -307,12 +280,10 @@ def remove_option(
 
 
 def remove_section(lines: list[str], section: str, match: Mapping[str, str] | None) -> list[str]:
-    """Return ``lines`` without the selected section, header line included.
-
-    The input list is returned unchanged when there is nothing to remove.
-    """
-    spans = section_spans(lines, section)
-    selected = _select_span(lines, spans, match)
+    """Return ``lines`` without the selected section, header included."""
+    headers, entries = _scan(lines)
+    spans = _spans_for(headers, lines, section)
+    selected = _select_span(entries, spans, match)
     if selected is None:
         return lines
     start, end = selected
@@ -356,11 +327,9 @@ def require_ini_value(value: str) -> str:
 
 
 def require_ini_value_list(values: Iterable[str]) -> list[str]:
-    """Validate that ``values`` is an ordered sequence and return it as a list.
+    """Validate that ``values`` is an ordered sequence and return a list.
 
-    Only sequences (list, tuple) are accepted: sets, dicts, generators, and
-    other unordered iterables are rejected because their iteration order can
-    differ between runs, which would make writes non-idempotent.
+    Reject sets, dicts, generators, and other unordered iterables.
     """
     if isinstance(values, str):
         raise TaskFailed("ini value list must not be a single string")
@@ -370,10 +339,10 @@ def require_ini_value_list(values: Iterable[str]) -> list[str]:
 
 
 def require_ini_values(values: Iterable[str]) -> list[str]:
-    """Validate a multi-line (appendable) option value and return it as a list.
+    """Validate a multi-line option value and return its items.
 
-    Each item becomes one continuation line when rendered, so items must be
-    non-empty, UTF-8-encodable, single-line strings.
+    Each item becomes one continuation line, so items must be non-empty,
+    UTF-8-encodable, single-line strings.
     """
     items = require_ini_value_list(values)
     require_collection(items, "ini value list")
@@ -393,11 +362,7 @@ def require_ini_values(values: Iterable[str]) -> list[str]:
 
 
 def require_ini_match(match: Mapping[str, str]) -> dict[str, str]:
-    """Validate a ``match`` selector and return it as a plain dict.
-
-    Keys and values must be non-empty regular expression strings; invalid
-    patterns raise ``TaskFailed``.
-    """
+    """Validate a regex ``match`` selector and return it as a plain dict."""
     if not isinstance(match, Mapping):
         raise TaskFailed("ini match must be a mapping of option names to values")
     require_collection(match, "ini match")
@@ -410,11 +375,12 @@ def require_ini_match(match: Mapping[str, str]) -> dict[str, str]:
 
 
 def _select_span(
-    lines: list[str],
+    entries: list[OptionEntry],
     spans: list[tuple[int, int]],
     match: Mapping[str, str] | None,
 ) -> tuple[int, int] | None:
     """Return the first span selected by ``match``, or the first span overall."""
     if match is None:
         return spans[0] if spans else None
-    return next((span for span in spans if span_matches(lines, span[0], span[1], match)), None)
+    patterns = _compile_match(match)
+    return next((span for span in spans if _match_entries(entries, span[0], span[1], patterns)), None)

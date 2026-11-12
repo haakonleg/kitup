@@ -77,6 +77,15 @@ def filter_plan(
         for bundle_id, bundle in registry.items():
             by_id.setdefault(bundle_id, bundle)
 
+    transitive_cache: dict[Bundle, set[Bundle]] = {}
+
+    def transitive(bundle: Bundle) -> set[Bundle]:
+        cached = transitive_cache.get(bundle)
+        if cached is None:
+            cached = _transitive_dependencies(bundle, by_id)
+            transitive_cache[bundle] = cached
+        return cached
+
     included = frozenset(include or ())
     excluded = frozenset(exclude or ())
 
@@ -96,12 +105,12 @@ def filter_plan(
         for bundle_id in included:
             bundle = by_id[bundle_id]
             keep.add(bundle)
-            keep.update(_transitive_dependencies(bundle, by_id))
+            keep.update(transitive(bundle))
 
     excluded_bundles = {by_id[bundle_id] for bundle_id in excluded}
     keep -= excluded_bundles
     for bundle in excluded_bundles:
-        dependents = sorted(kept.id for kept in keep if bundle in _transitive_dependencies(kept, by_id))
+        dependents = sorted(kept.id for kept in keep if bundle in transitive(kept))
         if dependents:
             required_by = ", ".join(repr(bundle_id) for bundle_id in dependents)
             raise ResolutionError(f"cannot exclude bundle {bundle.id!r}: required by {required_by}")

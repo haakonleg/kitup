@@ -619,37 +619,42 @@ def _diff_dependencies(
     normalized name matches with a different verbatim string (all duplicates of
     the name are reconciled); ``absent`` removes entries by normalized name.
     Non-registry entries (URLs, paths, direct references) are preserved verbatim
-    and never matched.
+    and never matched. Current entries are parsed once.
     """
+    parsed = [_try_parse_requirement(item) for item in current]
     if state == "absent":
         wanted_names = {req.normalized for req in wanted}
         removed: list[str] = []
         desired: list[str] = []
-        for item in current:
-            req = _try_parse_requirement(item)
+        for item, req in zip(current, parsed, strict=True):
             if req is not None and req.normalized in wanted_names:
                 removed.append(item)
             else:
                 desired.append(item)
         return desired, [], removed
+    by_name: dict[str, list[int]] = {}
+    for index, req in enumerate(parsed):
+        if req is not None:
+            by_name.setdefault(req.normalized, []).append(index)
     desired = list(current)
-    added = []
+    dropped: set[int] = set()
+    added: list[str] = []
     for req in wanted:
-        matches = [
-            index
-            for index, item in enumerate(desired)
-            if (parsed := _try_parse_requirement(item)) is not None and parsed.normalized == req.normalized
-        ]
-        if not matches:
+        positions = by_name.get(req.normalized)
+        if not positions:
+            by_name[req.normalized] = [len(desired)]
             desired.append(req.source)
             added.append(req.source)
-        elif len(matches) == 1 and desired[matches[0]] == req.source:
+        elif len(positions) == 1 and desired[positions[0]] == req.source:
             continue
         else:
-            desired[matches[0]] = req.source
-            for index in reversed(matches[1:]):
-                del desired[index]
+            first = positions[0]
+            desired[first] = req.source
+            dropped.update(positions[1:])
+            by_name[req.normalized] = [first]
             added.append(req.source)
+    if dropped:
+        desired = [item for index, item in enumerate(desired) if index not in dropped]
     return desired, added, []
 
 

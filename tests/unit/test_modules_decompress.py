@@ -7,6 +7,7 @@ import stat
 import struct
 import tarfile
 import zipfile
+from collections import Counter
 from collections.abc import Callable
 from compression import zstd
 from contextlib import contextmanager
@@ -207,6 +208,31 @@ def test_archive_processes_members_in_archive_order(tmp_path, monkeypatch):
     assert readers[0].rewinds <= 2
 
 
+def test_archive_stats_each_existing_parent_once(tmp_path, monkeypatch):
+    archive = tmp_path / "parents.tar"
+    with tarfile.open(archive, "w") as tar:
+        for index in range(8):
+            _tar_entry(tar, f"app/dir{index}/file{index}.txt", b"payload\n")
+    dest = tmp_path / "dest"
+    decompress.archive(make_context(tmp_path), archive, dest)
+
+    calls = Counter()
+    original = decompress.file_actions.stat_local
+
+    def counting(path, **kwargs):
+        calls[path] += 1
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(decompress.file_actions, "stat_local", counting)
+    second = make_context(tmp_path)
+    decompress.archive(second, archive, dest)
+
+    assert second.changes == []
+    assert calls[dest / "app"] == 1
+    for index in range(8):
+        assert calls[dest / f"app/dir{index}"] == 1
+
+
 def test_archive_reads_changed_same_size_members_once(tmp_path, monkeypatch):
     archive = tmp_path / "changed.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
@@ -393,7 +419,7 @@ def test_archive_refuses_to_follow_symlinks_inside_dest(tmp_path):
     with tarfile.open(archive, "w") as tar:
         _tar_entry(tar, "escape/pwned.txt", b"pwned\n")
 
-    with pytest.raises(TaskFailed, match="non-directory"):
+    with pytest.raises(TaskFailed, match="symlink"):
         decompress.archive(make_context(tmp_path), archive, dest)
 
     assert not (outside / "pwned.txt").exists()
@@ -418,7 +444,7 @@ def test_archive_rejects_invalid_destinations(tmp_path, tar_archive):
 
     link_dest = tmp_path / "link"
     link_dest.symlink_to(tmp_path)
-    with pytest.raises(TaskFailed, match="not a directory"):
+    with pytest.raises(TaskFailed, match="symlink"):
         decompress.archive(ctx, tar_archive, link_dest)
 
     with pytest.raises(TaskFailed, match="parent directory does not exist"):
@@ -447,7 +473,7 @@ def test_archive_validates_dest_before_creates_guard(tmp_path):
 
     with pytest.raises(TaskFailed, match="not a directory"):
         decompress.archive(ctx, source, file_dest, creates=marker)
-    with pytest.raises(TaskFailed, match="not a directory"):
+    with pytest.raises(TaskFailed, match="symlink"):
         decompress.archive(ctx, source, link_dest, creates=marker)
 
 
@@ -468,7 +494,7 @@ def test_archive_validates_arguments(tmp_path, tar_archive):
 
     with pytest.raises(TaskFailed, match="does not exist"):
         decompress.archive(ctx, tmp_path / "missing.tar", dest)
-    with pytest.raises(TaskFailed, match="not a regular file"):
+    with pytest.raises(TaskFailed, match="directory"):
         decompress.archive(ctx, tmp_path, dest)
 
 
