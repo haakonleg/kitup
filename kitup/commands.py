@@ -16,12 +16,7 @@ from .privileges import PrivilegeManager
 class CommandRunner:
     """Run argv-style commands with captured output and optional sudo."""
 
-    def __init__(
-        self,
-        privileges: PrivilegeManager,
-        *,
-        output: Output | None = None,
-    ) -> None:
+    def __init__(self, privileges: PrivilegeManager, *, output: Output | None = None) -> None:
         self.privileges = privileges
         self.output = output
 
@@ -100,14 +95,7 @@ class CommandRunner:
             raise_for_status(result)
         return result
 
-    def _report(
-        self,
-        command: list[str],
-        started: float,
-        returncode: int,
-        stdout: str,
-        stderr: str,
-    ) -> None:
+    def _report(self, command: list[str], started: float, returncode: int, stdout: str, stderr: str) -> None:
         if self.output is not None and self.output.verbose:
             self.output.command(
                 command,

@@ -11,7 +11,11 @@ from .._utils.paths import expand_path
 from .._utils.validation import require_bool, require_metadata, require_mode, require_path
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("template")
+
 
 _RESERVED_VARIABLES: Final = frozenset({"vars", "facts"})
 
@@ -55,7 +59,6 @@ def file(
             ctx,
             target,
             rendered.encode("utf-8"),
-            action="template.file",
             mode=mode,
             owner=owner,
             group=group,
@@ -93,12 +96,7 @@ def _read_template(ctx: TaskContext, source: Path) -> str:
         raise TaskFailed(f"template source is not UTF-8 text: {source}") from exc
 
 
-def _render(
-    ctx: TaskContext,
-    source: Path,
-    text: str,
-    variables: Mapping[str, Any],
-) -> str:
+def _render(ctx: TaskContext, source: Path, text: str, variables: Mapping[str, Any]) -> str:
     jinja2 = _load_jinja2()
     environment = _jinja_environment()
     context = {

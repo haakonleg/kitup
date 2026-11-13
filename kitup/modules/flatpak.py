@@ -17,7 +17,10 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult, format_items
+
+module("flatpak")
 
 
 def remote(
@@ -40,23 +43,9 @@ def remote(
             raise TaskFailed("flatpak remote URL is required when state is present")
         require_text(url, "flatpak remote URL")
         if name in _remote_names(ctx, flag):
-            return ctx.changed(
-                action="flatpak.remote",
-                changed=False,
-                summary=f"ensure remote {name}",
-                remote=name,
-                url=url,
-                scope=scope,
-            )
+            return ctx.changed(changed=False, summary=f"ensure remote {name}", remote=name, url=url, scope=scope)
 
-        call = CallResult(
-            action="flatpak.remote",
-            changed=True,
-            summary=f"add remote {name}",
-            remote=name,
-            url=url,
-            scope=scope,
-        )
+        call = CallResult(changed=True, summary=f"add remote {name}", remote=name, url=url, scope=scope)
         if ctx.dry_run:
             return ctx.changed(call)
         command = [
@@ -72,21 +61,9 @@ def remote(
         return ctx.changed(call)
 
     if name not in _remote_names(ctx, flag):
-        return ctx.changed(
-            action="flatpak.remote",
-            changed=False,
-            summary=f"ensure remote {name} is absent",
-            remote=name,
-            scope=scope,
-        )
+        return ctx.changed(changed=False, summary=f"ensure remote {name} is absent", remote=name, scope=scope)
 
-    call = CallResult(
-        action="flatpak.remote",
-        changed=True,
-        summary=f"remove remote {name}",
-        remote=name,
-        scope=scope,
-    )
+    call = CallResult(changed=True, summary=f"remove remote {name}", remote=name, scope=scope)
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(
@@ -122,19 +99,12 @@ def packages(
         missing = [name for name in wanted if not _matching_refs(name, installed)]
         if not missing:
             return ctx.changed(
-                action="flatpak.packages",
                 changed=False,
                 summary="ensure flatpaks are present: " + " ".join(wanted),
                 added=[],
                 scope=scope,
             )
-        call = CallResult(
-            action="flatpak.packages",
-            changed=True,
-            summary=format_items(missing, sign="+"),
-            added=missing,
-            scope=scope,
-        )
+        call = CallResult(changed=True, summary=format_items(missing, sign="+"), added=missing, scope=scope)
         if ctx.dry_run:
             return ctx.changed(call)
         command = [
@@ -157,20 +127,13 @@ def packages(
     present = [name for name in wanted if _matching_refs(name, installed)]
     if not present:
         return ctx.changed(
-            action="flatpak.packages",
             changed=False,
             summary="ensure flatpaks are absent: " + " ".join(wanted),
             removed=[],
             scope=scope,
         )
     targets = unique_strings(ref for name in present for ref in _matching_refs(name, installed))
-    call = CallResult(
-        action="flatpak.packages",
-        changed=True,
-        summary=format_items(targets, sign="-"),
-        removed=targets,
-        scope=scope,
-    )
+    call = CallResult(changed=True, summary=format_items(targets, sign="-"), removed=targets, scope=scope)
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(

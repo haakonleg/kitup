@@ -8,8 +8,9 @@ import pytest
 import kitup
 from kitup.context import TaskContext
 from kitup.errors import BundleError
-from kitup.registry import Bundle, SideEffect, bundle_of, side_effect, task
+from kitup.registry import Bundle, Module, SideEffect, bundle_of, module, side_effect, task
 from kitup.registry import bundle as define_bundle
+from kitup.results import CallResult
 
 from ..helpers import write
 
@@ -47,6 +48,9 @@ def test_package_reexports_the_authoring_api():
     assert kitup.side_effect is side_effect
     assert kitup.task is task
     assert kitup.TaskContext is TaskContext
+    assert kitup.module is module
+    assert kitup.Module is Module
+    assert kitup.CallResult is CallResult
 
 
 def test_bundle_defaults_to_no_tasks_outside_a_package(tmp_path):

@@ -106,10 +106,7 @@ def test_system_remote_add_and_remove(tmp_path: Path) -> None:
     assert FLATPAK_REMOTE not in flatpak_remotes()
 
 
-def test_system_package_install_and_remove(
-    tmp_path: Path,
-    system_remote: None,
-) -> None:
+def test_system_package_install_and_remove(tmp_path: Path, system_remote: None) -> None:
     install_root = write_bundle(
         tmp_path / "install",
         "flatpak_package_install",

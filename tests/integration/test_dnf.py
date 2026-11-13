@@ -68,10 +68,7 @@ def test_install_and_remove_package(tmp_path: Path) -> None:
     assert not rpm_installed()
 
 
-def test_install_and_remove_group_and_package(
-    tmp_path: Path,
-    group_absent: None,
-) -> None:
+def test_install_and_remove_group_and_package(tmp_path: Path, group_absent: None) -> None:
     install_root = write_bundle(
         tmp_path / "install",
         "dnf_group_install",
@@ -103,10 +100,7 @@ def test_install_and_remove_group_and_package(
     assert TEST_GROUP not in run(["dnf5", "group", "list", "--installed", "--hidden"]).stdout
 
 
-def test_install_and_remove_explicit_group(
-    tmp_path: Path,
-    group_absent: None,
-) -> None:
+def test_install_and_remove_explicit_group(tmp_path: Path, group_absent: None) -> None:
     install_root = write_bundle(
         tmp_path / "install",
         "dnf_group_only_install",

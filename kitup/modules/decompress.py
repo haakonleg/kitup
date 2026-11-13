@@ -32,7 +32,11 @@ from .._utils.paths import expand_path
 from .._utils.validation import normalize_strings, require_mode, require_non_negative_int, require_path, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("decompress")
+
 
 try:
     from compression import zstd
@@ -114,15 +118,7 @@ def archive(
         if not marker.is_absolute():
             marker = target / marker
         if file_actions.stat_local(marker) is not None:
-            return ctx.changed(
-                _archive_result(
-                    source,
-                    target,
-                    changes=0,
-                    files=[],
-                    size=_directory_size(target),
-                )
-            )
+            return ctx.changed(_archive_result(source, target, changes=0, files=[], size=_directory_size(target)))
 
     with closing(_open_archive(source)) as opened:
         entries = _select_entries(opened, strip_components, includes, excludes)
@@ -136,24 +132,10 @@ def archive(
             mode=mode,
         )
 
-    return ctx.changed(
-        _archive_result(
-            source,
-            target,
-            changes=changed,
-            files=files,
-            size=_directory_size(target),
-        )
-    )
+    return ctx.changed(_archive_result(source, target, changes=changed, files=files, size=_directory_size(target)))
 
 
-def file(
-    ctx: TaskContext,
-    src: str | Path,
-    dest: str | Path,
-    *,
-    mode: int | None = None,
-) -> CallResult:
+def file(ctx: TaskContext, src: str | Path, dest: str | Path, *, mode: int | None = None) -> CallResult:
     """Decompress a single-file compression format into ``dest``.
 
     Supported formats are gzip, bzip2, xz, and zstd, detected from the file
@@ -199,37 +181,19 @@ def file(
             else:
                 _install_temp(temporary, target, mode=mode, default_mode=0o644)
                 changed = True
-    return ctx.changed(_file_change(target, source, changed=changed))
+    summary = f"decompress {source} -> {target}" if changed else f"ensure {target} from {source}"
+    return ctx.changed(CallResult(changed=changed, summary=summary, dest=str(target), src=str(source)))
 
 
-def _archive_result(
-    source: Path,
-    target: Path,
-    *,
-    changes: int,
-    files: list[str],
-    size: int,
-) -> CallResult:
+def _archive_result(source: Path, target: Path, *, changes: int, files: list[str], size: int) -> CallResult:
     summary = f"extract {changes} paths from {source} -> {target}" if changes else f"ensure {target} from {source}"
     return CallResult(
-        action="decompress.archive",
         changed=bool(changes),
         summary=summary,
         src=str(source),
         dest=str(target),
         files=files,
         size=size,
-    )
-
-
-def _file_change(target: Path, source: Path, *, changed: bool) -> CallResult:
-    summary = f"decompress {source} -> {target}" if changed else f"ensure {target} from {source}"
-    return CallResult(
-        action="decompress.file",
-        changed=changed,
-        summary=summary,
-        dest=str(target),
-        src=str(source),
     )
 
 
@@ -266,14 +230,7 @@ def _reconcile(
     return changed
 
 
-def _ensure_parents(
-    target: Path,
-    parts: list[str],
-    *,
-    known: set[Path],
-    created: set[Path],
-    dry_run: bool,
-) -> int:
+def _ensure_parents(target: Path, parts: list[str], *, known: set[Path], created: set[Path], dry_run: bool) -> int:
     count = 0
     current = target
     for part in parts:
@@ -293,14 +250,7 @@ def _ensure_parents(
     return count
 
 
-def _ensure_directory(
-    path: Path,
-    member: _Member,
-    *,
-    known: set[Path],
-    created: set[Path],
-    dry_run: bool,
-) -> bool:
+def _ensure_directory(path: Path, member: _Member, *, known: set[Path], created: set[Path], dry_run: bool) -> bool:
     if path in created:
         # Created as a parent earlier in this run; apply the archive mode now.
         if not dry_run and member.mode is not None:
@@ -320,14 +270,7 @@ def _ensure_directory(
     return False
 
 
-def _ensure_file(
-    ctx: TaskContext,
-    archive: _Archive,
-    member: _Member,
-    path: Path,
-    *,
-    mode: int | None,
-) -> bool:
+def _ensure_file(ctx: TaskContext, archive: _Archive, member: _Member, path: Path, *, mode: int | None) -> bool:
     info = file_actions.stat_local(path)
     require_path_kind(path, info, policy=PathPolicy.NOT_DIRECTORY)
 
@@ -351,12 +294,7 @@ def _ensure_file(
         raise TaskFailed(f"could not extract {member.name!r}: {exc}") from exc
 
 
-def _same_contents(
-    path: Path,
-    info: file_actions.FileInfo | None,
-    temporary: Path,
-    member: _Member,
-) -> bool:
+def _same_contents(path: Path, info: file_actions.FileInfo | None, temporary: Path, member: _Member) -> bool:
     """Return whether the target already holds the member's contents."""
     if not _same_size_regular(info, member.size):
         return False
@@ -368,12 +306,7 @@ def _same_size_regular(info: file_actions.FileInfo | None, size: int) -> bool:
     return info is not None and not info.is_symlink and info.is_file and info.size == size
 
 
-def _ensure_symlink(
-    path: Path,
-    member: _Member,
-    *,
-    dry_run: bool,
-) -> bool:
+def _ensure_symlink(path: Path, member: _Member, *, dry_run: bool) -> bool:
     link = member.link
     if link is None:
         raise TaskFailed(f"missing symlink target in archive: {member.name!r}")
@@ -390,12 +323,7 @@ def _ensure_symlink(
     return True
 
 
-def _member_matches(
-    archive: _Archive,
-    member: _Member,
-    path: Path,
-    info: file_actions.FileInfo | None,
-) -> bool:
+def _member_matches(archive: _Archive, member: _Member, path: Path, info: file_actions.FileInfo | None) -> bool:
     if not _same_size_regular(info, member.size):
         return False
     try:
@@ -437,10 +365,7 @@ def _stream_matches(path: Path, stream: Any) -> bool:
 
 
 @contextmanager
-def _open_member(
-    archive: _Archive,
-    member: _Member,
-) -> Iterator[Any]:
+def _open_member(archive: _Archive, member: _Member) -> Iterator[Any]:
     if isinstance(archive, tarfile.TarFile):
         try:
             stream = archive.extractfile(member.raw)
@@ -458,10 +383,7 @@ def _open_member(
 
 
 @contextmanager
-def _staged(
-    directory: Path,
-    open_stream: Callable[[], AbstractContextManager[Any]],
-) -> Iterator[Path]:
+def _staged(directory: Path, open_stream: Callable[[], AbstractContextManager[Any]]) -> Iterator[Path]:
     """Stage a stream beside its destination, removing it on exit."""
 
     def write(sink: IO[bytes]) -> None:
@@ -569,9 +491,7 @@ def _directory_size(path: Path) -> int:
     return total
 
 
-def _iter_members(
-    archive: _Archive,
-) -> Iterator[_Member]:
+def _iter_members(archive: _Archive) -> Iterator[_Member]:
     if isinstance(archive, tarfile.TarFile):
         for info in archive.getmembers():
             if info.isdir():
@@ -664,10 +584,7 @@ def _archive_mode(value: int | None, default: int) -> int:
     return resolved or default
 
 
-def _require_patterns(
-    value: str | Iterable[str] | None,
-    label: str,
-) -> tuple[str, ...]:
+def _require_patterns(value: str | Iterable[str] | None, label: str) -> tuple[str, ...]:
     if value is None:
         return ()
     try:

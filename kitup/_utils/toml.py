@@ -11,7 +11,7 @@ import re
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Final, Literal, NamedTuple
+from typing import Any, Final, Literal, NamedTuple
 
 from ..context import TaskContext
 from ..errors import TaskFailed
@@ -260,7 +260,6 @@ def apply_toml_key(
     table: str | None,
     key: str | None,
     value: TomlValue | None,
-    action: str,
     sudo: bool,
     create: bool = True,
     rendered: str | None = None,
@@ -282,7 +281,7 @@ def apply_toml_key(
     stored: object = value
     if isinstance(value, Sequence) and not isinstance(value, str):
         stored = list(value)
-    data: dict[str, object] = {"path": str(target), "table": table, "key": key, "value": stored}
+    data: dict[str, Any] = {"path": str(target), "table": table, "key": key, "value": stored}
 
     new_lines: list[str]
     toml_action: str
@@ -312,7 +311,7 @@ def apply_toml_key(
     if new_lines == lines:
         # the editor made no change; never rewrite just to add a trailing newline
         data["toml_action"] = "unchanged"
-        return CallResult(action=action, changed=False, summary=unchanged_summary, **data)
+        return CallResult(changed=False, summary=unchanged_summary, **data)
     new_text = "".join(new_lines)
     if new_text and not new_text.endswith("\n"):
         new_text += newline_of(lines)
@@ -324,7 +323,6 @@ def apply_toml_key(
         target,
         new_text,
         snapshot=snapshot,
-        action=action,
         summary=summary,
         data=data,
         sudo=sudo,
@@ -604,14 +602,7 @@ def _checked_value(value_text: str, key: str) -> object:
         raise TaskFailed(f"invalid rendered value for {key!r}: {exc}") from exc
 
 
-def _validate_edit(
-    new_lines: list[str],
-    table: str | None,
-    key: str,
-    expected: object,
-    *,
-    present: bool,
-) -> None:
+def _validate_edit(new_lines: list[str], table: str | None, key: str, expected: object, *, present: bool) -> None:
     """Assert that an edited document parses and holds ``key`` as expected.
 
     A line-based edit that would produce invalid TOML raises instead of writing.

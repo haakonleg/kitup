@@ -12,12 +12,7 @@ from .helpers import make_context, serve_http
 DIGEST = "sha256:" + "a" * 64
 
 
-def asset_payload(
-    name: str,
-    *,
-    asset_id: int = 1,
-    digest: str | None = DIGEST,
-) -> dict[str, object]:
+def asset_payload(name: str, *, asset_id: int = 1, digest: str | None = DIGEST) -> dict[str, object]:
     return {
         "id": asset_id,
         "name": name,
@@ -134,12 +129,7 @@ def api_server(monkeypatch):
         def _send_json(self, status: int, payload: object) -> None:
             self._send(status, json.dumps(payload).encode(), {"Content-Type": "application/json"})
 
-        def _send(
-            self,
-            status: int,
-            body: bytes,
-            headers: dict[str, str] | None = None,
-        ) -> None:
+        def _send(self, status: int, body: bytes, headers: dict[str, str] | None = None) -> None:
             self.send_response(status)
             for name, value in (headers or {}).items():
                 self.send_header(name, value)

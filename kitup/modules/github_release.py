@@ -13,6 +13,10 @@ from .._utils.http import open_url, read_bytes
 from .._utils.validation import has_control_characters, require_text, require_timeout
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
+
+module("github_release")
+
 
 _API_URL: Final = "https://api.github.com"
 _DEFAULT_TIMEOUT: Final = 30
@@ -73,12 +77,7 @@ class Release:
         return _single_asset(self, _compile_asset_pattern(pattern))
 
 
-def latest(
-    ctx: TaskContext,
-    project: str,
-    *,
-    timeout: float = _DEFAULT_TIMEOUT,
-) -> Release:
+def latest(ctx: TaskContext, project: str, *, timeout: float = _DEFAULT_TIMEOUT) -> Release:
     """Return the latest published full release for a public repository.
 
     GitHub defines the latest release as the most recent non-draft,
@@ -96,13 +95,7 @@ def latest(
     )
 
 
-def by_tag(
-    ctx: TaskContext,
-    project: str,
-    tag: str,
-    *,
-    timeout: float = _DEFAULT_TIMEOUT,
-) -> Release:
+def by_tag(ctx: TaskContext, project: str, tag: str, *, timeout: float = _DEFAULT_TIMEOUT) -> Release:
     """Return the published release for ``tag`` in a public repository."""
     project = _validate_project(project)
     tag = _validate_tag(tag)
@@ -163,21 +156,12 @@ def _single_asset(release: Release, regex: re.Pattern[str]) -> Asset:
     return matches[0]
 
 
-def _load_release(
-    url: str,
-    label: str,
-    project: str,
-    timeout: float,
-) -> Release:
+def _load_release(url: str, label: str, project: str, timeout: float) -> Release:
     payload = _fetch_json(url, label, timeout)
     return _parse_release(project, payload)
 
 
-def _fetch_json(
-    url: str,
-    label: str,
-    timeout: float,
-) -> Mapping[str, Any]:
+def _fetch_json(url: str, label: str, timeout: float) -> Mapping[str, Any]:
     headers = {
         "Accept": _ACCEPT,
         "X-GitHub-Api-Version": _API_VERSION,
@@ -331,11 +315,7 @@ def _project_path(project: str) -> str:
     return f"{quote(owner, safe='')}/{quote(repo, safe='')}"
 
 
-def _memo_key(
-    project: str,
-    tag: str | None,
-    timeout: float,
-) -> str:
+def _memo_key(project: str, tag: str | None, timeout: float) -> str:
     target = f"tag:{tag}" if tag is not None else "latest"
     return f"github_release:{project}:{target}:{timeout}"
 

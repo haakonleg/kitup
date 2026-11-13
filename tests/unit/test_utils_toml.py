@@ -224,9 +224,7 @@ def test_apply_toml_key_does_not_rewrite_a_file_without_trailing_newline_when_un
     path.write_text('index-url = "https://x"', encoding="utf-8")  # no trailing newline
     ctx = make_context(tmp_path)
 
-    result = toml.apply_toml_key(
-        ctx, path, table=None, key="index-url", value="https://x", action="uv.config", sudo=False
-    )
+    result = toml.apply_toml_key(ctx, path, table=None, key="index-url", value="https://x", sudo=False)
 
     assert result.changed is False
     assert result["toml_action"] == "unchanged"
@@ -238,12 +236,9 @@ def test_apply_toml_key_sets_removes_and_reports(tmp_path):
     path.write_text('index-url = "old"\n', encoding="utf-8")
     ctx = make_context(tmp_path)
 
-    result = toml.apply_toml_key(
-        ctx, path, table=None, key="index-url", value="https://x", action="uv.config", sudo=False
-    )
+    result = toml.apply_toml_key(ctx, path, table=None, key="index-url", value="https://x", sudo=False)
 
     assert path.read_text() == 'index-url = "https://x"\n'
-    assert result.action == "uv.config"
     assert result.changed is True
     assert result.summary == f"set index-url in {path}"
     assert call_data(result) == {
@@ -254,20 +249,18 @@ def test_apply_toml_key_sets_removes_and_reports(tmp_path):
         "toml_action": "replaced",
     }
 
-    result = toml.apply_toml_key(
-        ctx, path, table=None, key="index-url", value="https://x", action="uv.config", sudo=False
-    )
+    result = toml.apply_toml_key(ctx, path, table=None, key="index-url", value="https://x", sudo=False)
     assert result.changed is False
     assert result.summary == f'ensure index-url is "https://x" in {path}'
     assert call_data(result)["toml_action"] == "unchanged"
 
-    result = toml.apply_toml_key(ctx, path, table=None, key="index-url", value=None, action="uv.config", sudo=False)
+    result = toml.apply_toml_key(ctx, path, table=None, key="index-url", value=None, sudo=False)
     assert result.changed is True
     assert result.summary == f"remove index-url from {path}"
     assert path.read_text() == ""
     assert call_data(result)["toml_action"] == "removed"
 
-    result = toml.apply_toml_key(ctx, path, table=None, key="index-url", value=None, action="uv.config", sudo=False)
+    result = toml.apply_toml_key(ctx, path, table=None, key="index-url", value=None, sudo=False)
     assert result.changed is False
     assert result.summary == f"ensure index-url is absent from {path}"
 
@@ -277,9 +270,7 @@ def test_apply_toml_key_creates_missing_files_and_tables(tmp_path):
     path = tmp_path / "deep" / "pyproject.toml"
     ctx = local_sudo_context(tmp_path)
 
-    result = toml.apply_toml_key(
-        ctx, path, table="tool.uv", key="native-tls", value=True, action="uv.config", sudo=True
-    )
+    result = toml.apply_toml_key(ctx, path, table="tool.uv", key="native-tls", value=True, sudo=True)
 
     assert path.read_text() == "[tool.uv]\nnative-tls = true\n"
     assert call_data(result)["table"] == "tool.uv"
@@ -290,7 +281,7 @@ def test_apply_toml_key_dry_run_reports_without_writing(tmp_path):
     path = tmp_path / "uv.toml"
     ctx = make_context(tmp_path, dry_run=True)
 
-    result = toml.apply_toml_key(ctx, path, table=None, key="key", value=["a", "b"], action="uv.config", sudo=False)
+    result = toml.apply_toml_key(ctx, path, table=None, key="key", value=["a", "b"], sudo=False)
 
     assert result.changed is True
     assert not path.exists()
@@ -326,7 +317,7 @@ def test_apply_toml_key_removes_a_whole_table(tmp_path):
     path.write_text('[server]\nhost = "x"\n\n[tool.uv]\nnative-tls = true\n')
     ctx = make_context(tmp_path)
 
-    result = toml.apply_toml_key(ctx, path, table="tool.uv", key=None, value=None, action="files.toml", sudo=False)
+    result = toml.apply_toml_key(ctx, path, table="tool.uv", key=None, value=None, sudo=False)
 
     # the blank line before [tool.uv] belongs to the [server] span and stays
     assert path.read_text() == '[server]\nhost = "x"\n\n'
@@ -340,7 +331,7 @@ def test_apply_toml_key_removes_a_whole_table(tmp_path):
         "toml_action": "removed",
     }
 
-    result = toml.apply_toml_key(ctx, path, table="tool.uv", key=None, value=None, action="files.toml", sudo=False)
+    result = toml.apply_toml_key(ctx, path, table="tool.uv", key=None, value=None, sudo=False)
     assert result.changed is False
     assert result.summary == f"ensure table [tool.uv] is absent from {path}"
 
@@ -350,18 +341,14 @@ def test_apply_toml_key_writes_arrays_with_set_array_layout(tmp_path):
     path.write_text('[project]\ndependencies = [\n    "a",\n]\n')
     ctx = make_context(tmp_path)
 
-    result = toml.apply_toml_key(
-        ctx, path, table="project", key="dependencies", value=["b", "c"], action="uv.config", sudo=False
-    )
+    result = toml.apply_toml_key(ctx, path, table="project", key="dependencies", value=["b", "c"], sudo=False)
 
     assert path.read_text() == '[project]\ndependencies = [\n    "b",\n    "c",\n]\n'
     assert result.changed is True
     assert call_data(result)["value"] == ["b", "c"]
 
     # an equal multi-line array is unchanged
-    result = toml.apply_toml_key(
-        ctx, path, table="project", key="dependencies", value=["b", "c"], action="uv.config", sudo=False
-    )
+    result = toml.apply_toml_key(ctx, path, table="project", key="dependencies", value=["b", "c"], sudo=False)
     assert result.changed is False
     assert call_data(result)["toml_action"] == "unchanged"
 
@@ -378,7 +365,7 @@ def test_array_edits_scan_the_file_once(tmp_path, monkeypatch):
         return original(lines)
 
     monkeypatch.setattr(toml, "_scan", counting)
-    toml.apply_toml_key(ctx, path, table="project", key="dependencies", value=["b"], action="uv.config", sudo=False)
+    toml.apply_toml_key(ctx, path, table="project", key="dependencies", value=["b"], sudo=False)
 
     assert len(calls) == 1
 
@@ -388,12 +375,10 @@ def test_apply_toml_key_create_false_rejects_a_missing_file(tmp_path):
     missing = tmp_path / "missing.toml"
 
     with pytest.raises(TaskFailed, match="does not exist and create=False"):
-        toml.apply_toml_key(ctx, missing, table=None, key="a", value=1, action="files.toml", sudo=False, create=False)
+        toml.apply_toml_key(ctx, missing, table=None, key="a", value=1, sudo=False, create=False)
     # the create check runs before the state handling, mirroring apply_ini
     with pytest.raises(TaskFailed, match="does not exist and create=False"):
-        toml.apply_toml_key(
-            ctx, missing, table=None, key="a", value=None, action="files.toml", sudo=False, create=False
-        )
+        toml.apply_toml_key(ctx, missing, table=None, key="a", value=None, sudo=False, create=False)
 
     assert not missing.exists()
 
@@ -402,7 +387,7 @@ def test_apply_toml_key_absent_on_a_missing_file_is_a_noop(tmp_path):
     ctx = make_context(tmp_path)
     missing = tmp_path / "missing.toml"
 
-    result = toml.apply_toml_key(ctx, missing, table="a", key="b", value=None, action="files.toml", sudo=False)
+    result = toml.apply_toml_key(ctx, missing, table="a", key="b", value=None, sudo=False)
 
     assert result.changed is False
     assert not missing.exists()
@@ -412,7 +397,7 @@ def test_apply_toml_key_dry_run_on_a_missing_file_creates_nothing(tmp_path):
     ctx = make_context(tmp_path, dry_run=True)
     missing = tmp_path / "deep" / "uv.toml"
 
-    result = toml.apply_toml_key(ctx, missing, table=None, key="a", value=1, action="files.toml", sudo=False)
+    result = toml.apply_toml_key(ctx, missing, table=None, key="a", value=1, sudo=False)
 
     assert result.changed is True
     assert not missing.exists()

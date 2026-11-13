@@ -2,6 +2,7 @@
 
 import importlib
 import inspect
+import keyword
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -17,8 +18,13 @@ from ._utils.validation import split_tags
 from .errors import BundleError
 
 _SPECS_ATTR: Final = "__kitup_task_specs__"
+_MODULE_ATTR: Final = "__kitup_module__"
 _MODULES_SEQUENCE: Final = "bundle modules must be a sequence of task modules or task module paths"
 _ORDER: Final = count()
+
+# Registered ``<module name>`` prefixes keyed by the dotted Python module that
+# declared them. ``ctx.changed`` consults this to infer ``"<module>.<method>"``.
+_ACTION_PREFIXES: dict[str, str] = {}
 
 type TaskFunc = Callable[[Any], Any]
 
@@ -81,6 +87,16 @@ class SideEffect:
     func: TaskFunc
     one_shot: bool = True
     description: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Module:
+    """A task module registered with :func:`module`.
+
+    ``name`` is the action prefix, for example ``"mytool"``.
+    """
+
+    name: str
 
 
 class Bundle:
@@ -155,10 +171,7 @@ class Bundle:
         self.var_paths = var_paths
         self._frozen = True
 
-    def _normalize_modules(
-        self,
-        modules: Sequence[ModuleType | str | Path] | None,
-    ) -> tuple[ModuleType, ...]:
+    def _normalize_modules(self, modules: Sequence[ModuleType | str | Path] | None) -> tuple[ModuleType, ...]:
         if modules is None:
             return ()
         if isinstance(modules, (ModuleType, str, Path)):
@@ -284,7 +297,7 @@ class Bundle:
         if callable(name) and not isinstance(name, str):
             return self._register_task(name, None, tag_values, description)
         if name is not None:
-            _validate_task_name(name)
+            _validate_name(name, "task name")
         return lambda func: self._register_task(func, name, tag_values, description)
 
     def _register_task(
@@ -342,6 +355,55 @@ def bundle(
     if is_package:
         caller["__kitup_bundle__"] = created
     return created
+
+
+def module(name: str) -> Module:
+    """Register the calling Python module as a kitup task module.
+
+    Call this once at the top of a module file, or in a package
+    ``__init__.py`` to cover every file in that package. Public functions that
+    record calls with ``ctx.changed(...)`` then get actions of the form
+    ``"<name>.<function>"`` without passing ``action`` explicitly.
+
+    ``name`` must be a valid, non-keyword Python identifier because it becomes
+    the first segment of every action id.
+    """
+    caller = sys._getframe(1).f_globals
+    module_name = caller.get("__name__")
+    if not module_name:
+        raise BundleError("module() must be called from a Python module")
+    registered = Module(name=_validate_module_name(name))
+    _ACTION_PREFIXES[module_name] = registered.name
+    caller[_MODULE_ATTR] = registered
+    return registered
+
+
+def module_of(value: ModuleType) -> Module | None:
+    """Return the module registered on a Python module, if any."""
+    registered = getattr(value, _MODULE_ATTR, None)
+    return registered if isinstance(registered, Module) else None
+
+
+def action_prefix(module_name: str) -> str | None:
+    """Return the registered action prefix for a dotted module name, if any.
+
+    Submodules inherit the prefix of a registered package, so
+    ``modules.webserver.nginx`` resolves through ``modules.webserver``.
+    """
+    name = module_name
+    while name:
+        prefix = _ACTION_PREFIXES.get(name)
+        if prefix is not None:
+            return prefix
+        name = name.rpartition(".")[0]
+    return None
+
+
+def forget_module_prefix(prefix: str) -> None:
+    """Drop registered action prefixes under a dotted module name."""
+    for module_name in tuple(_ACTION_PREFIXES):
+        if module_name == prefix or module_name.startswith(f"{prefix}."):
+            del _ACTION_PREFIXES[module_name]
 
 
 def discover_task_modules(package: str, folder: Path) -> tuple[ModuleType, ...]:
@@ -422,17 +484,12 @@ def task(
     if callable(name) and not isinstance(name, str):
         return register(name, None)
     if name is not None:
-        _validate_task_name(name)
+        _validate_name(name, "task name")
     return lambda func: register(func, name)
 
 
 @overload
-def side_effect(
-    name: TaskFunc,
-    *,
-    one_shot: bool = True,
-    description: str | None = None,
-) -> SideEffect: ...
+def side_effect(name: TaskFunc, *, one_shot: bool = True, description: str | None = None) -> SideEffect: ...
 
 
 @overload
@@ -465,7 +522,7 @@ def side_effect(
     if callable(name) and not isinstance(name, str):
         return decorate(name, None)
     if name is not None:
-        _validate_side_effect_name(name)
+        _validate_name(name, "side effect name")
     return lambda func: decorate(func, name)
 
 
@@ -508,12 +565,11 @@ def _normalize_tags(tags: Iterable[str]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _validate_task_name(name: object) -> str:
-    return _validate_name(name, "task name")
-
-
-def _validate_side_effect_name(name: object) -> str:
-    return _validate_name(name, "side effect name")
+def _validate_module_name(name: object) -> str:
+    value = _validate_name(name, "module name")
+    if not value.isidentifier() or keyword.iskeyword(value):
+        raise BundleError(f"module name must be a valid, non-keyword Python identifier: {value!r}")
+    return value
 
 
 def _humanize_name(func: TaskFunc) -> str:
@@ -526,13 +582,13 @@ def _humanize_name(func: TaskFunc) -> str:
 def _resolve_task_name(name: str | None, func: TaskFunc) -> str:
     if name is None:
         return _humanize_name(func)
-    return _validate_task_name(name)
+    return _validate_name(name, "task name")
 
 
 def _resolve_side_effect_name(name: str | None, func: TaskFunc) -> str:
     if name is None:
         return _humanize_name(func)
-    return _validate_side_effect_name(name)
+    return _validate_name(name, "side effect name")
 
 
 def _resolve_description(description: str | None, func: TaskFunc) -> str:

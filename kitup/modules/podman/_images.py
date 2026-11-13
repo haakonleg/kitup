@@ -74,12 +74,7 @@ def image(
             data = {"image": name}
             if source is not None:
                 data["source"] = source
-            return ctx.changed(
-                action="podman.image",
-                changed=False,
-                summary=f"ensure image {name}",
-                **data,
-            )
+            return ctx.changed(changed=False, summary=f"ensure image {name}", **data)
         if pull == "never":
             raise TaskFailed(f"image is not present locally: {name}")
         platform_args = ["--platform", platform] if platform is not None else []
@@ -88,7 +83,7 @@ def image(
         if source is not None:
             data["source"] = source
             summary = f"pull {name} from {source}"
-        call = CallResult(action="podman.image", changed=True, summary=summary, **data)
+        call = CallResult(changed=True, summary=summary, **data)
         if ctx.dry_run:
             return ctx.changed(call)
         ctx.run(
@@ -101,18 +96,8 @@ def image(
         return ctx.changed(call)
 
     if not image_exists(ctx, podman_command, name, sudo=sudo):
-        return ctx.changed(
-            action="podman.image",
-            changed=False,
-            summary=f"ensure image {name} is absent",
-            image=name,
-        )
-    call = CallResult(
-        action="podman.image",
-        changed=True,
-        summary=f"remove image {name}",
-        image=name,
-    )
+        return ctx.changed(changed=False, summary=f"ensure image {name} is absent", image=name)
+    call = CallResult(changed=True, summary=f"remove image {name}", image=name)
     if ctx.dry_run:
         return ctx.changed(call)
     force_args = ["--force"] if force else []
@@ -165,13 +150,7 @@ def build(
     argument_args = build_arg_args(build_args)
     podman_command = podman(ctx)
     if not force and image_exists(ctx, podman_command, tag, sudo=sudo):
-        return ctx.changed(
-            action="podman.build",
-            changed=False,
-            summary=f"ensure image {tag}",
-            image=tag,
-            context=str(context_path),
-        )
+        return ctx.changed(changed=False, summary=f"ensure image {tag}", image=tag, context=str(context_path))
 
     command = [podman_command, "build", "-t", tag]
     if containerfile_path is not None:
@@ -183,13 +162,7 @@ def build(
         command.append("--no-cache")
     command.append(str(context_path))
 
-    call = CallResult(
-        action="podman.build",
-        changed=True,
-        summary=f"build {tag} from {context_path}",
-        image=tag,
-        context=str(context_path),
-    )
+    call = CallResult(changed=True, summary=f"build {tag} from {context_path}", image=tag, context=str(context_path))
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(command, timeout=timeout, sudo=sudo)
@@ -198,13 +171,7 @@ def build(
     return ctx.changed(call)
 
 
-def tag(
-    ctx: TaskContext,
-    image: str,
-    targets: str | Iterable[str],
-    *,
-    sudo: bool = False,
-) -> CallResult:
+def tag(ctx: TaskContext, image: str, targets: str | Iterable[str], *, sudo: bool = False) -> CallResult:
     """Add one or more target names to a local image."""
     require_text(image, "image name")
     wanted = unique_strings(normalize_strings(targets))
@@ -216,21 +183,9 @@ def tag(
     source_id = image_id(ctx, podman_command, image, sudo=sudo)
     changed = [target for target in wanted if image_id_or_none(ctx, podman_command, target, sudo=sudo) != source_id]
     if not changed:
-        return ctx.changed(
-            action="podman.tag",
-            changed=False,
-            summary=f"ensure tags for {image}",
-            source=image,
-            targets=[],
-        )
+        return ctx.changed(changed=False, summary=f"ensure tags for {image}", source=image, targets=[])
 
-    call = CallResult(
-        action="podman.tag",
-        changed=True,
-        summary=f"tag {image} as {', '.join(changed)}",
-        source=image,
-        targets=changed,
-    )
+    call = CallResult(changed=True, summary=f"tag {image} as {', '.join(changed)}", source=image, targets=changed)
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run([podman_command, "tag", image, *changed], sudo=sudo)

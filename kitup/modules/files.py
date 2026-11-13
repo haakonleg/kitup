@@ -23,7 +23,10 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("files")
 
 
 def file(
@@ -56,7 +59,6 @@ def file(
                 ctx,
                 target,
                 info,
-                action="files.file",
                 force=False,
                 sudo=sudo,
                 unchanged_summary=f"ensure {target} is absent",
@@ -72,7 +74,6 @@ def file(
                     ctx,
                     target,
                     info,
-                    action="files.file",
                     mode=mode,
                     owner=owner,
                     group=group,
@@ -97,7 +98,6 @@ def file(
             target,
             data,
             snapshot=snapshot,
-            action="files.file",
             mode=mode,
             owner=owner,
             group=group,
@@ -149,7 +149,6 @@ def copy(
                 ctx,
                 target,
                 target_info,
-                action="files.copy",
                 mode=resolved_mode,
                 owner=owner,
                 group=group,
@@ -185,7 +184,6 @@ def copy(
         file_actions.apply_change(
             ctx,
             target,
-            action="files.copy",
             summary=f"copy {source} -> {target}",
             data=data,
             sudo=sudo,
@@ -235,7 +233,6 @@ def move(
             ctx,
             target,
             target_info,
-            action="files.move",
             mode=mode,
             owner=owner,
             group=group,
@@ -260,13 +257,7 @@ def move(
 
     def result(*, metadata: bool) -> CallResult:
         summary = f"{move_summary}; update metadata for {target}" if metadata else move_summary
-        return CallResult(
-            action="files.move",
-            changed=True,
-            summary=summary,
-            dest=str(target),
-            src=str(source),
-        )
+        return CallResult(changed=True, summary=summary, dest=str(target), src=str(source))
 
     if ctx.dry_run:
         if metadata_requested:
@@ -344,7 +335,6 @@ def line(
             target,
             new_text,
             snapshot=snapshot,
-            action="files.line",
             summary=summary,
             unchanged_summary=unchanged_summary,
             data={"path": str(target)},
@@ -393,7 +383,6 @@ def block(
     else:
         if bounds is None:
             return ctx.changed(
-                action="files.block",
                 changed=False,
                 summary=f"ensure {marker} block is absent from {target}",
                 path=str(target),
@@ -410,7 +399,6 @@ def block(
             target,
             new_text,
             snapshot=snapshot,
-            action="files.block",
             summary=summary,
             unchanged_summary=unchanged_summary,
             data={"path": str(target)},
@@ -472,7 +460,6 @@ def ini(
             value=set_value,
             match=match,
             create=create,
-            action="files.ini",
             sudo=sudo,
         )
     )
@@ -537,20 +524,9 @@ def toml(
             key=key,
             value=value,
             create=create,
-            action="files.toml",
             sudo=sudo,
             rendered=rendered,
         )
-    )
-
-
-def _directory_result(ctx: TaskContext, target: Path, summary: str, *, changed: bool = True) -> CallResult:
-    """Record a ``files.directory`` result for ``target``."""
-    return ctx.changed(
-        action="files.directory",
-        changed=changed,
-        summary=summary,
-        path=str(target),
     )
 
 
@@ -577,11 +553,8 @@ def directory(
     if state == "absent":
         info = file_actions.stat(ctx, target, sudo=sudo)
         if info is None:
-            return _directory_result(
-                ctx,
-                target,
-                f"ensure directory {target} is absent",
-                changed=False,
+            return ctx.changed(
+                CallResult(changed=False, summary=f"ensure directory {target} is absent", path=str(target))
             )
         require_path_kind(target, info, policy=PathPolicy.DIRECTORY)
         return ctx.changed(
@@ -589,7 +562,6 @@ def directory(
                 ctx,
                 target,
                 info,
-                action="files.directory",
                 force=force,
                 sudo=sudo,
                 unchanged_summary=f"ensure directory {target} is absent",
@@ -603,7 +575,7 @@ def directory(
         file_actions.require_parent(ctx, target, sudo=sudo)
         if ctx.dry_run:
             file_actions.resolve_metadata(owner, group)
-            return _directory_result(ctx, target, f"mkdir {target}")
+            return ctx.changed(CallResult(changed=True, summary=f"mkdir {target}", path=str(target)))
         file_actions.make_directory(
             ctx,
             target,
@@ -612,14 +584,13 @@ def directory(
             group=group,
             sudo=sudo,
         )
-        return _directory_result(ctx, target, f"mkdir {target}")
+        return ctx.changed(CallResult(changed=True, summary=f"mkdir {target}", path=str(target)))
 
     return ctx.changed(
         file_actions.reconcile_metadata(
             ctx,
             target,
             info,
-            action="files.directory",
             mode=mode,
             owner=owner,
             group=group,
@@ -631,13 +602,7 @@ def directory(
     )
 
 
-def symlink(
-    ctx: TaskContext,
-    target: str | Path,
-    path: str | Path,
-    *,
-    sudo: bool = False,
-) -> CallResult:
+def symlink(ctx: TaskContext, target: str | Path, path: str | Path, *, sudo: bool = False) -> CallResult:
     """Create a symlink, replacing an existing file or symlink."""
     require_text(str(target), "symlink target")
     require_path(path, "symlink path")
@@ -646,23 +611,11 @@ def symlink(
     desired = str(expand_path(target, error=TaskFailed))
     info = file_actions.stat(ctx, link, sudo=sudo)
     if info is not None and info.is_symlink and info.link == desired:
-        return ctx.changed(
-            action="files.symlink",
-            changed=False,
-            summary=f"ensure symlink {link} -> {desired}",
-            path=str(link),
-            target=desired,
-        )
+        return ctx.changed(changed=False, summary=f"ensure symlink {link} -> {desired}", path=str(link), target=desired)
     require_path_kind(link, info, policy=PathPolicy.NOT_DIRECTORY)
 
     file_actions.require_parent(ctx, link, sudo=sudo)
-    result = CallResult(
-        action="files.symlink",
-        changed=True,
-        summary=f"symlink {link} -> {desired}",
-        path=str(link),
-        target=desired,
-    )
+    result = CallResult(changed=True, summary=f"symlink {link} -> {desired}", path=str(link), target=desired)
     if ctx.dry_run:
         return ctx.changed(result)
     if file_actions.privileged(ctx, sudo=sudo):

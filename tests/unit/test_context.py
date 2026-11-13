@@ -41,7 +41,8 @@ def test_changed_records_calls_notes_and_task_scope(tmp_path):
 def test_changed_builds_calls_and_defaults_action(tmp_path):
     context = make_context(tmp_path)
 
-    result = context.changed(action="test.method", summary="+pkg", package="pkg")
+    explicit = CallResult(action="test.method", changed=True, summary="+pkg", package="pkg")
+    result = context.changed(explicit)
     assert isinstance(result, CallResult)
     assert result.action == "test.method"
     assert result.changed is True
@@ -59,15 +60,20 @@ def test_changed_builds_calls_and_defaults_action(tmp_path):
     assert no_change not in context.changes
 
 
-def test_call_result_requires_a_non_empty_action(tmp_path):
-    with pytest.raises(TypeError):
-        CallResult(changed=True, summary="+pkg")  # type: ignore[call-arg]
-    with pytest.raises(ValueError, match="action"):
-        CallResult(action="", changed=True, summary="+pkg")
+def test_call_result_action_is_an_inferred_sentinel(tmp_path):
+    empty = CallResult(changed=True, summary="+pkg")
+    assert empty.action == ""
 
     context = make_context(tmp_path)
-    with pytest.raises(ValueError, match="action"):
-        context.changed(action="", summary="+pkg")
+    assert context.changed(empty).action == "task"
+    assert context.changed(summary="+pkg").action == "task"
+
+    context.begin_task(task_for())
+    inferred = context.changed(CallResult(changed=True, summary="+pkg"))
+    assert inferred.action == "task._noop"
+
+    with pytest.raises(TypeError, match="action"):
+        CallResult(action=1, changed=True, summary="+pkg")  # type: ignore[arg-type]
 
 
 def test_memo_and_input_share_a_store_across_tasks(tmp_path, monkeypatch):

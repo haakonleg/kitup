@@ -5,12 +5,7 @@ from pathlib import Path
 from ..errors import KitupError
 
 
-def expand_path(
-    value: str | Path,
-    *,
-    error: type[KitupError],
-    resolve: bool = False,
-) -> Path:
+def expand_path(value: str | Path, *, error: type[KitupError], resolve: bool = False) -> Path:
     """Expand a path, optionally resolving it, and raise ``error`` on failure."""
     try:
         path = Path(value).expanduser()

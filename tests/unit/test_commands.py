@@ -11,14 +11,7 @@ from .helpers import FakeSudo
 
 
 class FakeProcess:
-    def __init__(
-        self,
-        *,
-        pid: int = 12345,
-        returncode: int = 0,
-        stdout: str = "",
-        stderr: str = "",
-    ) -> None:
+    def __init__(self, *, pid: int = 12345, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
         self.pid = pid
         self.returncode = returncode
         self.stdout = stdout

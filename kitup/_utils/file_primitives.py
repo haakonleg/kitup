@@ -113,10 +113,7 @@ def _streams_equal(left: BinaryIO, right: BinaryIO) -> bool:
             return True
 
 
-def compare_paths(
-    source: str | os.PathLike[str],
-    destination: str | os.PathLike[str],
-) -> bool:
+def compare_paths(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> bool:
     """Return whether two regular files have identical content."""
     with _open_regular(source) as left, _open_regular(destination) as right:
         return _streams_equal(left, right)
@@ -149,12 +146,7 @@ def apply_metadata(
         os.chmod(path, info["mode"])
 
 
-def _resolve_file_mode(
-    info: dict[str, Any] | None,
-    mode: int | None,
-    *,
-    default: int = 0o644,
-) -> int:
+def _resolve_file_mode(info: dict[str, Any] | None, mode: int | None, *, default: int = 0o644) -> int:
     """Resolve an explicit mode, an existing file mode, or a default."""
     if mode is not None:
         return mode
@@ -285,10 +277,7 @@ def copy_path(
         write_stream_path(destination, stream, mode=resolved_mode, owner=owner, group=group, info=info)
 
 
-def move_path(
-    source: str | os.PathLike[str],
-    destination: str | os.PathLike[str],
-) -> None:
+def move_path(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> None:
     """Move a regular file, copying across filesystems when necessary.
 
     Symlink sources, directories, and symlink destinations are rejected.

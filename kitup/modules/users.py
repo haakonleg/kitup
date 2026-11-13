@@ -20,7 +20,11 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("users")
+
 
 _NAME_PATTERN: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")
 
@@ -80,18 +84,8 @@ def user(
     current = _probe_user(name)
     if state == "absent":
         if current is None:
-            return ctx.changed(
-                action="users.user",
-                changed=False,
-                summary=f"ensure user {name} is absent",
-                user=name,
-            )
-        call = CallResult(
-            action="users.user",
-            changed=True,
-            summary=f"remove user {name}",
-            user=name,
-        )
+            return ctx.changed(changed=False, summary=f"ensure user {name} is absent", user=name)
+        call = CallResult(changed=True, summary=f"remove user {name}", user=name)
         if ctx.dry_run:
             return ctx.changed(call)
         ctx.run(["userdel", name], sudo=True)
@@ -129,13 +123,7 @@ def user(
     )
 
 
-def group(
-    ctx: TaskContext,
-    name: str,
-    *,
-    state: State = "present",
-    gid: int | None = None,
-) -> CallResult:
+def group(ctx: TaskContext, name: str, *, state: State = "present", gid: int | None = None) -> CallResult:
     """Ensure a local group exists or is absent."""
     require_state(state, "group")
     _require_name(name, "group name")
@@ -145,18 +133,8 @@ def group(
     current = _probe_group(name)
     if state == "absent":
         if current is None:
-            return ctx.changed(
-                action="users.group",
-                changed=False,
-                summary=f"ensure group {name} is absent",
-                group=name,
-            )
-        call = CallResult(
-            action="users.group",
-            changed=True,
-            summary=f"remove group {name}",
-            group=name,
-        )
+            return ctx.changed(changed=False, summary=f"ensure group {name} is absent", group=name)
+        call = CallResult(changed=True, summary=f"remove group {name}", group=name)
         if ctx.dry_run:
             return ctx.changed(call)
         ctx.run(["groupdel", name], sudo=True)
@@ -169,12 +147,7 @@ def group(
         if gid is not None:
             command.extend(["-g", str(gid)])
         command.append(name)
-        call = CallResult(
-            action="users.group",
-            changed=True,
-            summary=f"create group {name}",
-            group=name,
-        )
+        call = CallResult(changed=True, summary=f"create group {name}", group=name)
         if ctx.dry_run:
             return ctx.changed(call)
         ctx.run(command, sudo=True)
@@ -187,21 +160,10 @@ def group(
 
     if gid is not None and gid != current.gid:
         raise TaskFailed(f"changing an existing GID is not supported: {name} has GID {current.gid}, requested {gid}")
-    return ctx.changed(
-        action="users.group",
-        changed=False,
-        summary=f"ensure group {name}",
-        group=name,
-    )
+    return ctx.changed(changed=False, summary=f"ensure group {name}", group=name)
 
 
-def membership(
-    ctx: TaskContext,
-    user: str,
-    group: str,
-    *,
-    state: State = "present",
-) -> CallResult:
+def membership(ctx: TaskContext, user: str, group: str, *, state: State = "present") -> CallResult:
     """Ensure a user is a supplementary member of a group."""
     require_state(state, "group membership")
     _require_name(user, "user name")
@@ -216,32 +178,14 @@ def membership(
 
     if account.gid == target.gid:
         if state == "present":
-            return ctx.changed(
-                action="users.membership",
-                changed=False,
-                summary=f"ensure {user} is in group {group}",
-                user=user,
-                group=group,
-            )
+            return ctx.changed(changed=False, summary=f"ensure {user} is in group {group}", user=user, group=group)
         raise TaskFailed(f"cannot remove {user} from primary group {group}; change the primary group with users.user()")
 
     is_member = user in target.members
     if state == "present":
         if is_member:
-            return ctx.changed(
-                action="users.membership",
-                changed=False,
-                summary=f"ensure {user} is in group {group}",
-                user=user,
-                group=group,
-            )
-        call = CallResult(
-            action="users.membership",
-            changed=True,
-            summary=f"add {user} to group {group}",
-            user=user,
-            group=group,
-        )
+            return ctx.changed(changed=False, summary=f"ensure {user} is in group {group}", user=user, group=group)
+        call = CallResult(changed=True, summary=f"add {user} to group {group}", user=user, group=group)
         if ctx.dry_run:
             return ctx.changed(call)
         ctx.run(["gpasswd", "-a", user, group], sudo=True)
@@ -251,20 +195,8 @@ def membership(
         return ctx.changed(call)
 
     if not is_member:
-        return ctx.changed(
-            action="users.membership",
-            changed=False,
-            summary=f"ensure {user} is not in group {group}",
-            user=user,
-            group=group,
-        )
-    call = CallResult(
-        action="users.membership",
-        changed=True,
-        summary=f"remove {user} from group {group}",
-        user=user,
-        group=group,
-    )
+        return ctx.changed(changed=False, summary=f"ensure {user} is not in group {group}", user=user, group=group)
+    call = CallResult(changed=True, summary=f"remove {user} from group {group}", user=user, group=group)
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(["gpasswd", "-d", user, group], sudo=True)
@@ -301,12 +233,7 @@ def _create_user(
     summary = f"create user {name}"
     if password is not None:
         summary = f"{summary}; set password for {name}"
-    call = CallResult(
-        action="users.user",
-        changed=True,
-        summary=summary,
-        user=name,
-    )
+    call = CallResult(changed=True, summary=summary, user=name)
     if ctx.dry_run:
         return call
     ctx.run(command, sudo=True)
@@ -359,7 +286,6 @@ def _modify_user(
     if password_changed:
         summaries.append(f"set password for {current.name}")
     call = CallResult(
-        action="users.user",
         changed=bool(changed_fields),
         summary="; ".join(summaries) if summaries else f"ensure user {current.name}",
         user=current.name,
@@ -399,14 +325,7 @@ def _verify_password(ctx: TaskContext, name: str, password: str) -> None:
         raise TaskFailed(f"password was not updated for user: {name}")
 
 
-def _verify_user(
-    account: _User,
-    *,
-    uid: int | None,
-    gid: int | None,
-    home: str | None,
-    shell: str | None,
-) -> None:
+def _verify_user(account: _User, *, uid: int | None, gid: int | None, home: str | None, shell: str | None) -> None:
     if uid is not None and account.uid != uid:
         raise TaskFailed(f"user {account.name} has UID {account.uid}, expected {uid}")
     if gid is not None and account.gid != gid:

@@ -122,7 +122,6 @@ def generate_systemd(
             ctx,
             target,
             result.stdout.encode(),
-            action="podman.generate_systemd",
             mode=mode,
             owner=None,
             group=None,

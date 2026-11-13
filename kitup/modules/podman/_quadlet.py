@@ -85,7 +85,6 @@ def quadlet(
             ctx,
             path,
             content.encode(),
-            action="podman.quadlet",
             mode=mode,
             owner=None,
             group=None,
@@ -107,9 +106,7 @@ def _quadlet_exec(command: str | Sequence[str] | None) -> str | None:
     return shlex.join(parts)
 
 
-def _quadlet_extra_options(
-    extra_options: Mapping[str, str | Sequence[str]] | None,
-) -> list[str]:
+def _quadlet_extra_options(extra_options: Mapping[str, str | Sequence[str]] | None) -> list[str]:
     if extra_options is None:
         return []
     if not isinstance(extra_options, Mapping):

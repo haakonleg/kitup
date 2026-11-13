@@ -6,7 +6,7 @@ import re
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 from .._utils import file_actions
 from .._utils import ini as ini_ops
@@ -26,7 +26,11 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult, format_items
+
+module("pip")
+
 
 type PipState = Literal["present", "absent", "latest"]
 type VenvState = Literal["exists", "created", "would-create", "missing"]
@@ -173,7 +177,6 @@ def config(
             value=set_value,
             match=None,
             create=True,
-            action="pip.config",
             sudo=sudo,
             option_pattern=ini_ops.canonical_option_re(option),
             snapshot=snapshot,
@@ -414,14 +417,7 @@ def _normalize_venv(venv: str | Path | None) -> Path | None:
     return expand_path(venv, error=TaskFailed)
 
 
-def _prepare_venv(
-    ctx: TaskContext,
-    venv: Path | None,
-    python: str | None,
-    *,
-    state: PipState,
-    sudo: bool,
-) -> VenvState:
+def _prepare_venv(ctx: TaskContext, venv: Path | None, python: str | None, *, state: PipState, sudo: bool) -> VenvState:
     """Create a missing venv unless ``state="absent"``; return the resulting venv state."""
     if venv is None or _is_venv(ctx, venv, sudo=sudo):
         return "exists"
@@ -455,14 +451,14 @@ def _packages_result(
     removed: list[str] | None = None,
 ) -> CallResult:
     """Build the flat ``pip.packages`` call result for one invocation."""
-    data: dict[str, object] = {"packages": wanted}
+    data: dict[str, Any] = {"packages": wanted}
     if venv is not None:
         data["venv"] = str(venv)
     if added is not None:
         data["added"] = added
     if removed is not None:
         data["removed"] = removed
-    return CallResult(action="pip.packages", changed=changed, summary=summary, **data)
+    return CallResult(changed=changed, summary=summary, **data)
 
 
 def _require_absent_name(name: str) -> None:

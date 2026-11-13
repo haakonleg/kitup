@@ -105,13 +105,7 @@ class _LineReader(threading.Thread):
 class PrivilegedWorker:
     """Lazily started, long-lived privileged worker process."""
 
-    def __init__(
-        self,
-        ctx: TaskContext,
-        *,
-        timeout: float = 600,
-        startup_timeout: float = 30,
-    ) -> None:
+    def __init__(self, ctx: TaskContext, *, timeout: float = 600, startup_timeout: float = 30) -> None:
         self.ctx = ctx
         self.timeout = timeout
         self.startup_timeout = startup_timeout

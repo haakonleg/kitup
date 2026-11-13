@@ -21,6 +21,10 @@ my-machine/                     # project root
 │       ├── files/              # bundle resources
 │       └── vars/               # optional; bundle-scoped variable values
 │           └── defaults.py
+├── modules/                    # optional custom modules
+│   ├── motd.py                 # single-file module; calls module("motd")
+│   └── desktop/                # package module; calls module("desktop")
+│       └── __init__.py
 ├── files/                      # optional project-level source overlays
 │   ├── common.conf             # global override
 │   └── base/                   # overrides for the base bundle
@@ -211,6 +215,41 @@ bundle id, including external bundles. Absolute paths and `~` are used as-is.
 and do not consult project overlays. Not every module path uses this lookup; for
 example, `dnf.repository()` and `dnf.rpm()` treat local inputs as ordinary paths
 relative to the current working directory.
+
+## Custom modules
+
+Reusable, idempotent operation code belongs in an optional top-level `modules/`
+directory. A module is a single file, or a folder with an `__init__.py`; either
+way it calls `module(...)` once.
+
+```python
+# modules/motd.py
+from kitup import CallResult, module
+from kitup.modules import files
+
+module("motd")
+
+
+def message(ctx, text: str) -> CallResult:
+    """Write the message of the day."""
+    return files.file(ctx, "/etc/motd", content=text + "\n", sudo=True)
+```
+
+Tasks import custom modules like any other Python module:
+
+```python
+from kitup import task
+from modules import motd
+
+
+@task
+def configure_machine(ctx):
+    """Write the message of the day."""
+    motd.message(ctx, ctx.vars.MOTD)
+```
+
+See [Custom modules](custom-modules.md) for package modules and the full
+authoring contract.
 
 ## Vars
 

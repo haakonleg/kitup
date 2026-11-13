@@ -25,16 +25,7 @@ class FakeAccounts(FakeCommandRunner):
         self.shadows: dict[str, str] = {}
         self.fail: dict[str, str] = {}
 
-    def add_user(
-        self,
-        name: str,
-        *,
-        uid: int,
-        gid: int,
-        home: str,
-        shell: str,
-        password: str | None = None,
-    ) -> None:
+    def add_user(self, name: str, *, uid: int, gid: int, home: str, shell: str, password: str | None = None) -> None:
         self.users[name] = {"uid": uid, "gid": gid, "home": home, "shell": shell}
         if password is not None:
             self.shadows[name] = password

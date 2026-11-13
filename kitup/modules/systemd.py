@@ -5,7 +5,11 @@ from typing import Final, Literal
 from .._utils.validation import require_bool, require_scope, require_state, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("systemd")
+
 
 type SystemdState = Literal["started", "stopped"]
 
@@ -72,31 +76,16 @@ def unit(
         summary = f"ensure {unit} is {' and '.join(wanted)}"
     else:
         summary = "; ".join(summaries)
-    return ctx.changed(
-        action="systemd.unit",
-        changed=bool(actions),
-        summary=summary,
-        unit=unit,
-        scope=scope,
-        actions=actions,
-    )
+    return ctx.changed(changed=bool(actions), summary=summary, unit=unit, scope=scope, actions=actions)
 
 
 def daemon_reload(ctx: TaskContext, *, scope: str = "system") -> CallResult:
     """Reload systemd manager configuration."""
     base = _command(ctx, scope)
     if ctx.dry_run:
-        return ctx.changed(
-            action="systemd.daemon_reload",
-            summary=f"would reload systemd ({scope})",
-            scope=scope,
-        )
+        return ctx.changed(summary=f"would reload systemd ({scope})", scope=scope)
     ctx.run([*base, "daemon-reload"], sudo=scope == "system")
-    return ctx.changed(
-        action="systemd.daemon_reload",
-        summary=f"reload systemd ({scope})",
-        scope=scope,
-    )
+    return ctx.changed(summary=f"reload systemd ({scope})", scope=scope)
 
 
 def _command(ctx: TaskContext, scope: str) -> list[str]:

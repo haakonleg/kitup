@@ -2,14 +2,18 @@
 
 import re
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from .._utils import file_actions, ini
 from .._utils.paths import expand_path
 from .._utils.validation import State, require_state, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("sysctl")
+
 
 _KEY_PATTERN: Final = r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*"
 
@@ -53,7 +57,7 @@ def key(
         summaries.append(file_call.summary)
     if runtime_changed:
         summaries.append(f"set {key_name}={desired}")
-    data: dict[str, object] = {
+    data: dict[str, Any] = {
         "key": key_name,
         "value": desired,
         "runtime": runtime_changed,
@@ -62,7 +66,6 @@ def key(
         data["path"] = str(target)
     changed = runtime_changed or (file_call is not None and file_call.changed)
     result = CallResult(
-        action="sysctl.key",
         changed=changed,
         summary="; ".join(summaries) if summaries else f"ensure {key_name}={desired}",
         **data,
@@ -121,13 +124,7 @@ def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> Cal
     matches = [line for line in lines if pattern.match(line) is not None]
     if len(matches) == 1 and _entry_value(matches[0]) == _normalize_ws(desired):
         # Keep the existing line, including its spacing and position.
-        return CallResult(
-            action="sysctl.key",
-            changed=False,
-            summary=f"ensure {name} in {target}",
-            path=str(target),
-            key=name,
-        )
+        return CallResult(changed=False, summary=f"ensure {name} in {target}", path=str(target), key=name)
     remaining = [line for line in lines if pattern.match(line) is None]
     if remaining and not remaining[-1].endswith("\n"):
         remaining[-1] += "\n"
@@ -137,7 +134,6 @@ def _write_entry(ctx: TaskContext, target: Path, name: str, desired: str) -> Cal
         target,
         "".join(remaining),
         snapshot=snapshot,
-        action="sysctl.key",
         summary=f"set {name} in {target}",
         unchanged_summary=f"ensure {name} in {target}",
         data={"path": str(target), "key": name},
@@ -162,7 +158,6 @@ def _remove_entry(ctx: TaskContext, target: Path, name: str) -> CallResult:
         target,
         new_text,
         snapshot=snapshot,
-        action="sysctl.key",
         summary=f"remove {name} from {target}",
         unchanged_summary=f"ensure {name} is absent from {target}",
         data={"path": str(target), "key": name},

@@ -80,6 +80,51 @@ def test_modules_do_not_import_each_other():
     assert not violations, "modules must remain standalone: " + ", ".join(violations)
 
 
+def _declares_module(path: Path, name: str) -> bool:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+            continue
+        call = node.value
+        if not isinstance(call.func, ast.Name) or call.func.id != "module":
+            continue
+        if len(call.args) != 1 or not isinstance(call.args[0], ast.Constant):
+            continue
+        if call.args[0].value == name:
+            return True
+    return False
+
+
+def test_builtin_modules_register_their_stem():
+    """Built-in modules declare their action prefix with ``module(...)``."""
+    offenders: list[str] = []
+    for path in sorted(MODULES_DIR.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        if not _declares_module(path, path.stem):
+            offenders.append(str(path.relative_to(MODULES_DIR)))
+    for folder in sorted(item for item in MODULES_DIR.iterdir() if item.is_dir() and (item / "__init__.py").is_file()):
+        init = folder / "__init__.py"
+        if not _declares_module(init, folder.name):
+            offenders.append(str(init.relative_to(MODULES_DIR)))
+
+    assert not offenders, "modules must call module(...): " + ", ".join(offenders)
+
+
+def test_modules_do_not_hard_code_actions():
+    """Built-in modules let ``ctx.changed`` infer ``"<module>.<method>"``."""
+    offenders = [
+        f"{path.relative_to(MODULES_DIR)}:{node.lineno}"
+        for path in sorted(MODULES_DIR.rglob("*.py"))
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "action" and isinstance(keyword.value, ast.Constant)
+    ]
+
+    assert not offenders, "modules must not pass action explicitly: " + ", ".join(offenders)
+
+
 def test_modules_have_documentation():
     """Every built-in module has a matching page in ``docs/modules``."""
     module_names = _module_names()

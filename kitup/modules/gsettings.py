@@ -5,17 +5,13 @@ from typing import Any
 from .._utils.validation import State, require_state, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
 
+module("gsettings")
 
-def key(
-    ctx: TaskContext,
-    schema: str,
-    key: str,
-    value: Any = None,
-    *,
-    state: State = "present",
-) -> CallResult:
+
+def key(ctx: TaskContext, schema: str, key: str, value: Any = None, *, state: State = "present") -> CallResult:
     """Manage a gsettings key, or reset it to its schema default."""
     require_state(state, "gsettings")
     require_text(schema, "gsettings schema")
@@ -33,7 +29,6 @@ def key(
     desired = _format_value(value)
     if _read(ctx, schema, key) == desired:
         return ctx.changed(
-            action="gsettings.key",
             changed=False,
             summary=f"ensure {schema} {key}={desired}",
             schema=schema,
@@ -41,14 +36,7 @@ def key(
             value=value,
         )
 
-    call = CallResult(
-        action="gsettings.key",
-        changed=True,
-        summary=f"set {schema} {key}={desired}",
-        schema=schema,
-        key=key,
-        value=value,
-    )
+    call = CallResult(changed=True, summary=f"set {schema} {key}={desired}", schema=schema, key=key, value=value)
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(
@@ -67,21 +55,9 @@ def _reset(ctx: TaskContext, schema: str, key: str) -> CallResult:
         env={"GSETTINGS_BACKEND": "memory"},
     )
     if default.returncode == 0 and current == _normalize(default.stdout):
-        return CallResult(
-            action="gsettings.key",
-            changed=False,
-            summary=f"ensure {schema} {key} is reset",
-            schema=schema,
-            key=key,
-        )
+        return CallResult(changed=False, summary=f"ensure {schema} {key} is reset", schema=schema, key=key)
 
-    call = CallResult(
-        action="gsettings.key",
-        changed=True,
-        summary=f"reset {schema} {key}",
-        schema=schema,
-        key=key,
-    )
+    call = CallResult(changed=True, summary=f"reset {schema} {key}", schema=schema, key=key)
     if ctx.dry_run:
         return call
     ctx.run(

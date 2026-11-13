@@ -15,7 +15,7 @@ import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 from .._utils import file_actions
 from .._utils import toml as toml_ops
@@ -37,7 +37,11 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult, format_items
+
+module("uv")
+
 
 type UvState = Literal["present", "absent", "latest"]
 
@@ -90,7 +94,8 @@ def dependencies(
     if python is not None:
         require_text(python, "python")
     extra = normalize_extra_args(extra_args)
-    requirements = [_require_project_requirement(name, state=state) for name in wanted]
+    # Project dependencies reject ``@`` specifiers; those are uv tool syntax.
+    requirements = [_parse_registry_requirement(name, state=state, tool=False) for name in wanted]
 
     pyproject = project_path / "pyproject.toml"
     project_info = file_actions.stat(ctx, project_path, sudo=False, follow=True)
@@ -132,12 +137,7 @@ def dependencies(
         desired_state = "up to date" if state == "latest" else state
         data = _call_data("dependencies", wanted, state, project=str(project_path))
         return ctx.changed(
-            CallResult(
-                action="uv.dependencies",
-                changed=False,
-                summary=f"ensure dependencies are {desired_state}: " + " ".join(wanted),
-                **data,
-            )
+            CallResult(changed=False, summary=f"ensure dependencies are {desired_state}: " + " ".join(wanted), **data)
         )
 
     parts: list[str] = []
@@ -150,7 +150,7 @@ def dependencies(
         parts.append(format_items(added, sign="+"))
     parts.append(f"sync {project_path}")
     data = _call_data("dependencies", wanted, state, project=str(project_path), added=added, removed=removed)
-    result = CallResult(action="uv.dependencies", changed=True, summary="; ".join(parts), **data)
+    result = CallResult(changed=True, summary="; ".join(parts), **data)
     if ctx.dry_run:
         return ctx.changed(result)
 
@@ -195,7 +195,7 @@ def tools(
     if python is not None:
         require_text(python, "python")
     extra = normalize_extra_args(extra_args)
-    requirements = [_require_tool_requirement(name, state=state) for name in wanted]
+    requirements = [_parse_registry_requirement(name, state=state, tool=True) for name in wanted]
 
     uv = _uv_bin(ctx)
     tools_dir = _tools_dir(ctx, uv)
@@ -348,7 +348,6 @@ def config(
             table=table,
             key=option,
             value=value,
-            action="uv.config",
             sudo=sudo,
             rendered=rendered,
         )
@@ -358,7 +357,6 @@ def config(
 def _absent_no_change(wanted: list[str], project: Path, state: UvState) -> CallResult:
     """Build the ``changed=False`` result for ``state="absent"`` with nothing to remove."""
     return CallResult(
-        action="uv.dependencies",
         changed=False,
         summary="ensure dependencies are absent: " + " ".join(wanted),
         **_call_data("dependencies", wanted, state, project=str(project)),
@@ -369,7 +367,6 @@ def _tools_no_change(wanted: list[str], state: UvState) -> CallResult:
     """Build the ``changed=False`` result for ``uv.tools`` when the desired state already holds."""
     desired = "up to date" if state == "latest" else state
     return CallResult(
-        action="uv.tools",
         changed=False,
         summary=f"ensure tools are {desired}: " + " ".join(wanted),
         **_call_data("tools", wanted, state),
@@ -380,7 +377,6 @@ def _tools_changed(wanted: list[str], state: UvState, items: list[str]) -> CallR
     """Build the ``changed=True`` result for ``uv.tools`` from the added or removed items."""
     sign = "-" if state == "absent" else "+"
     return CallResult(
-        action="uv.tools",
         changed=True,
         summary=" ".join(f"{sign}{item}" for item in items),
         **_call_data("tools", wanted, state, added=items, removed=items),
@@ -457,7 +453,7 @@ def _write_table(
     key: str,
     desired: list[str],
     summary: str,
-    data: dict[str, object],
+    data: dict[str, Any],
 ) -> None:
     """Write the edited dependency table into ``pyproject.toml``."""
     new_lines, _ = toml_ops.set_array(lines, table, key, desired)
@@ -469,7 +465,6 @@ def _write_table(
         pyproject,
         new_text,
         snapshot=snapshot,
-        action="uv.dependencies",
         summary=summary,
         data=data,
         sudo=False,
@@ -534,21 +529,6 @@ def _require_group_name(group: str) -> str:
     return key
 
 
-def _require_project_requirement(name: str, *, state: UvState) -> Requirement:
-    """Validate a project dependency entry and return it parsed.
-
-    Project dependencies reject ``@`` specifiers: ``name@latest`` and
-    ``name@<version>`` are uv *tool* syntax and invalid in ``pyproject.toml``
-    dependency tables.
-    """
-    return _parse_registry_requirement(name, state=state, tool=False)
-
-
-def _require_tool_requirement(name: str, *, state: UvState) -> Requirement:
-    """Validate a uv tool requirement (``@`` specifiers allowed) and return it parsed."""
-    return _parse_registry_requirement(name, state=state, tool=True)
-
-
 def _parse_registry_requirement(name: str, *, state: UvState, tool: bool) -> Requirement:
     """Parse a registry requirement, mapping URL/path errors to the ``state="absent"`` message."""
     try:
@@ -590,9 +570,9 @@ def _call_data(
     added: list[str] | None = None,
     removed: list[str] | None = None,
     **fields: object,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Build the flat call data for one ``uv`` module invocation (``dependencies`` or ``tools``)."""
-    data: dict[str, object] = {field: wanted, **fields}
+    data: dict[str, Any] = {field: wanted, **fields}
     if state == "absent":
         data["removed"] = removed if removed is not None else []
     else:
@@ -805,12 +785,7 @@ def _parse_tool_list(output: str) -> dict[str, str]:
     return versions
 
 
-def _config_target(
-    *,
-    scope: str,
-    project: str | Path | None,
-    path: str | Path | None,
-) -> tuple[Path, str | None]:
+def _config_target(*, scope: str, project: str | Path | None, path: str | Path | None) -> tuple[Path, str | None]:
     """Resolve the uv config file and TOML table to edit for the given scope."""
     if path is not None:
         require_path(path, "config path")

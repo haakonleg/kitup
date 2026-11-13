@@ -14,7 +14,11 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("host")
+
 
 _LOCALE_KEYS: Final = frozenset(
     {
@@ -59,7 +63,6 @@ def hostname(ctx: TaskContext, name: str | None = None, *, pretty: str | None = 
         calls.append(_converge_hostname(ctx, "pretty", pretty_name))
         hostnames["pretty"] = pretty_name
     return ctx.changed(
-        action="host.hostname",
         changed=any(call.changed for call in calls),
         summary="; ".join(call.summary for call in calls),
         hostnames=hostnames,
@@ -76,19 +79,9 @@ def timezone(ctx: TaskContext, zone: str) -> CallResult:
 
     current = _timedatectl_property(ctx, "Timezone")
     if current == zone:
-        return ctx.changed(
-            action="host.timezone",
-            changed=False,
-            summary=f"ensure time zone {zone}",
-            timezone=zone,
-        )
+        return ctx.changed(changed=False, summary=f"ensure time zone {zone}", timezone=zone)
 
-    call = CallResult(
-        action="host.timezone",
-        changed=True,
-        summary=f"set time zone {zone}",
-        timezone=zone,
-    )
+    call = CallResult(changed=True, summary=f"set time zone {zone}", timezone=zone)
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(["timedatectl", "set-timezone", zone], sudo=True)
@@ -108,21 +101,11 @@ def ntp(
     current = _parse_yes_no(values["NTP"], "NTP")
     action = "enable" if enabled else "disable"
     if current == enabled:
-        return ctx.changed(
-            action="host.ntp",
-            changed=False,
-            summary=f"ensure network time synchronization is {action}d",
-            ntp=enabled,
-        )
+        return ctx.changed(changed=False, summary=f"ensure network time synchronization is {action}d", ntp=enabled)
     if not _parse_yes_no(values["CanNTP"], "CanNTP"):
         raise TaskFailed("network time synchronization is not available (CanNTP=no)")
 
-    call = CallResult(
-        action="host.ntp",
-        changed=True,
-        summary=f"{action} network time synchronization",
-        ntp=enabled,
-    )
+    call = CallResult(changed=True, summary=f"{action} network time synchronization", ntp=enabled)
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(
@@ -142,19 +125,9 @@ def rtc_local(
     current = _parse_yes_no(_timedatectl_property(ctx, "LocalRTC"), "LocalRTC")
     mode = "local time" if enabled else "UTC"
     if current == enabled:
-        return ctx.changed(
-            action="host.rtc_local",
-            changed=False,
-            summary=f"ensure RTC is {mode}",
-            rtc_local=enabled,
-        )
+        return ctx.changed(changed=False, summary=f"ensure RTC is {mode}", rtc_local=enabled)
 
-    call = CallResult(
-        action="host.rtc_local",
-        changed=True,
-        summary=f"set RTC to {mode}",
-        rtc_local=enabled,
-    )
+    call = CallResult(changed=True, summary=f"set RTC to {mode}", rtc_local=enabled)
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(
@@ -185,19 +158,9 @@ def locale(ctx: TaskContext, values: Mapping[str, str]) -> CallResult:
     assignments = [f"{key}={value}" for key, value in desired.items()]
     current = _localectl_status(ctx)
     if all(_locale_satisfied(current, key, value) for key, value in desired.items()):
-        return ctx.changed(
-            action="host.locale",
-            changed=False,
-            summary=f"ensure locale {' '.join(assignments)}",
-            locale=desired,
-        )
+        return ctx.changed(changed=False, summary=f"ensure locale {' '.join(assignments)}", locale=desired)
 
-    call = CallResult(
-        action="host.locale",
-        changed=True,
-        summary=f"set locale {' '.join(assignments)}",
-        locale=desired,
-    )
+    call = CallResult(changed=True, summary=f"set locale {' '.join(assignments)}", locale=desired)
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(["localectl", "set-locale", *assignments], sudo=True)
@@ -214,22 +177,10 @@ def _converge_hostname(ctx: TaskContext, kind: _HostnameKind, desired: str) -> C
     clearing = kind == "pretty" and desired == ""
     if current == desired:
         summary = "ensure pretty hostname is cleared" if clearing else f"ensure {kind} hostname {desired}"
-        return CallResult(
-            action="host.hostname",
-            changed=False,
-            summary=summary,
-            hostname=desired,
-            kind=kind,
-        )
+        return CallResult(changed=False, summary=summary, hostname=desired, kind=kind)
 
     summary = "clear pretty hostname" if clearing else f"set {kind} hostname {desired}"
-    call = CallResult(
-        action="host.hostname",
-        changed=True,
-        summary=summary,
-        hostname=desired,
-        kind=kind,
-    )
+    call = CallResult(changed=True, summary=summary, hostname=desired, kind=kind)
     if ctx.dry_run:
         return call
     ctx.run(["hostnamectl", "hostname", f"--{kind}", desired], sudo=True)

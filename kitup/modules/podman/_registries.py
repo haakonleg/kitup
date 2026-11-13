@@ -63,7 +63,6 @@ def registry(
                 ctx,
                 target,
                 info,
-                action="podman.registry",
                 force=False,
                 sudo=sudo,
                 summary=f"remove registry {name} from {target}",
@@ -93,7 +92,6 @@ def registry(
             ctx,
             target,
             content.encode(),
-            action="podman.registry",
             mode=mode,
             owner=None,
             group=None,
@@ -144,20 +142,13 @@ def login(
         == username
     ):
         return ctx.changed(
-            action="podman.login",
             changed=False,
             summary=f"ensure login to {registry} as {username}",
             registry=registry,
             username=username,
         )
 
-    call = CallResult(
-        action="podman.login",
-        changed=True,
-        summary=f"login to {registry} as {username}",
-        registry=registry,
-        username=username,
-    )
+    call = CallResult(changed=True, summary=f"login to {registry} as {username}", registry=registry, username=username)
     if ctx.dry_run:
         return ctx.changed(call)
     command = [podman_command, "login", f"--username={username}", "--password-stdin"]
@@ -170,13 +161,7 @@ def login(
     return ctx.changed(call)
 
 
-def logout(
-    ctx: TaskContext,
-    registry: str,
-    *,
-    authfile: str | Path | None = None,
-    sudo: bool = False,
-) -> CallResult:
+def logout(ctx: TaskContext, registry: str, *, authfile: str | Path | None = None, sudo: bool = False) -> CallResult:
     """Log out of a container registry."""
     require_text(registry, "registry")
     if authfile is not None:
@@ -186,19 +171,9 @@ def logout(
 
     podman_command = podman(ctx)
     if _login_status(ctx, podman_command, registry, authfile=authfile_path, sudo=sudo) is None:
-        return ctx.changed(
-            action="podman.logout",
-            changed=False,
-            summary=f"ensure logout from {registry}",
-            registry=registry,
-        )
+        return ctx.changed(changed=False, summary=f"ensure logout from {registry}", registry=registry)
 
-    call = CallResult(
-        action="podman.logout",
-        changed=True,
-        summary=f"logout from {registry}",
-        registry=registry,
-    )
+    call = CallResult(changed=True, summary=f"logout from {registry}", registry=registry)
     if ctx.dry_run:
         return ctx.changed(call)
     command = [podman_command, "logout"]

@@ -813,11 +813,7 @@ def test_generate_systemd_scenarios(tmp_path: Path) -> None:
     assert "network-online.target" in content
 
 
-def test_generate_systemd_system_scope(
-    tmp_path: Path,
-    rootful_image: str,
-    clean_rootful: None,
-) -> None:
+def test_generate_systemd_system_scope(tmp_path: Path, rootful_image: str, clean_rootful: None) -> None:
     name = unique()
     run(sudo("podman", "create", "--name", name, rootful_image))
     run(sudo("podman", "start", name))

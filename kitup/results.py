@@ -16,18 +16,14 @@ class CallResult(AttrDict):
     identifies the API method as ``"<module>.<method>"``. Every other keyword
     argument is stored as a top-level data field and is also available as an
     attribute.
+
+    An empty ``action`` is a sentinel: :meth:`TaskContext.changed` fills it in
+    from the calling module when the call is recorded.
     """
 
-    def __init__(
-        self,
-        *,
-        action: str,
-        changed: bool,
-        summary: str,
-        **data: Any,
-    ) -> None:
-        if not isinstance(action, str) or not action:
-            raise ValueError("action must be a non-empty string")
+    def __init__(self, *, action: str = "", changed: bool, summary: str, **data: Any) -> None:
+        if not isinstance(action, str):
+            raise TypeError("action must be a string")
         super().__init__(action=action, changed=changed, summary=summary, **data)
 
     @property

@@ -53,3 +53,8 @@ Each module page documents its parameters, result fields, and usage examples.
 - [podman](podman.md) — images, containers, registries, and systemd/Quadlet units
 - [pip](pip.md) — Python packages via pip (optionally in a virtualenv) and pip.conf options
 - [uv](uv.md) — uv project dependencies, per-user CLI tools, and uv.toml options
+
+## Custom modules
+
+Projects can also define their own modules. See
+[Custom modules](../custom-modules.md).

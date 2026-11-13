@@ -2,9 +2,11 @@
 
 import builtins
 import subprocess
+import sys
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from types import FrameType
 from typing import Any, Final, Never, cast, overload
 
 from ._privileged.client import PrivilegedWorker
@@ -15,7 +17,7 @@ from .errors import SkipTask, TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
 from .project import FILES_DIR, Project
-from .registry import Bundle, SideEffect, Task
+from .registry import Bundle, SideEffect, Task, action_prefix
 from .results import CallResult, TaskResult
 from .runtime import BundleState, RunState
 from .vars import Vars
@@ -275,41 +277,36 @@ class TaskContext:
     def changed(self, result: CallResult) -> CallResult: ...
 
     @overload
-    def changed(
-        self,
-        *,
-        action: str | None = None,
-        changed: bool = True,
-        summary: str,
-        **data: Any,
-    ) -> CallResult: ...
+    def changed(self, *, changed: bool = True, summary: str, **data: Any) -> CallResult: ...
 
     def changed(
         self,
         result: CallResult | None = None,
         *,
-        action: str | None = None,
         changed: bool = True,
         summary: str = "",
         **data: Any,
     ) -> CallResult:
         """Record one module-level call for the current task and return it.
 
-        Pass an existing ``CallResult`` or keyword data to build one. Module
-        methods pass ``action="<module>.<method>"``; user task code may omit it
-        and gets ``task.<function name>``.
+        Pass an existing ``CallResult`` or keyword data to build one. The
+        action is inferred from the calling function: a module registered with
+        :func:`kitup.module` yields ``"<module>.<function>"``, while task code
+        gets ``task.<function name>``. Pass a ``CallResult`` with an explicit
+        action to override it.
         """
+        frame = sys._getframe(1)
         if result is None:
-            result = CallResult(
-                action=self._default_action() if action is None else action,
-                changed=changed,
-                summary=summary,
-                **data,
-            )
+            result = CallResult(action=self._default_action(frame), changed=changed, summary=summary, **data)
+        elif not result.action:
+            result["action"] = self._default_action(frame)
         self._calls.append(result)
         return result
 
-    def _default_action(self) -> str:
+    def _default_action(self, frame: FrameType) -> str:
+        prefix = action_prefix(frame.f_globals.get("__name__", ""))
+        if prefix is not None:
+            return f"{prefix}.{frame.f_code.co_name}"
         if self._task is not None:
             return f"task.{self._task.func.__name__}"
         return "task"

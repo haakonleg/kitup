@@ -2,14 +2,18 @@
 
 import re
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from .._utils.executables import require_command
 from .._utils.paths import expand_path
 from .._utils.validation import require_bool, require_path, require_success, require_text
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("git")
+
 
 _SHA: Final = re.compile(r"[0-9a-f]{40}")
 _GIT_ENV: Final = {"GIT_TERMINAL_PROMPT": "0"}
@@ -75,14 +79,7 @@ def _clone(
     if version != "HEAD" and sha is None:
         command.append(f"--branch={version}")
     command.extend([url, str(path)])
-    result = CallResult(
-        action="git.repo",
-        changed=True,
-        summary=f"clone {url} into {path}",
-        repo=url,
-        dest=str(path),
-        version=version,
-    )
+    result = CallResult(changed=True, summary=f"clone {url} into {path}", repo=url, dest=str(path), version=version)
     if ctx.dry_run:
         return result
     ctx.run(command, env=_GIT_ENV)
@@ -104,7 +101,7 @@ def _reconcile(
     dest = str(path)
     current_url = _remote_url(ctx, git, dest)
     url_changed = current_url != url
-    data: dict[str, object] = {
+    data: dict[str, Any] = {
         "repo": url,
         "dest": dest,
         "version": version,
@@ -118,17 +115,12 @@ def _reconcile(
             ctx.run([git, "-C", dest, "remote", verb, "origin", url])
 
     if not update and not url_changed:
-        return CallResult(
-            action="git.repo",
-            changed=False,
-            summary=f"ensure {dest} at {version}",
-            **data,
-        )
+        return CallResult(changed=False, summary=f"ensure {dest} at {version}", **data)
 
     if url_changed and ctx.dry_run:
         # The new URL is not applied in dry-run, so fetching would contact the
         # old remote and resolve the version against the wrong refs.
-        return CallResult(action="git.repo", changed=True, summary="; ".join(summaries), **data)
+        return CallResult(changed=True, summary="; ".join(summaries), **data)
 
     _fetch(ctx, git, dest)
     desired = _resolve_version(ctx, git, dest, version)
@@ -137,7 +129,6 @@ def _reconcile(
         data["before"] = current
         data["after"] = desired
         return CallResult(
-            action="git.repo",
             changed=bool(summaries),
             summary="; ".join(summaries) if summaries else f"ensure {dest} at {version}",
             **data,
@@ -148,12 +139,12 @@ def _reconcile(
     data["before"] = current
     data["after"] = desired
     if ctx.dry_run:
-        return CallResult(action="git.repo", changed=True, summary="; ".join(summaries), **data)
+        return CallResult(changed=True, summary="; ".join(summaries), **data)
     ctx.run([git, "-C", dest, "checkout", "--force", version])
     ctx.run([git, "-C", dest, "reset", "--hard", desired])
     if _head(ctx, git, dest) != desired:
         raise TaskFailed(f"could not update {dest} to {desired}")
-    return CallResult(action="git.repo", changed=True, summary="; ".join(summaries), **data)
+    return CallResult(changed=True, summary="; ".join(summaries), **data)
 
 
 def _is_repo(ctx: TaskContext, git: str, dest: str, path: Path) -> bool:

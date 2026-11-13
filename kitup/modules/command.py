@@ -17,7 +17,10 @@ from .._utils.validation import (
 )
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("command")
 
 
 def run(
@@ -34,18 +37,19 @@ def run(
     check: bool | None = None,
 ) -> CallResult:
     """Run a command unless a guard says it is already satisfied."""
-    return _run(
-        ctx,
-        cmd,
-        action="command.run",
-        creates=creates,
-        unless=unless,
-        cwd=cwd,
-        env=env,
-        changed=changed,
-        sudo=sudo,
-        timeout=timeout,
-        check=check,
+    return ctx.changed(
+        _run(
+            ctx,
+            cmd,
+            creates=creates,
+            unless=unless,
+            cwd=cwd,
+            env=env,
+            changed=changed,
+            sudo=sudo,
+            timeout=timeout,
+            check=check,
+        )
     )
 
 
@@ -76,18 +80,19 @@ def shell(
     if unless is not None:
         require_text(unless, "shell unless")
         unless_command = [executable, "-c", unless]
-    return _run(
-        ctx,
-        [executable, "-c", cmd],
-        action="command.shell",
-        creates=creates,
-        unless=unless_command,
-        cwd=cwd,
-        env=env,
-        changed=changed,
-        sudo=sudo,
-        timeout=timeout,
-        check=check,
+    return ctx.changed(
+        _run(
+            ctx,
+            [executable, "-c", cmd],
+            creates=creates,
+            unless=unless_command,
+            cwd=cwd,
+            env=env,
+            changed=changed,
+            sudo=sudo,
+            timeout=timeout,
+            check=check,
+        )
     )
 
 
@@ -95,7 +100,6 @@ def _run(
     ctx: TaskContext,
     cmd: str | Sequence[str],
     *,
-    action: str,
     creates: str | Path | None,
     unless: str | Sequence[str] | None,
     cwd: str | Path | None,
@@ -128,30 +132,15 @@ def _run(
         if cwd_path is not None and not marker.is_absolute():
             marker = cwd_path / marker
         if os.path.lexists(marker):
-            return ctx.changed(
-                action=action,
-                changed=False,
-                summary=f"skip {' '.join(cmd)}",
-                cmd=cmd,
-            )
+            return CallResult(changed=False, summary=f"skip {' '.join(cmd)}", cmd=cmd)
 
     if unless is not None:
         probe = ctx.probe(unless, cwd=cwd_path, env=env, sudo=sudo, timeout=timeout)
         if probe.returncode == 0:
-            return ctx.changed(
-                action=action,
-                changed=False,
-                summary=f"skip {' '.join(cmd)}",
-                cmd=cmd,
-            )
+            return CallResult(changed=False, summary=f"skip {' '.join(cmd)}", cmd=cmd)
 
     if ctx.dry_run:
-        return ctx.changed(
-            action=action,
-            changed=changed,
-            summary=f"would run: {' '.join(cmd)}",
-            cmd=cmd,
-        )
+        return CallResult(changed=changed, summary=f"would run: {' '.join(cmd)}", cmd=cmd)
 
     if check is None:
         check = changed
@@ -165,8 +154,7 @@ def _run(
             timeout=timeout,
             check=check,
         )
-    return ctx.changed(
-        action=action,
+    return CallResult(
         changed=changed,
         summary=" ".join(cmd),
         cmd=cmd,

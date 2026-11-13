@@ -86,13 +86,7 @@ def read_response(
         raise TaskFailed(f"incomplete {label} for {context}: expected {content_length} bytes, got {total}")
 
 
-def read_bytes(
-    response: Any,
-    *,
-    max_bytes: int | None,
-    label: str,
-    context: str,
-) -> bytes:
+def read_bytes(response: Any, *, max_bytes: int | None, label: str, context: str) -> bytes:
     """Read a response body into memory, enforcing an optional size limit."""
     buffer = io.BytesIO()
     read_response(

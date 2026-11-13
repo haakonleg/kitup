@@ -125,7 +125,6 @@ def container(
             _remove_container(ctx, podman_command, name, timeout=timeout, sudo=sudo)
 
     return ctx.changed(
-        action="podman.container",
         changed=bool(actions),
         summary="; ".join(summaries) if summaries else f"ensure container {name} is {state}",
         container=name,
@@ -158,14 +157,7 @@ def _create_container(
         raise TaskFailed(f"container is missing after create: {name}")
 
 
-def _start_container(
-    ctx: TaskContext,
-    podman_command: str,
-    name: str,
-    *,
-    timeout: float,
-    sudo: bool,
-) -> None:
+def _start_container(ctx: TaskContext, podman_command: str, name: str, *, timeout: float, sudo: bool) -> None:
     ctx.run([podman_command, "start", name], timeout=timeout, sudo=sudo)
     status = container_status(ctx, podman_command, name, sudo=sudo)
     if status is None:
@@ -195,14 +187,7 @@ def _stop_container(
         raise TaskFailed(f"container did not stop: {name}")
 
 
-def _remove_container(
-    ctx: TaskContext,
-    podman_command: str,
-    name: str,
-    *,
-    timeout: float,
-    sudo: bool,
-) -> None:
+def _remove_container(ctx: TaskContext, podman_command: str, name: str, *, timeout: float, sudo: bool) -> None:
     ctx.run(
         [podman_command, "rm", "--force", name],
         timeout=timeout,

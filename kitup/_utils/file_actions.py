@@ -257,12 +257,7 @@ def resolve_metadata(owner: str | int | None, group: str | int | None) -> None:
         raise TaskFailed(str(exc)) from exc
 
 
-def metadata_differs(
-    info: FileInfo,
-    mode: int,
-    owner: str | int | None,
-    group: str | int | None,
-) -> bool:
+def metadata_differs(info: FileInfo, mode: int, owner: str | int | None, group: str | int | None) -> bool:
     """Return whether requested metadata differs from ``info``."""
     if info.mode != mode:
         return True
@@ -276,13 +271,7 @@ def metadata_differs(
     return gid is not None and info.gid != gid
 
 
-def read_bytes(
-    ctx: TaskContext,
-    path: Path,
-    info: FileInfo | None,
-    *,
-    sudo: bool,
-) -> bytes:
+def read_bytes(ctx: TaskContext, path: Path, info: FileInfo | None, *, sudo: bool) -> bytes:
     """Read a path as bytes, using the privileged worker when needed."""
     if info is None:
         return b""
@@ -299,13 +288,7 @@ def read_bytes(
         raise TaskFailed(f"could not read {path}: {exc}") from exc
 
 
-def read_snapshot(
-    ctx: TaskContext,
-    path: Path,
-    *,
-    sudo: bool,
-    content_size: int | None = None,
-) -> FileSnapshot:
+def read_snapshot(ctx: TaskContext, path: Path, *, sudo: bool, content_size: int | None = None) -> FileSnapshot:
     """Stat and read a path once for a later apply call.
 
     ``content_size`` is the size of the content the caller intends to write.
@@ -395,9 +378,8 @@ def apply_change(
     ctx: TaskContext,
     path: Path,
     *,
-    action: str,
     summary: str,
-    data: dict[str, object],
+    data: dict[str, Any],
     sudo: bool,
     old: bytes | None,
     new: bytes | None,
@@ -417,11 +399,11 @@ def apply_change(
         emit_diff(ctx, path, old, new)
     if ctx.dry_run:
         resolve_metadata(owner, group)
-        return CallResult(action=action, changed=True, summary=summary, **data)
+        return CallResult(changed=True, summary=summary, **data)
     if check_parent:
         require_parent(ctx, path, sudo=sudo)
     write()
-    return CallResult(action=action, changed=True, summary=summary, **data)
+    return CallResult(changed=True, summary=summary, **data)
 
 
 def apply_bytes(
@@ -429,12 +411,11 @@ def apply_bytes(
     path: Path,
     content: bytes,
     *,
-    action: str,
     mode: int | None,
     owner: str | int | None,
     group: str | int | None,
     summary: str,
-    data: dict[str, object],
+    data: dict[str, Any],
     sudo: bool,
     unchanged_summary: str | None = None,
     snapshot: FileSnapshot | None = None,
@@ -463,7 +444,6 @@ def apply_bytes(
             ctx,
             path,
             info,
-            action=action,
             mode=mode,
             owner=owner,
             group=group,
@@ -483,7 +463,6 @@ def apply_bytes(
     return apply_change(
         ctx,
         path,
-        action=action,
         summary=summary,
         data=data,
         sudo=sudo,
@@ -502,9 +481,8 @@ def apply_text(
     new_text: str,
     *,
     snapshot: FileSnapshot,
-    action: str,
     summary: str,
-    data: dict[str, object],
+    data: dict[str, Any],
     sudo: bool,
     unchanged_summary: str | None = None,
 ) -> CallResult:
@@ -517,7 +495,7 @@ def apply_text(
     """
     old_text = snapshot.text(path)
     if new_text == old_text:
-        return CallResult(action=action, changed=False, summary=unchanged_summary or summary, **data)
+        return CallResult(changed=False, summary=unchanged_summary or summary, **data)
     try:
         payload = new_text.encode()
     except UnicodeEncodeError as exc:
@@ -526,7 +504,6 @@ def apply_text(
         ctx,
         path,
         payload,
-        action=action,
         mode=None,
         owner=None,
         group=None,
@@ -547,7 +524,6 @@ def apply_ini(
     value: str | Sequence[str] | None,
     match: Mapping[str, str] | None,
     create: bool,
-    action: str,
     sudo: bool,
     option_pattern: re.Pattern[str] | None = None,
     snapshot: FileSnapshot | None = None,
@@ -574,7 +550,7 @@ def apply_ini(
     lines = text.splitlines(keepends=True)
 
     where = f"[{section}] of {target}" if section is not None else str(target)
-    data: dict[str, object] = {"path": str(target), "section": section, "option": option, "value": value}
+    data: dict[str, Any] = {"path": str(target), "section": section, "option": option, "value": value}
     display = value if value is None or isinstance(value, str) else ", ".join(value)
 
     new_lines: list[str]
@@ -610,12 +586,11 @@ def apply_ini(
             target,
             new_text,
             snapshot=snapshot,
-            action=action,
             summary=summary,
             data=data,
             sudo=sudo,
         )
-    return CallResult(action=action, changed=False, summary=unchanged_summary, **data)
+    return CallResult(changed=False, summary=unchanged_summary, **data)
 
 
 def apply_metadata_ctx(
@@ -679,12 +654,11 @@ def reconcile_metadata(
     path: Path,
     info: FileInfo | None,
     *,
-    action: str,
     mode: int | None,
     owner: str | int | None,
     group: str | int | None,
     summary: str,
-    data: dict[str, object],
+    data: dict[str, Any],
     sudo: bool,
     unchanged_summary: str | None = None,
 ) -> CallResult:
@@ -695,8 +669,8 @@ def reconcile_metadata(
     ``unchanged_summary`` the desired state when nothing changes.
     """
     if reconcile_metadata_changed(ctx, path, info, mode=mode, owner=owner, group=group, sudo=sudo):
-        return CallResult(action=action, changed=True, summary=summary, **data)
-    return CallResult(action=action, changed=False, summary=unchanged_summary or summary, **data)
+        return CallResult(changed=True, summary=summary, **data)
+    return CallResult(changed=False, summary=unchanged_summary or summary, **data)
 
 
 def remove(
@@ -704,11 +678,10 @@ def remove(
     path: Path,
     info: FileInfo | None,
     *,
-    action: str,
     force: bool,
     sudo: bool,
     summary: str | None = None,
-    data: dict[str, object] | None = None,
+    data: dict[str, Any] | None = None,
     allow_directory: bool = True,
     unchanged_summary: str | None = None,
 ) -> CallResult:
@@ -728,14 +701,9 @@ def remove(
     if summary is None:
         summary = f"{operation} {path}"
     if info is None:
-        return CallResult(
-            action=action,
-            changed=False,
-            summary=unchanged_summary or f"ensure {path} is absent",
-            **data,
-        )
+        return CallResult(changed=False, summary=unchanged_summary or f"ensure {path} is absent", **data)
     if ctx.dry_run:
-        return CallResult(action=action, changed=True, summary=summary, **data)
+        return CallResult(changed=True, summary=summary, **data)
     if privileged(ctx, sudo=sudo):
         try:
             worker_request(ctx, "remove", path=str(path), force=force)
@@ -743,14 +711,14 @@ def remove(
             if is_dir and not force:
                 raise TaskFailed(f"directory is not empty: {path}") from exc
             raise TaskFailed(f"could not remove {path}: {exc}") from exc
-        return CallResult(action=action, changed=True, summary=summary, **data)
+        return CallResult(changed=True, summary=summary, **data)
     try:
         remove_path(path, force=force)
     except OSError as exc:
         if is_dir and not force:
             raise TaskFailed(f"directory is not empty: {path}") from exc
         raise TaskFailed(f"could not remove {path}: {exc}") from exc
-    return CallResult(action=action, changed=True, summary=summary, **data)
+    return CallResult(changed=True, summary=summary, **data)
 
 
 def _write_bytes(

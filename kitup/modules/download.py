@@ -23,7 +23,11 @@ from .._utils.timing import timed
 from .._utils.validation import has_control_characters, require_bool, require_mode, require_path, require_timeout
 from ..context import TaskContext
 from ..errors import TaskFailed
+from ..registry import module
 from ..results import CallResult
+
+module("download")
+
 
 _DEFAULT_MAX_BYTES: Final = 10 * 1024 * 1024
 _ACCEPT_ENCODING: Final = "gzip, deflate, zstd"
@@ -181,12 +185,10 @@ def to_file(
     file_actions.require_parent_local(target)
     if ctx.dry_run:
         return ctx.changed(
-            _record_download(
-                display,
-                target,
-                checksum_dest=None,
-                duration=0.0,
-                size=_file_size(target),
+            CallResult(
+                changed=True,
+                summary=f"download {display} -> {target}",
+                **_download_data(display, target, checksum_dest=None, duration=0.0, size=_file_size(target)),
             )
         )
 
@@ -220,12 +222,10 @@ def to_file(
                     size=size,
                 )
             )
-        result = _record_download(
-            display,
-            target,
-            checksum_dest=checksum_dest,
-            duration=duration,
-            size=size,
+        result = CallResult(
+            changed=True,
+            summary=f"download {display} -> {target}",
+            **_download_data(display, target, checksum_dest=checksum_dest, duration=duration, size=size),
         )
         try:
             replace_path(temporary, target, mode=mode)
@@ -298,14 +298,7 @@ def _download_to_temp(
     return Path(temporary), checksum_dest
 
 
-def _open_url(
-    url: str,
-    display: str,
-    headers: Mapping[str, str],
-    timeout: float,
-    *,
-    validate_certs: bool,
-) -> Any:
+def _open_url(url: str, display: str, headers: Mapping[str, str], timeout: float, *, validate_certs: bool) -> Any:
     try:
         return open_url(
             url,
@@ -361,10 +354,7 @@ def _read_response(
     return dest_hasher.hexdigest()
 
 
-def _resolve_destination(
-    dest: str | Path,
-    parts: SplitResult,
-) -> tuple[Path, file_actions.FileInfo | None]:
+def _resolve_destination(dest: str | Path, parts: SplitResult) -> tuple[Path, file_actions.FileInfo | None]:
     require_path(dest, "download destination")
     target = expand_path(dest, error=TaskFailed)
     if isinstance(dest, str) and dest.endswith("/"):
@@ -514,7 +504,6 @@ def _reconcile_metadata(
         ctx,
         target,
         info,
-        action="download.to_file",
         mode=mode,
         owner=None,
         group=None,
@@ -531,43 +520,6 @@ def _reconcile_metadata(
     )
 
 
-def _record_download(
-    display: str,
-    target: Path,
-    *,
-    checksum_dest: str | None,
-    duration: float,
-    size: int,
-) -> CallResult:
-    return _download_result(
-        display,
-        target,
-        changed=True,
-        summary=f"download {display} -> {target}",
-        checksum_dest=checksum_dest,
-        duration=duration,
-        size=size,
-    )
-
-
-def _download_result(
-    display: str,
-    target: Path,
-    *,
-    changed: bool,
-    summary: str,
-    checksum_dest: str | None,
-    duration: float,
-    size: int,
-) -> CallResult:
-    return CallResult(
-        action="download.to_file",
-        changed=changed,
-        summary=summary,
-        **_download_data(display, target, checksum_dest=checksum_dest, duration=duration, size=size),
-    )
-
-
 def _download_data(
     display: str,
     target: Path,
@@ -575,7 +527,7 @@ def _download_data(
     checksum_dest: str | None,
     duration: float,
     size: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     return {
         "url": display,
         "dest": str(target),

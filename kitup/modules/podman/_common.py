@@ -128,26 +128,14 @@ def image_id(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool) ->
     return result.stdout.strip()
 
 
-def image_id_or_none(
-    ctx: TaskContext,
-    podman_command: str,
-    name: str,
-    *,
-    sudo: bool,
-) -> str | None:
+def image_id_or_none(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool) -> str | None:
     """Return an image ID, or ``None`` when the image is missing."""
     if not image_exists(ctx, podman_command, name, sudo=sudo):
         return None
     return image_id(ctx, podman_command, name, sudo=sudo)
 
 
-def container_status(
-    ctx: TaskContext,
-    podman_command: str,
-    name: str,
-    *,
-    sudo: bool,
-) -> str | None:
+def container_status(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool) -> str | None:
     """Return a container status, or ``None`` when it does not exist."""
     result = ctx.probe(
         [podman_command, "container", "inspect", "--format", "{{.State.Status}}", name],
@@ -161,12 +149,7 @@ def container_status(
     return result.stdout.strip()
 
 
-def command_parts(
-    command: str | Sequence[str] | None,
-    *,
-    label: str,
-    split_string: bool,
-) -> list[str] | None:
+def command_parts(command: str | Sequence[str] | None, *, label: str, split_string: bool) -> list[str] | None:
     """Normalize a command into argv parts, or ``None`` when absent."""
     if command is None:
         return None

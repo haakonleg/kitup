@@ -2,8 +2,9 @@
 
 kitup has four commands: `apply`, `list`, `check`, and `init`. Every command
 takes an optional project directory as its positional argument. It defaults to
-the current directory and is the root containing `bundles/`, `files/`, `vars/`,
-and `presets/`. See [Projects](project.md) for the project layout.
+the current directory and is the root containing `bundles/`, `modules/`,
+`files/`, `vars/`, and `presets/`. See [Projects](project.md) for the project
+layout.
 
 ## Synopsis
 

@@ -13,12 +13,7 @@ from .timer import Stopwatch
 class LiveLine:
     """Render one animation line on a reusable worker thread."""
 
-    def __init__(
-        self,
-        stream: TextIO,
-        *,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
+    def __init__(self, stream: TextIO, *, clock: Callable[[], float] = time.monotonic) -> None:
         self.stream = stream
         self._clock = clock
         self._condition = threading.Condition()

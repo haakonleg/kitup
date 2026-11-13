@@ -366,13 +366,7 @@ def _missing_bundles_message(project: Project) -> str:
     return "no bundles found in " + ", ".join(str(path) for path in existing)
 
 
-def _print_environment(
-    project: Project,
-    var_paths: Sequence[Path],
-    output: Output,
-    *,
-    verbose: bool,
-) -> None:
+def _print_environment(project: Project, var_paths: Sequence[Path], output: Output, *, verbose: bool) -> None:
     output.write()
     project_label = str(project.root) if verbose else (project.root.name or str(project.root))
     output.write(f"project: {project_label}")

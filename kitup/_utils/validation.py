@@ -148,11 +148,7 @@ def require_choice(value: str, choices: Collection[str], label: str) -> None:
         raise TaskFailed(f"invalid {label}: {value!r}")
 
 
-def require_state(
-    state: str,
-    label: str,
-    allowed: Collection[str] = _PRESENT_OR_ABSENT,
-) -> None:
+def require_state(state: str, label: str, allowed: Collection[str] = _PRESENT_OR_ABSENT) -> None:
     """Reject a state value outside the allowed choices."""
     if state not in allowed:
         raise TaskFailed(f"invalid {label} state: {state!r}")
