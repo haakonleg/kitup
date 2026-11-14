@@ -1,9 +1,11 @@
 """Command-line interface."""
 
+import inspect
 import sys
 import textwrap
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final
 
 from . import PACKAGE_NAME, __version__
@@ -15,11 +17,21 @@ from .commands import CommandRunner
 from .context import TaskContext
 from .errors import KitupError, PrivilegeError, ProjectError, UsageError
 from .facts import collect_facts
+from .modules import discover_builtin_modules
 from .output import Output, bundle_label
 from .presets import parse_with_presets
 from .privileges import PrivilegeManager
-from .project import BUNDLES_DIR, PRESETS_DIR, VARS_DIR, Project, load_project, on_project_path
-from .registry import Bundle
+from .project import (
+    BUNDLES_DIR,
+    PRESETS_DIR,
+    VARS_DIR,
+    Project,
+    discover_custom_modules,
+    load_project,
+    load_project_modules,
+    on_project_path,
+)
+from .registry import Bundle, Module
 from .resolver import BundlePlan, filter_plan, resolve
 from .runner import Runner
 from .vars import Vars, filter_var_paths, load_bundle_vars, load_vars
@@ -184,6 +196,7 @@ _LIST_OPTIONS: Final = (
 )
 _CHECK_OPTIONS: Final = _LIST_OPTIONS
 _INIT_OPTIONS: Final = (_PROJECT_OPTION, _FORCE_OPTION, *_COMMON_OPTIONS)
+_LIST_MODULES_OPTIONS: Final = (_PROJECT_OPTION, *_COMMON_OPTIONS)
 _ALL_OPTIONS: Final = (*_APPLY_OPTIONS, *_LIST_OPTIONS, *_INIT_OPTIONS)
 
 _DEFAULTS: Final[dict[str, Any]] = {
@@ -213,6 +226,12 @@ def build_parser() -> Parser:
                 help="list bundles and tasks",
                 options=_LIST_OPTIONS,
                 epilog=_examples("kitup list", "kitup list my-machine -v"),
+            ),
+            Command(
+                name="list-modules",
+                help="list built-in and custom task modules",
+                options=_LIST_MODULES_OPTIONS,
+                epilog=_examples("kitup list-modules", "kitup list-modules my-machine -v"),
             ),
             Command(
                 name="check",
@@ -251,6 +270,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         output = Output(no_color=args.no_color, verbose=args.verbose)
         if args.command == "init":
             return _init(args, output)
+        if args.command == "list-modules":
+            return _list_modules(args, output)
 
         project = load_project(
             _project_root(args.project_dir),
@@ -278,9 +299,24 @@ def _project_root(value: str | Path | None) -> Path:
     return expand_path(value or ".", error=ProjectError, resolve=True)
 
 
+def _list_modules(args: Args, output: Output) -> int:
+    project = load_project_modules(_project_root(args.project_dir))
+    output.banner()
+    output.write()
+    output.write(f"project: {_project_label(project, verbose=args.verbose)}")
+    _print_module_group("built-in modules", discover_builtin_modules(), output, verbose=args.verbose, show_path=False)
+    _print_module_group(
+        "custom modules", discover_custom_modules(project), output, verbose=args.verbose, show_path=True
+    )
+    return 0
+
+
 def _run_project(args: Args, project: Project, output: Output) -> int:
     if not project.bundles and args.command in {"apply", "check"}:
         raise ProjectError(_missing_bundles_message(project))
+
+    if args.command == "check":
+        discover_custom_modules(project)
 
     registry = {bundle.id: bundle for bundle in project.bundles}
     plan = resolve(project.bundles, registry=registry)
@@ -368,8 +404,7 @@ def _missing_bundles_message(project: Project) -> str:
 
 def _print_environment(project: Project, var_paths: Sequence[Path], output: Output, *, verbose: bool) -> None:
     output.write()
-    project_label = str(project.root) if verbose else (project.root.name or str(project.root))
-    output.write(f"project: {project_label}")
+    output.write(f"project: {_project_label(project, verbose=verbose)}")
     if project.bundle_roots:
         bundle_paths = ", ".join(_path_label(path, verbose=verbose) for path in project.bundle_roots)
         output.write(f"bundle path: {bundle_paths}")
@@ -379,6 +414,10 @@ def _print_environment(project: Project, var_paths: Sequence[Path], output: Outp
     if var_paths:
         var_labels = ", ".join(_path_label(path, verbose=verbose) for path in var_paths)
         output.write(f"vars: {var_labels}")
+
+
+def _project_label(project: Project, *, verbose: bool) -> str:
+    return str(project.root) if verbose else (project.root.name or str(project.root))
 
 
 def _path_label(path: Path, *, verbose: bool) -> str:
@@ -416,6 +455,80 @@ def _dependency_id(dependency: str | Bundle) -> str:
     if isinstance(dependency, str):
         return dependency
     return dependency.id
+
+
+def _print_module_group(
+    label: str,
+    modules: Sequence[Module],
+    output: Output,
+    *,
+    verbose: bool,
+    show_path: bool,
+) -> None:
+    output.write()
+    output.write(f"{label}:")
+    if not modules:
+        output.write("  (none)")
+        return
+    for index, entry in enumerate(modules):
+        if verbose and index:
+            output.write()
+        if verbose:
+            output.write(f"  - {entry.name}")
+            _print_module_details(entry, output, show_path=show_path)
+        elif entry.description:
+            description = entry.description.replace("\n", "\n      ")
+            output.write(f"  - {entry.name}: {description}")
+        else:
+            output.write(f"  - {entry.name}")
+
+
+def _print_module_details(entry: Module, output: Output, *, show_path: bool) -> None:
+    if entry.description:
+        description = entry.description.replace("\n", "\n      ")
+        output.write(f"      description: {description}")
+    module = sys.modules.get(entry.module_name)
+    if show_path:
+        path = getattr(module, "__file__", None)
+        if path:
+            output.write(f"      path: {path}")
+    functions = _module_functions(module) if module is not None else []
+    if not functions:
+        output.write("      functions: (none)")
+        return
+    output.write("      functions:")
+    for name, description in functions:
+        suffix = f": {description}" if description else ""
+        output.write(f"        - {name}{suffix}")
+
+
+def _module_functions(module: ModuleType) -> list[tuple[str, str]]:
+    """Return public functions with the first line of their docstring."""
+    exported = getattr(module, "__all__", None)
+    if exported is None:
+        candidates = [
+            (name, value)
+            for name, value in vars(module).items()
+            if not name.startswith("_") and _declared_in(value, module.__name__)
+        ]
+    else:
+        candidates = [(name, getattr(module, name, None)) for name in exported if isinstance(name, str)]
+    return [
+        (name, _first_line(getattr(value, "__doc__", None))) for name, value in candidates if inspect.isroutine(value)
+    ]
+
+
+def _declared_in(value: object, module_name: str) -> bool:
+    """Return whether ``value`` was defined by ``module_name`` or its submodules."""
+    owner = getattr(value, "__module__", "")
+    return owner == module_name or owner.startswith(f"{module_name}.")
+
+
+def _first_line(doc: str | None) -> str:
+    """Return the first non-empty line of a docstring."""
+    if not doc:
+        return ""
+    return next((line.strip() for line in doc.splitlines() if line.strip()), "")
 
 
 def _warn_empty_bundles(plan: BundlePlan, output: Output) -> None:

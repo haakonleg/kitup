@@ -20,7 +20,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult, format_items
 
-module("flatpak")
+module("flatpak", "Flatpak remotes, applications, and runtimes.")
 
 
 def remote(

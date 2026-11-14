@@ -18,7 +18,7 @@ A single-file module calls `module()` at the top of the file:
 from kitup import CallResult, module
 from kitup.modules import files
 
-module("motd")
+module("motd", "Write the message of the day.")
 
 
 def message(ctx, text: str) -> CallResult:
@@ -40,7 +40,7 @@ modules/desktop/
 # modules/desktop/__init__.py
 from kitup import module
 
-module("desktop")
+module("desktop", "Desktop wallpaper and settings.")
 ```
 
 ```python
@@ -54,9 +54,11 @@ def set_wallpaper(ctx, uri: str) -> CallResult:
     return gsettings.key(ctx, "org.gnome.desktop.background", "picture-uri", uri)
 ```
 
-The name passed to `module()` identifies the module in recorded actions; it does
-not have to match the file or folder name. Files and folders whose names start
-with `_` are private helpers and are not loaded as modules.
+The name passed to `module()` identifies the module in recorded actions. The
+optional second argument is a human-readable description shown by
+`kitup list-modules`. Files and folders whose names start with `_` are private
+helpers and are not loaded as modules. Run `kitup list-modules` to confirm which
+modules are registered.
 
 ## Use a module
 
@@ -110,4 +112,5 @@ A function that only delegates to a built-in module can return that module's
 ## Reference
 
 The [built-in modules](modules/index.md) use the same API and are good examples
-to copy. A missing `module(...)` call is reported when the project loads.
+to copy. A missing `module(...)` call is reported by `kitup check` and
+`kitup list-modules`.

@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from kitup.errors import BundleError, ProjectError
-from kitup.project import load_project
-from kitup.registry import Bundle, Module, action_prefix, forget_module_prefix, module
+from kitup.project import discover_custom_modules, load_project
+from kitup.registry import Bundle, Module, action_prefix, module, registered_modules
 
 from ..helpers import write
 from .helpers import make_context
@@ -70,16 +70,6 @@ def install(ctx):
 """
 
 
-@pytest.fixture(autouse=True)
-def clean_project_modules():
-    """Drop top-level project modules so tests never share imported code."""
-    yield
-    for name in tuple(sys.modules):
-        if name == "modules" or name.startswith("modules."):
-            sys.modules.pop(name, None)
-    forget_module_prefix("modules")
-
-
 def import_tree(tmp_path: Path, files: dict[str, str]) -> str:
     """Write a unique package tree under ``tmp_path`` and import its root."""
     name = f"pkg_{uuid.uuid4().hex}"
@@ -119,6 +109,8 @@ def test_module_registers_the_calling_module(tmp_path):
     registered = tool.__kitup_module__
     assert isinstance(registered, Module)
     assert registered.name == "mytool"
+    assert registered.module_name == f"{name}.tool"
+    assert registered in registered_modules()
     assert action_prefix(f"{name}.tool") == "mytool"
     assert action_prefix(f"{name}.tool.submodule") == "mytool"
 
@@ -221,11 +213,31 @@ def test_project_discovers_custom_modules(tmp_path):
     assert names == ["mytool", "webserver"]
 
 
+def test_load_project_does_not_import_custom_modules(tmp_path):
+    build_project(tmp_path, {"mytool.py": "raise RuntimeError('imported')\n"})
+
+    project = load_project(tmp_path)
+
+    assert [path.stem for path in project.module_paths] == ["mytool"]
+    assert "modules.mytool" not in sys.modules
+
+
+def test_discover_custom_modules_imports_them(tmp_path):
+    build_project(tmp_path, {"mytool.py": SINGLE_FILE})
+
+    project = load_project(tmp_path)
+    registered = discover_custom_modules(project)
+
+    assert [entry.name for entry in registered] == ["mytool"]
+    assert "modules.mytool" in sys.modules
+
+
 def test_project_requires_module_registration(tmp_path):
     build_project(tmp_path, {"mytool.py": "def install(ctx):\n    pass\n"})
 
+    project = load_project(tmp_path)
     with pytest.raises(ProjectError, match=r"must call module\(\.\.\.\)"):
-        load_project(tmp_path)
+        discover_custom_modules(project)
 
 
 def test_project_allows_a_custom_module_name(tmp_path):
@@ -247,6 +259,7 @@ def install(ctx):
     project = load_project(tmp_path)
 
     assert [path.stem for path in project.module_paths] == ["mytool"]
+    discover_custom_modules(project)
     tool = importlib.import_module("modules.mytool")
     assert tool.install(task_context(tmp_path)).action == "other.install"
 
@@ -276,10 +289,12 @@ def test_project_reloads_modules_between_roots(tmp_path):
         {"tool.py": 'from kitup import module\n\nmodule("tool")\n\n\ndef value():\n    return "second"\n'},
     )
 
-    load_project(first)
+    first_project = load_project(first)
+    discover_custom_modules(first_project)
     assert importlib.import_module("modules.tool").value() == "first"
 
-    load_project(second)
+    second_project = load_project(second)
+    discover_custom_modules(second_project)
     assert importlib.import_module("modules.tool").value() == "second"
 
 

@@ -13,7 +13,7 @@ from typing import Final
 from ._utils.importer import load_package_module
 from ._utils.paths import expand_path
 from .errors import KitupError, PresetError, ProjectError
-from .registry import Bundle, discover_task_modules, forget_module_prefix, module_of
+from .registry import Bundle, Module, discover_task_modules, forget_module_prefix, module_of, registered_modules
 
 BUNDLES_DIR: Final = "bundles"
 FILES_DIR: Final = "files"
@@ -70,12 +70,7 @@ def load_project(
     extra_var_paths: Sequence[str | Path] = (),
 ) -> Project:
     """Discover a project rooted at ``root`` (default: the current directory)."""
-    project_root = Path.cwd() if root is None else Path(root)
-    project_root = expand_path(project_root, error=ProjectError, resolve=True)
-    if not project_root.exists():
-        raise ProjectError(f"project not found: {project_root} (run 'kitup init {project_root}' to create one)")
-    if not project_root.is_dir():
-        raise ProjectError(f"project root is not a directory: {project_root}")
+    project_root = _resolve_project_root(root)
 
     bundle_roots = _unique_roots(_resolve_against(project_root, path, error=ProjectError) for path in bundle_paths)
     resolved_var_paths = tuple(_resolve_against(project_root, path, error=ProjectError) for path in extra_var_paths)
@@ -96,7 +91,6 @@ def load_project(
     module_paths = discover_module_paths(project_root)
     _purge_project_modules()
     with on_project_path(project_root):
-        _load_modules(module_paths)
         bundles = _load_bundles(bundle_dirs, local_root=local_root)
     return Project(
         root=project_root,
@@ -106,6 +100,37 @@ def load_project(
         bundle_roots=bundle_roots,
         module_paths=module_paths,
     )
+
+
+def load_project_modules(root: str | Path | None = None) -> Project:
+    """Discover a project's root and custom module paths without loading bundles."""
+    project_root = _resolve_project_root(root)
+    _reject_shadowing_file(project_root, MODULES_DIR, label="modules")
+    module_paths = discover_module_paths(project_root)
+    _purge_project_modules()
+    return Project(root=project_root, module_paths=module_paths)
+
+
+def discover_custom_modules(project: Project) -> tuple[Module, ...]:
+    """Import the project's custom modules and return their registrations.
+
+    A module that does not call ``module(...)`` raises ``ProjectError``.
+    """
+    with on_project_path(project.root):
+        for path in project.module_paths:
+            name = path.stem
+            package = f"{MODULES_DIR}.{name}"
+            try:
+                loaded = importlib.import_module(package)
+            except KitupError:
+                raise
+            except Exception as exc:
+                raise ProjectError(f"failed to import module {name!r}: {exc}") from exc
+
+            if module_of(loaded) is None:
+                location = path.name if path.is_file() else f"{path.name}/__init__.py"
+                raise ProjectError(f"module {name!r} must call module(...) in {location}")
+    return registered_modules(MODULES_DIR)
 
 
 def discover_bundle_dirs(root: str | Path, *, extra_roots: Sequence[Path] = ()) -> tuple[Path, ...]:
@@ -185,6 +210,16 @@ def resolve_preset(root: str | Path, value: str | Path) -> Path:
     return Path(root) / PRESETS_DIR / path
 
 
+def _resolve_project_root(root: str | Path | None) -> Path:
+    project_root = Path.cwd() if root is None else Path(root)
+    project_root = expand_path(project_root, error=ProjectError, resolve=True)
+    if not project_root.exists():
+        raise ProjectError(f"project not found: {project_root} (run 'kitup init {project_root}' to create one)")
+    if not project_root.is_dir():
+        raise ProjectError(f"project root is not a directory: {project_root}")
+    return project_root
+
+
 def _reject_shadowing_file(root: Path, directory: str, *, label: str) -> None:
     """Reject a ``<name>.py`` file that shadows the ``<name>/`` directory."""
     if (root / directory).is_dir() and (root / f"{directory}.py").is_file():
@@ -230,23 +265,6 @@ def _reject_duplicate_var_ids(var_paths: Sequence[Path]) -> None:
         if existing is not None:
             raise ProjectError(f"duplicate var id {path.stem!r}: {existing} and {path}")
         seen[path.stem] = path
-
-
-def _load_modules(paths: Sequence[Path]) -> None:
-    """Import each custom module and verify its ``module(...)`` registration."""
-    for path in paths:
-        name = path.stem
-        package = f"{MODULES_DIR}.{name}"
-        try:
-            loaded = importlib.import_module(package)
-        except KitupError:
-            raise
-        except Exception as exc:
-            raise ProjectError(f"failed to import module {name!r}: {exc}") from exc
-
-        if module_of(loaded) is None:
-            location = path.name if path.is_file() else f"{path.name}/__init__.py"
-            raise ProjectError(f"module {name!r} must call module(...) in {location}")
 
 
 def _load_bundles(bundle_dirs: Sequence[Path], *, local_root: Path) -> tuple[Bundle, ...]:

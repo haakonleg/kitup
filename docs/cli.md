@@ -1,18 +1,19 @@
 # CLI
 
-kitup has four commands: `apply`, `list`, `check`, and `init`. Every command
-takes an optional project directory as its positional argument. It defaults to
-the current directory and is the root containing `bundles/`, `modules/`,
-`files/`, `vars/`, and `presets/`. See [Projects](project.md) for the project
-layout.
+kitup has five commands: `apply`, `list`, `list-modules`, `check`, and `init`.
+Every command takes an optional project directory as its positional argument. It
+defaults to the current directory and is the root containing `bundles/`,
+`modules/`, `files/`, `vars/`, and `presets/`. See [Projects](project.md) for the
+project layout.
 
 ## Synopsis
 
 ```text
-kitup apply [PROJECT_DIR] [OPTIONS]
-kitup list  [PROJECT_DIR] [OPTIONS]
-kitup check [PROJECT_DIR] [OPTIONS]
-kitup init  [PROJECT_DIR] [--force] [OPTIONS]
+kitup apply        [PROJECT_DIR] [OPTIONS]
+kitup list         [PROJECT_DIR] [OPTIONS]
+kitup list-modules [PROJECT_DIR] [OPTIONS]
+kitup check        [PROJECT_DIR] [OPTIONS]
+kitup init         [PROJECT_DIR] [--force] [OPTIONS]
 ```
 
 ## Commands
@@ -28,6 +29,11 @@ system; use `--dry-run` to preview the result first.
 Show the active project, vars, bundles, and tasks without running anything.
 Bundle ids and display names are shown. Add `--verbose` to include descriptions,
 dependencies, bundle var files, task ids, and tags.
+
+### `list-modules`
+
+List registered module names and descriptions. Add `--verbose` to include public
+functions.
 
 ### `check`
 
@@ -114,6 +120,7 @@ values resolve against the project root, not the preset file.
 kitup init my-machine
 kitup check my-machine
 kitup list my-machine -v
+kitup list-modules my-machine -v
 kitup apply my-machine -n
 kitup apply my-machine --preset laptop
 kitup apply my-machine -t packages,docs

@@ -18,13 +18,15 @@ def make_project(
     var_files: Mapping[str, str] | None = None,
     vars: str | None = None,
     preset: Mapping[str, str] | None = None,
+    modules: Mapping[str, str] | None = None,
 ) -> Path:
     """Build a project tree and return its root.
 
     A bundle value may be a mapping of files relative to the bundle folder, or
     a string used as an auto-discovered ``tasks.py``. ``vars`` is written to
     ``vars/base.py``; ``var_files`` adds further files under ``vars/``. Preset
-    files are written under ``presets/``.
+    files are written under ``presets/``. ``modules`` adds files under
+    ``modules/``.
     """
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -48,5 +50,8 @@ def make_project(
     if preset:
         for name, text in preset.items():
             write(root / "presets" / name, text)
+    if modules:
+        for relative, text in modules.items():
+            write(root / "modules" / relative, text)
 
     return root

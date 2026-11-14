@@ -26,7 +26,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("files")
+module("files", "Files, directories, symlinks, lines, blocks, INI files, and moves.")
 
 
 def file(

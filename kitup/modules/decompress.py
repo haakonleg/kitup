@@ -35,7 +35,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("decompress")
+module("decompress", "Archive extraction and single-file decompression.")
 
 
 try:

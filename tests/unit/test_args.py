@@ -205,3 +205,19 @@ def test_help_lists_commands(capsys):
     output = capsys.readouterr().out
     assert "usage: demo" in output
     assert "run things" in output
+
+
+def test_list_modules_command_is_parsed(parser):
+    args = parser.parse_args(["list-modules", "machine", "-v"])
+
+    assert args.command == "list-modules"
+    assert args.project_dir == "machine"
+    assert args.verbose is True
+
+
+def test_help_lists_list_modules(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.build_parser().parse_args(["--help"])
+
+    assert exc.value.code == 0
+    assert "list-modules" in capsys.readouterr().out

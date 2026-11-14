@@ -17,7 +17,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("host")
+module("host", "Hostname, time zone, NTP, RTC, and locale.")
 
 
 _LOCALE_KEYS: Final = frozenset(

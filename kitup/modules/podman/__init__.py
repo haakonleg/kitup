@@ -8,7 +8,7 @@ from ._quadlet import quadlet
 from ._registries import login, logout, registry
 from ._units import generate_systemd
 
-module("podman")
+module("podman", "Images, containers, registries, and systemd/Quadlet units.")
 
 
 __all__ = [

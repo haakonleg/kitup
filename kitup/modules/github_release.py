@@ -15,7 +15,7 @@ from ..context import TaskContext
 from ..errors import TaskFailed
 from ..registry import module
 
-module("github_release")
+module("github_release", "Public GitHub release metadata and assets.")
 
 
 _API_URL: Final = "https://api.github.com"

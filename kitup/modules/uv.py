@@ -40,7 +40,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult, format_items
 
-module("uv")
+module("uv", "uv project dependencies, per-user CLI tools, and uv.toml options.")
 
 
 type UvState = Literal["present", "absent", "latest"]

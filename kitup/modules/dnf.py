@@ -27,7 +27,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult, format_items
 
-module("dnf")
+module("dnf", "RPM packages, groups, repositories, COPR, and dnf.conf options.")
 
 
 _DEFAULT_CONFIG_PATH: Final = Path("/etc/dnf/dnf.conf")

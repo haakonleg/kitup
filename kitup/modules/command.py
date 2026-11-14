@@ -20,7 +20,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("command")
+module("command", "Guarded one-off commands.")
 
 
 def run(

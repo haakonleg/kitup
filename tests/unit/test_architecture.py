@@ -1,8 +1,12 @@
 """Architecture rules for built-in modules and embedded worker sources."""
 
 import ast
+import importlib
+import inspect
+import re
 import sys
 from pathlib import Path
+from types import ModuleType
 
 from kitup import PACKAGE_NAME
 
@@ -88,10 +92,13 @@ def _declares_module(path: Path, name: str) -> bool:
         call = node.value
         if not isinstance(call.func, ast.Name) or call.func.id != "module":
             continue
-        if len(call.args) != 1 or not isinstance(call.args[0], ast.Constant):
+        if not 1 <= len(call.args) <= 2 or not isinstance(call.args[0], ast.Constant):
             continue
-        if call.args[0].value == name:
-            return True
+        if call.args[0].value != name:
+            continue
+        if len(call.args) == 2 and not isinstance(call.args[1], ast.Constant):
+            continue
+        return True
     return False
 
 
@@ -135,6 +142,51 @@ def test_modules_have_documentation():
 
     assert not missing, "modules missing documentation: " + ", ".join(missing)
     assert not orphaned, "documentation without a module: " + ", ".join(orphaned)
+
+
+def _public_functions(module: ModuleType) -> set[str]:
+    """Return public function names using the ``list-modules`` convention."""
+    exported = getattr(module, "__all__", None)
+    if exported is None:
+        names = [
+            name
+            for name, value in vars(module).items()
+            if not name.startswith("_") and _declared_in(value, module.__name__)
+        ]
+    else:
+        names = [name for name in exported if isinstance(name, str)]
+    return {name for name in names if inspect.isroutine(getattr(module, name, None))}
+
+
+def _declared_in(value: object, module_name: str) -> bool:
+    owner = getattr(value, "__module__", "")
+    return owner == module_name or owner.startswith(f"{module_name}.")
+
+
+def _documented_functions(path: Path) -> set[str]:
+    """Return function names from ``## `name(...)` `` headings."""
+    documented: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"^## `([^`]+)`\s*$", line)
+        if match and "(" in match.group(1):
+            documented.add(match.group(1).split("(", 1)[0].strip())
+    return documented
+
+
+def test_module_docs_cover_public_functions():
+    """Every public built-in module function has a matching API section."""
+    violations: list[str] = []
+    for name in sorted(_module_names()):
+        module = importlib.import_module(f"{PACKAGE_NAME}.modules.{name}")
+        functions = _public_functions(module)
+        documented = _documented_functions(DOCS_DIR / f"{name}.md")
+        missing = sorted(functions - documented)
+        extra = sorted(documented - functions)
+        if missing:
+            violations.append(f"{name}: missing {', '.join(missing)}")
+        if extra:
+            violations.append(f"{name}: sections without a public function {', '.join(extra)}")
+    assert not violations, "module docs must match public functions: " + "; ".join(violations)
 
 
 class _EmbeddedVisitor(ast.NodeVisitor):

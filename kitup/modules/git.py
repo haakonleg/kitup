@@ -12,7 +12,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("git")
+module("git", "Repository clones and checkouts.")
 
 
 _SHA: Final = re.compile(r"[0-9a-f]{40}")

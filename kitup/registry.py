@@ -22,10 +22,6 @@ _MODULE_ATTR: Final = "__kitup_module__"
 _MODULES_SEQUENCE: Final = "bundle modules must be a sequence of task modules or task module paths"
 _ORDER: Final = count()
 
-# Registered ``<module name>`` prefixes keyed by the dotted Python module that
-# declared them. ``ctx.changed`` consults this to infer ``"<module>.<method>"``.
-_ACTION_PREFIXES: dict[str, str] = {}
-
 type TaskFunc = Callable[[Any], Any]
 
 
@@ -93,10 +89,21 @@ class SideEffect:
 class Module:
     """A task module registered with :func:`module`.
 
-    ``name`` is the action prefix, for example ``"mytool"``.
+    ``name`` is the action prefix, for example ``"mytool"``. ``module_name`` is
+    the dotted Python module that declared it, for example ``"modules.mytool"``.
+    ``description`` is the optional human-readable summary shown by
+    ``kitup list-modules``.
     """
 
     name: str
+    module_name: str
+    description: str = ""
+
+
+# Registered modules keyed by the dotted Python module that declared them.
+# ``module()`` records an entry at import time; ``ctx.changed`` consults the
+# registry to infer ``"<module>.<method>"`` and the CLI lists its contents.
+_MODULES: dict[str, Module] = {}
 
 
 class Bundle:
@@ -357,7 +364,7 @@ def bundle(
     return created
 
 
-def module(name: str) -> Module:
+def module(name: str, description: str = "") -> Module:
     """Register the calling Python module as a kitup task module.
 
     Call this once at the top of a module file, or in a package
@@ -366,14 +373,21 @@ def module(name: str) -> Module:
     ``"<name>.<function>"`` without passing ``action`` explicitly.
 
     ``name`` must be a valid, non-keyword Python identifier because it becomes
-    the first segment of every action id.
+    the first segment of every action id. ``description`` is an optional
+    human-readable summary shown by ``kitup list-modules``.
     """
     caller = sys._getframe(1).f_globals
     module_name = caller.get("__name__")
     if not module_name:
         raise BundleError("module() must be called from a Python module")
-    registered = Module(name=_validate_module_name(name))
-    _ACTION_PREFIXES[module_name] = registered.name
+    if not isinstance(description, str):
+        raise BundleError("module description must be a string")
+    registered = Module(
+        name=_validate_module_name(name),
+        module_name=module_name,
+        description=description,
+    )
+    _MODULES[module_name] = registered
     caller[_MODULE_ATTR] = registered
     return registered
 
@@ -384,6 +398,20 @@ def module_of(value: ModuleType) -> Module | None:
     return registered if isinstance(registered, Module) else None
 
 
+def registered_modules(prefix: str | None = None) -> tuple[Module, ...]:
+    """Return registered modules sorted by action prefix.
+
+    Pass ``prefix`` to keep only modules declared by that dotted module or its
+    submodules.
+    """
+    entries = [
+        entry
+        for entry in _MODULES.values()
+        if prefix is None or entry.module_name == prefix or entry.module_name.startswith(f"{prefix}.")
+    ]
+    return tuple(sorted(entries, key=lambda entry: entry.name))
+
+
 def action_prefix(module_name: str) -> str | None:
     """Return the registered action prefix for a dotted module name, if any.
 
@@ -392,18 +420,18 @@ def action_prefix(module_name: str) -> str | None:
     """
     name = module_name
     while name:
-        prefix = _ACTION_PREFIXES.get(name)
-        if prefix is not None:
-            return prefix
+        registered = _MODULES.get(name)
+        if registered is not None:
+            return registered.name
         name = name.rpartition(".")[0]
     return None
 
 
 def forget_module_prefix(prefix: str) -> None:
-    """Drop registered action prefixes under a dotted module name."""
-    for module_name in tuple(_ACTION_PREFIXES):
+    """Drop registered modules under a dotted module name."""
+    for module_name in tuple(_MODULES):
         if module_name == prefix or module_name.startswith(f"{prefix}."):
-            del _ACTION_PREFIXES[module_name]
+            del _MODULES[module_name]
 
 
 def discover_task_modules(package: str, folder: Path) -> tuple[ModuleType, ...]:

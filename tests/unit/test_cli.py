@@ -1247,3 +1247,241 @@ def test_verbose_output_shows_bundle_paths(tmp_path, capsys):
 
     assert code == 0
     assert f"bundle path: {external}" in capsys.readouterr().out
+
+
+def test_list_modules_shows_builtin_and_empty_custom_sections(tmp_path, capsys):
+    make_project(tmp_path, bundles={"base": task_source("run")})
+
+    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert f"project: {tmp_path.name}" in out
+    assert "built-in modules:" in out
+    assert "  - files: " in out
+    assert "  - dnf: " in out
+    assert "  - podman: " in out
+    assert "custom modules:" in out
+    assert "  (none)" in out
+
+
+def test_list_modules_shows_custom_modules_by_registered_name(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        modules={
+            "mytool.py": 'from kitup import module\n\nmodule("other")\n\n\ndef install(ctx):\n    pass\n',
+            "webserver/__init__.py": 'from kitup import module\n\nmodule("webserver")\n',
+            "_private.py": "VALUE = 1\n",
+        },
+    )
+
+    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "custom modules:" in out
+    assert "  - other" in out
+    assert "  - webserver" in out
+    assert "  - mytool" not in out
+    assert "_private" not in out
+
+
+def test_list_modules_shows_descriptions_in_both_modes(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        modules={"mytool.py": 'from kitup import module\n\nmodule("mytool", "Install mytool.")\n'},
+    )
+
+    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "  - mytool: Install mytool." in out
+
+    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "  - mytool\n" in out
+    assert "      description: Install mytool." in out
+
+
+def test_list_modules_indents_multiline_descriptions(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        modules={"mytool.py": 'from kitup import module\n\nmodule("mytool", "First line.\\nSecond line.")\n'},
+    )
+
+    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "  - mytool: First line.\n      Second line." in out
+
+
+def test_list_modules_works_without_bundles(tmp_path, capsys):
+    make_project(tmp_path, modules={"mytool.py": 'from kitup import module\n\nmodule("mytool")\n'})
+
+    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
+
+    assert code == 0
+    assert "  - mytool" in capsys.readouterr().out
+
+
+def test_list_modules_defaults_to_the_current_directory(tmp_path, monkeypatch, capsys):
+    make_project(tmp_path, modules={"mytool.py": 'from kitup import module\n\nmodule("mytool")\n'})
+    monkeypatch.chdir(tmp_path)
+
+    code = cli.main(["list-modules", "--no-color"])
+
+    assert code == 0
+    assert "  - mytool" in capsys.readouterr().out
+
+
+def test_list_modules_does_not_load_bundles(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        bundles={"base": "raise RuntimeError('broken bundle')\n"},
+        modules={"mytool.py": 'from kitup import module\n\nmodule("mytool")\n'},
+    )
+
+    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
+
+    assert code == 0
+    assert "  - mytool" in capsys.readouterr().out
+
+
+def test_list_modules_does_not_collect_facts(tmp_path, monkeypatch):
+    make_project(tmp_path)
+
+    def fail():
+        raise AssertionError("collect_facts called")
+
+    monkeypatch.setattr(cli, "collect_facts", fail)
+
+    assert cli.main(["list-modules", str(tmp_path), "--no-color"]) == 0
+
+
+def test_list_modules_verbose_shows_paths_and_functions(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        modules={
+            "mytool.py": (
+                "from kitup import module\n\n"
+                'module("mytool")\n\n\n'
+                "def install(ctx):\n"
+                '    """Install mytool."""\n\n\n'
+                "def _helper():\n"
+                "    pass\n"
+            )
+        },
+    )
+
+    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert f"project: {tmp_path.resolve()}" in out
+    assert f"path: {tmp_path.resolve() / 'modules' / 'mytool.py'}" in out
+    assert "- install: Install mytool." in out
+    assert "_helper" not in out
+
+
+def test_list_modules_verbose_ignores_public_classes(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        modules={
+            "mytool.py": (
+                "from kitup import module\n\n"
+                'module("mytool")\n\n\n'
+                "class Helper:\n"
+                '    """A public class."""\n\n\n'
+                "def install(ctx):\n"
+                '    """Install mytool."""\n'
+            )
+        },
+    )
+
+    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "- install: Install mytool." in out
+    assert "Helper" not in out
+
+
+def test_list_modules_verbose_separates_modules_with_blank_lines(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        modules={
+            "one.py": 'from kitup import module\n\nmodule("one")\n\n\ndef first(ctx):\n    """First."""\n',
+            "two.py": 'from kitup import module\n\nmodule("two")\n\n\ndef second(ctx):\n    """Second."""\n',
+        },
+    )
+
+    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "        - first: First.\n\n  - two\n" in out
+
+
+def test_list_modules_verbose_shows_builtin_functions(tmp_path, capsys):
+    make_project(tmp_path)
+
+    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "  - files" in out
+    assert "- file: Ensure a text file exists" in out
+    assert "      description: Files, directories" in out
+    assert "path:" not in out
+
+
+def test_apply_does_not_import_unused_custom_modules(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        bundles={"base": task_source("run")},
+        modules={"broken.py": "raise RuntimeError('imported broken module')\n"},
+    )
+
+    code = cli.main(["apply", str(tmp_path), "-n", "--no-color"])
+
+    assert code == 0
+    assert "imported broken module" not in capsys.readouterr().err
+
+
+def test_list_does_not_import_unused_custom_modules(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        bundles={"base": task_source("run")},
+        modules={"broken.py": "raise RuntimeError('imported broken module')\n"},
+    )
+
+    code = cli.main(["list", str(tmp_path), "--no-color"])
+
+    assert code == 0
+    assert "imported broken module" not in capsys.readouterr().err
+
+
+def test_check_imports_custom_modules(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        bundles={"base": task_source("run")},
+        modules={"broken.py": "raise RuntimeError('imported broken module')\n"},
+    )
+
+    code = cli.main(["check", str(tmp_path), "--no-color"])
+
+    assert code == 2
+    assert "failed to import module 'broken'" in capsys.readouterr().err
+
+
+def test_list_modules_imports_custom_modules(tmp_path, capsys):
+    make_project(tmp_path, modules={"broken.py": "raise RuntimeError('imported broken module')\n"})
+
+    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
+
+    assert code == 2
+    assert "failed to import module 'broken'" in capsys.readouterr().err

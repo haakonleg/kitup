@@ -29,7 +29,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult, format_items
 
-module("pip")
+module("pip", "Python packages via pip and pip.conf options.")
 
 
 type PipState = Literal["present", "absent", "latest"]

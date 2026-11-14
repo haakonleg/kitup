@@ -23,7 +23,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("users")
+module("users", "Local users, groups, and group membership.")
 
 
 _NAME_PATTERN: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")

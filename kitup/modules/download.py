@@ -26,7 +26,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("download")
+module("download", "Remote file download over HTTP(S).")
 
 
 _DEFAULT_MAX_BYTES: Final = 10 * 1024 * 1024

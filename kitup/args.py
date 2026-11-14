@@ -8,6 +8,7 @@ from typing import Any, Final, Literal, Never
 
 _HELP_FLAGS: Final = ("-h", "--help")
 _HELP_WIDTH: Final = 34
+_COMMAND_WIDTH: Final = 10
 _VALUE_KINDS: Final = frozenset({"store", "append"})
 
 
@@ -212,7 +213,8 @@ class Parser:
         if command is None:
             lines.append(self.description)
             lines.extend(["", "commands:"])
-            lines.extend(f"  {item.name:<10} {item.help}" for item in self._commands.values())
+            width = max(_COMMAND_WIDTH, max((len(item.name) for item in self._commands.values()), default=0) + 2)
+            lines.extend(f"  {item.name:<{width}} {item.help}" for item in self._commands.values())
             lines.extend(["", "options:", "  -h, --help  show this help message and exit"])
             lines.extend(_format_options(self._top_option_list))
         else:

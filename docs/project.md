@@ -220,14 +220,15 @@ relative to the current working directory.
 
 Reusable, idempotent operation code belongs in an optional top-level `modules/`
 directory. A module is a single file, or a folder with an `__init__.py`; either
-way it calls `module(...)` once.
+way it calls `module(...)` once. The optional second argument is a
+human-readable description shown by `kitup list-modules`.
 
 ```python
 # modules/motd.py
 from kitup import CallResult, module
 from kitup.modules import files
 
-module("motd")
+module("motd", "Write the message of the day.")
 
 
 def message(ctx, text: str) -> CallResult:
@@ -249,7 +250,8 @@ def configure_machine(ctx):
 ```
 
 See [Custom modules](custom-modules.md) for package modules and the full
-authoring contract.
+authoring contract. A missing `module(...)` call is reported by `kitup check`
+and `kitup list-modules`.
 
 ## Vars
 

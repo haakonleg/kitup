@@ -190,6 +190,7 @@ Mutating system operations request sudo automatically where appropriate.
 | `kitup init [PROJECT_DIR]` | Scaffold a new project. |
 | `kitup check [PROJECT_DIR]` | Discover, resolve, and validate without running. |
 | `kitup list [PROJECT_DIR]` | Show the bundles and tasks in the plan. |
+| `kitup list-modules [PROJECT_DIR]` | List built-in and custom task modules. |
 | `kitup apply [PROJECT_DIR]` | Apply the plan. |
 
 Common options include `-n/--dry-run`, `-d/--diff`, `-t/--tags`,

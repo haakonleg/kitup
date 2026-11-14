@@ -8,7 +8,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("gsettings")
+module("gsettings", "GNOME settings.")
 
 
 def key(ctx: TaskContext, schema: str, key: str, value: Any = None, *, state: State = "present") -> CallResult:

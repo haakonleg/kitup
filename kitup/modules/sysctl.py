@@ -12,7 +12,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("sysctl")
+module("sysctl", "Kernel parameters at runtime and in sysctl files.")
 
 
 _KEY_PATTERN: Final = r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*"

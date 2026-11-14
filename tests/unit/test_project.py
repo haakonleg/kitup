@@ -8,6 +8,7 @@ from kitup.project import (
     discover_bundle_dirs,
     discover_var_paths,
     load_project,
+    load_project_modules,
     on_project_path,
     resolve_preset,
 )
@@ -28,6 +29,19 @@ def test_load_project_requires_an_existing_directory(tmp_path):
     target.write_text("", encoding="utf-8")
     with pytest.raises(ProjectError, match="project root is not a directory"):
         load_project(target)
+
+
+def test_load_project_modules_skips_bundles(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={"base": "raise RuntimeError('broken bundle')\n"},
+        modules={"mytool.py": 'from kitup import module\n\nmodule("mytool")\n'},
+    )
+
+    project = load_project_modules(tmp_path)
+
+    assert project.bundles == ()
+    assert [path.stem for path in project.module_paths] == ["mytool"]
 
 
 def test_unknown_user_in_project_path_is_a_project_error():

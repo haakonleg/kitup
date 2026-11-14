@@ -14,7 +14,7 @@ from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
 
-module("template")
+module("template", "Jinja2 templates rendered into managed files.")
 
 
 _RESERVED_VARIABLES: Final = frozenset({"vars", "facts"})

@@ -8,7 +8,19 @@ import pytest
 import kitup
 from kitup.context import TaskContext
 from kitup.errors import BundleError
-from kitup.registry import Bundle, Module, SideEffect, bundle_of, module, side_effect, task
+from kitup.registry import (
+    Bundle,
+    Module,
+    SideEffect,
+    action_prefix,
+    bundle_of,
+    forget_module_prefix,
+    module,
+    module_of,
+    registered_modules,
+    side_effect,
+    task,
+)
 from kitup.registry import bundle as define_bundle
 from kitup.results import CallResult
 
@@ -583,3 +595,95 @@ def test_bundle_paths_and_resources(tmp_path):
 def test_unknown_user_in_bundle_path_is_a_bundle_error():
     with pytest.raises(BundleError, match="cannot resolve path '~bogususer/bundle'"):
         Bundle("Base", path=Path("~bogususer/bundle"))
+
+
+def test_module_registers_in_the_registry(tmp_path):
+    name, _ = import_package(tmp_path, {"tool.py": 'from kitup import module\n\nmodule("mytool")\n'})
+    tool = importlib.import_module(f"{name}.tool")
+
+    entries = {entry.module_name: entry for entry in registered_modules(name)}
+    assert entries[f"{name}.tool"].name == "mytool"
+    assert entries[f"{name}.tool"].description == ""
+    assert module_of(tool) is entries[f"{name}.tool"]
+    assert action_prefix(f"{name}.tool") == "mytool"
+
+
+def test_module_description_is_optional_and_validated(tmp_path):
+    name, _ = import_package(
+        tmp_path,
+        {
+            "plain.py": 'from kitup import module\n\nmodule("plain")\n',
+            "described.py": 'from kitup import module\n\nmodule("described", "A described module.")\n',
+        },
+    )
+    importlib.import_module(f"{name}.plain")
+    importlib.import_module(f"{name}.described")
+
+    entries = {entry.name: entry for entry in registered_modules(name)}
+    assert entries["plain"].description == ""
+    assert entries["described"].description == "A described module."
+
+    with pytest.raises(BundleError, match="module description must be a string"):
+        module("bad", 1)  # type: ignore[arg-type]
+
+
+def test_registered_modules_are_sorted_by_name(tmp_path):
+    name, _ = import_package(
+        tmp_path,
+        {
+            "zulu.py": 'from kitup import module\n\nmodule("zulu")\n',
+            "alpha.py": 'from kitup import module\n\nmodule("alpha")\n',
+        },
+    )
+    importlib.import_module(f"{name}.zulu")
+    importlib.import_module(f"{name}.alpha")
+
+    assert [entry.name for entry in registered_modules(name)] == ["alpha", "zulu"]
+
+
+def test_registered_modules_filter_by_prefix(tmp_path):
+    name, _ = import_package(
+        tmp_path,
+        {
+            "one.py": 'from kitup import module\n\nmodule("one")\n',
+            "two.py": 'from kitup import module\n\nmodule("two")\n',
+        },
+    )
+    importlib.import_module(f"{name}.one")
+    importlib.import_module(f"{name}.two")
+
+    assert [entry.name for entry in registered_modules(name)] == ["one", "two"]
+    assert [entry.name for entry in registered_modules(f"{name}.one")] == ["one"]
+    assert registered_modules(f"{name}.missing") == ()
+
+
+def test_registering_again_replaces_the_entry(tmp_path):
+    name, _ = import_package(
+        tmp_path,
+        {"tool.py": 'from kitup import module\n\nmodule("first")\nmodule("second")\n'},
+    )
+    tool = importlib.import_module(f"{name}.tool")
+
+    entries = registered_modules(name)
+    registered = module_of(tool)
+    assert [entry.name for entry in entries] == ["second"]
+    assert registered is not None
+    assert registered.name == "second"
+    assert action_prefix(f"{name}.tool") == "second"
+
+
+def test_forget_module_prefix_drops_registered_modules(tmp_path):
+    name, _ = import_package(
+        tmp_path,
+        {
+            "one.py": 'from kitup import module\n\nmodule("one")\n',
+            "two.py": 'from kitup import module\n\nmodule("two")\n',
+        },
+    )
+    importlib.import_module(f"{name}.one")
+    importlib.import_module(f"{name}.two")
+
+    forget_module_prefix(name)
+
+    assert action_prefix(f"{name}.one") is None
+    assert registered_modules(name) == ()

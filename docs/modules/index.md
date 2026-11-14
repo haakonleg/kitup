@@ -9,6 +9,9 @@ from kitup import task
 from kitup.modules import dnf, files
 ```
 
+Run `kitup list-modules` to list the built-in modules and the project's custom
+modules.
+
 ## Return values
 
 Methods that manage system state return a `CallResult`. It records what the call
