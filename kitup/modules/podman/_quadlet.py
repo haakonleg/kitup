@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..._utils import file_actions
 from ..._utils.paths import expand_path
-from ..._utils.validation import require_mode, require_non_negative_int, require_scope, require_text
+from ..._utils.validation import normalize_mode, require_non_negative_int, require_scope, require_text
 from ...context import current_context
 from ...errors import TaskFailed
 from ...results import CallResult
@@ -33,7 +33,7 @@ def quadlet(
     extra_options: Mapping[str, str | Sequence[str]] | None = None,
     install_target: str | None = None,
     stop_timeout: int | None = None,
-    mode: int | None = 0o644,
+    mode: int | str | None = 0o644,
 ) -> CallResult:
     """Write a Quadlet ``.container`` file.
 
@@ -44,7 +44,7 @@ def quadlet(
     require_scope(scope, "podman", is_root=ctx.sudo.is_root)
     require_object_name(name, "container name")
     require_text(image, "container image")
-    require_mode(mode)
+    mode = normalize_mode(mode)
     if stop_timeout is not None:
         require_non_negative_int(stop_timeout, "container stop_timeout")
 

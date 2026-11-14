@@ -8,7 +8,7 @@ from typing import Any, Final
 from .._utils import file_actions
 from .._utils.file_actions import PathPolicy, require_path_kind
 from .._utils.paths import expand_path
-from .._utils.validation import require_bool, require_metadata, require_mode, require_path
+from .._utils.validation import normalize_mode, require_bool, require_metadata, require_path
 from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
@@ -25,7 +25,7 @@ def file(
     dest: str | Path,
     *,
     variables: Mapping[str, Any] | None = None,
-    mode: int | None = None,
+    mode: int | str | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
     sudo: bool = False,
@@ -44,7 +44,7 @@ def file(
     require_path(src, "template source")
     require_path(dest, "template destination")
     require_metadata(owner, group)
-    require_mode(mode)
+    mode = normalize_mode(mode)
     require_bool(sudo, "template sudo")
     extra = _require_variables(variables)
     target = expand_path(dest, error=TaskFailed)

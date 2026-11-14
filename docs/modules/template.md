@@ -19,6 +19,7 @@ Render the template `src` and write the result to `dest`.
 - `dest` — destination file path. The parent directory must already exist; use
   [`files.directory()`](files.md) first.
 - `mode=None` preserves an existing mode; new files default to `0o644`.
+  Accepts an integer or an octal string such as `"0644"`.
 - `owner` and `group` accept a name or numeric ID.
 - `sudo=True` performs the write as root.
 

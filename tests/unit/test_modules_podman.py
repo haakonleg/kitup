@@ -922,6 +922,25 @@ def test_quadlet_scenarios(tmp_path):
     assert ctx.calls[-1].summary == f"ensure quadlet {CONTAINER} in {target}"
 
 
+def test_octal_string_modes_are_applied(tmp_path):
+    registry_target = tmp_path / "example.conf"
+    context(tmp_path, sudo=FakeSudo(is_root=True))
+    podman.registry("example", location="docker.io", path=registry_target, mode="0600")
+    assert stat.S_IMODE(registry_target.stat().st_mode) == 0o600
+
+    command = FakeCommandRunner()
+    command.responses = [response(0, UNIT)]
+    context(tmp_path, command=command, sudo=FakeSudo(is_root=True))
+    podman.generate_systemd(CONTAINER, dest=tmp_path, mode="0600")
+    service = tmp_path / f"container-{CONTAINER}.service"
+    assert stat.S_IMODE(service.stat().st_mode) == 0o600
+
+    context(tmp_path, sudo=FakeSudo(is_root=True))
+    podman.quadlet(CONTAINER, image=IMAGE, dest=tmp_path, mode="0600")
+    quadlet = tmp_path / f"{CONTAINER}.container"
+    assert stat.S_IMODE(quadlet.stat().st_mode) == 0o600
+
+
 def test_quadlet_user_scope_uses_user_directory(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     directory = tmp_path / ".config" / "containers" / "systemd"

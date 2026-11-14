@@ -296,6 +296,17 @@ def test_file_preserves_existing_mode_and_applies_explicit_mode(tmp_path):
     assert stat.S_IMODE(dest.stat().st_mode) == 0o640
 
 
+def test_file_accepts_octal_string_mode(tmp_path):
+    source = tmp_path / "template.j2"
+    write_source(source, "value\n")
+    dest = tmp_path / "rendered.conf"
+    context(tmp_path)
+
+    template.file(source, dest, mode="0640")
+
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o640
+
+
 def test_file_reports_metadata_only_change(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "same\n")

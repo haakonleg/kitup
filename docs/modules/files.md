@@ -18,6 +18,7 @@ Ensure a text file exists with optional content, or is absent.
   empty. Symlinks are refused.
 - `state="absent"` removes the file or symlink, but not a directory.
 - `mode=None` preserves an existing mode; new files default to `0o644`.
+  Accepts an integer or an octal string such as `"0600"`.
 - `owner` and `group` accept a name or numeric ID.
 - `sudo=True` performs the operation as root.
 
@@ -42,8 +43,9 @@ refused.
   expanded.
 - `dest` — destination path. If it ends with `/`, it is treated as a directory
   and the source filename is appended. The parent directory must already exist.
-- `mode`, `owner`, and `group` override the destination metadata. `owner` and
-  `group` accept a name or numeric ID.
+- `mode`, `owner`, and `group` override the destination metadata. `mode`
+  accepts an integer or an octal string such as `"0600"`; `owner` and `group`
+  accept a name or numeric ID.
 - `sudo=True` performs the operation as root.
 
 ### Result fields
@@ -68,8 +70,9 @@ Move one regular file, preserving its mode and ownership when renamed.
 - `dest` — destination path. If it ends with `/`, it is treated as a directory
   and the source filename is appended.
 - `mode`, `owner`, and `group` override the destination metadata after the move.
-  Without them, a rename preserves the source metadata; a cross-filesystem copy
-  is owned by the moving process.
+  `mode` accepts an integer or an octal string such as `"0600"`. Without them, a
+  rename preserves the source metadata; a cross-filesystem copy is owned by the
+  moving process.
 - `sudo=True` performs the move and metadata changes as root.
 
 When both paths are on the same filesystem, the file is moved without copying.
@@ -231,6 +234,7 @@ Ensure a directory exists or is absent.
 - `state="absent"` removes an empty directory; `force=True` removes it
   recursively.
 - `mode=None` preserves an existing mode; new directories default to `0o755`.
+  Accepts an integer or an octal string such as `"0755"`.
 - `owner` and `group` accept a name or numeric ID.
 - `sudo=True` performs the operation as root.
 

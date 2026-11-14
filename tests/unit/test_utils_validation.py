@@ -26,3 +26,24 @@ def test_require_single_line_rejects_every_splitlines_boundary():
 
 def test_require_single_line_allows_tabs_and_plain_text():
     validation.require_single_line("a\tb", "line")
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (None, None),
+        (0o600, 0o600),
+        ("0600", 0o600),
+        ("600", 0o600),
+        ("0o600", 0o600),
+        (" 0755 ", 0o755),
+    ],
+)
+def test_normalize_mode_accepts_integers_and_octal_strings(mode, expected):
+    assert validation.normalize_mode(mode) == expected
+
+
+@pytest.mark.parametrize("mode", [True, -1, 0o10000, "", "  ", "0899", "rw-r--r--", 1.5])
+def test_normalize_mode_rejects_invalid_values(mode):
+    with pytest.raises(TaskFailed, match="mode"):
+        validation.normalize_mode(mode)

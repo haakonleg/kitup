@@ -24,7 +24,8 @@ Download a URL to a destination file.
 - `validate_certs=False` disables TLS certificate verification. Use it only for
   trusted hosts with self-signed certificates.
 - `mode=None` preserves an existing mode; new files default to `0o644`.
-  Ownership is never changed.
+  Accepts an integer or an octal string such as `"0644"`. Ownership is never
+  changed.
 
 ### Result fields
 

@@ -29,7 +29,7 @@ from .._utils.file_primitives import (
     symlink_path,
 )
 from .._utils.paths import expand_path
-from .._utils.validation import normalize_strings, require_mode, require_non_negative_int, require_path, require_text
+from .._utils.validation import normalize_mode, normalize_strings, require_non_negative_int, require_path, require_text
 from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
@@ -87,7 +87,7 @@ def archive(
     strip_components: int = 0,
     include: str | Iterable[str] | None = None,
     exclude: str | Iterable[str] | None = None,
-    mode: int | None = None,
+    mode: int | str | None = None,
 ) -> CallResult:
     """Extract a tar or zip archive into ``dest``, replacing only differences.
 
@@ -101,7 +101,7 @@ def archive(
     ctx = current_context()
     require_path(src, "archive source")
     require_path(dest, "archive destination")
-    require_mode(mode)
+    mode = normalize_mode(mode)
     require_non_negative_int(strip_components, "strip_components")
     includes = _require_patterns(include, "include")
     excludes = _require_patterns(exclude, "exclude")
@@ -135,7 +135,7 @@ def archive(
     return ctx.changed(_archive_result(source, target, changes=changed, files=files, size=_directory_size(target)))
 
 
-def file(src: str | Path, dest: str | Path, *, mode: int | None = None) -> CallResult:
+def file(src: str | Path, dest: str | Path, *, mode: int | str | None = None) -> CallResult:
     """Decompress a single-file compression format into ``dest``.
 
     Supported formats are gzip, bzip2, xz, and zstd, detected from the file
@@ -147,7 +147,7 @@ def file(src: str | Path, dest: str | Path, *, mode: int | None = None) -> CallR
     ctx = current_context()
     require_path(src, "compressed source")
     require_path(dest, "decompressed destination")
-    require_mode(mode)
+    mode = normalize_mode(mode)
 
     source = ctx.resolve_source(src)
     _require_source(source, "compressed source")

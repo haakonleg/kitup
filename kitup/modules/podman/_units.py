@@ -6,9 +6,9 @@ from pathlib import Path
 from ..._utils import file_actions
 from ..._utils.paths import expand_path
 from ..._utils.validation import (
+    normalize_mode,
     require_bool,
     require_choice,
-    require_mode,
     require_non_negative_int,
     require_scope,
     require_success,
@@ -42,7 +42,7 @@ def generate_systemd(
     wants: str | Iterable[str] = (),
     requires: str | Iterable[str] = (),
     after: str | Iterable[str] = (),
-    mode: int | None = 0o644,
+    mode: int | str | None = 0o644,
 ) -> CallResult:
     """Generate a systemd unit for a container.
 
@@ -56,7 +56,7 @@ def generate_systemd(
     require_scope(scope, "podman", is_root=ctx.sudo.is_root)
     require_text(name, "container name")
     require_bool(new, "systemd new")
-    require_mode(mode)
+    mode = normalize_mode(mode)
     if restart_policy is not None:
         require_choice(restart_policy, RESTART_POLICIES, "systemd restart policy")
     for value, label in (

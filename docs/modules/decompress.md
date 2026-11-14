@@ -27,7 +27,8 @@ Extract an archive into the directory `dest`.
   relative path. When `include` is given, only matching entries are extracted;
   `exclude` then removes matches. A pattern such as `*.txt` also matches nested
   files. Excluding a directory does not exclude its children.
-- `mode` — overrides the mode of extracted regular files.
+- `mode` — overrides the mode of extracted regular files. Accepts an integer or
+  an octal string such as `"0644"`.
 
 ### Result fields
 
@@ -78,8 +79,9 @@ Decompress a single compressed file.
 - `dest` — destination file, existing directory, or path ending with `/`. A
   directory destination uses the source filename with its `.gz`, `.bz2`, `.xz`,
   `.zst`, or `.zstd` suffix removed.
-- `mode` — overrides the destination mode. Existing files keep their mode when
-  omitted; new files use `0o644`.
+- `mode` — overrides the destination mode. Accepts an integer or an octal string
+  such as `"0644"`. Existing files keep their mode when omitted; new files use
+  `0o644`.
 
 Supported formats are gzip, bzip2, xz, and zstd, detected from the contents.
 Archive sources are rejected; use `archive()` for tar and zip files. An existing

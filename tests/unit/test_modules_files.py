@@ -53,6 +53,31 @@ def test_file_creates_file_and_is_idempotent(tmp_path):
     assert ctx.calls[1].changed is False
 
 
+@pytest.mark.parametrize("mode", ["0600", "600", "0o600"])
+def test_file_accepts_octal_string_mode_and_is_idempotent(tmp_path, mode):
+    path = tmp_path / "example.conf"
+    ctx = context(tmp_path)
+
+    files.file(path, content="value = 1\n", mode=mode)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert len(ctx.changes) == 1
+
+    files.file(path, content="value = 1\n", mode=mode)
+    assert len(ctx.changes) == 1
+    assert ctx.calls[-1].changed is False
+
+
+def test_directory_accepts_octal_string_mode(tmp_path):
+    path = tmp_path / "private"
+    ctx = context(tmp_path)
+
+    files.directory(path, mode="0700")
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o700
+    assert len(ctx.changes) == 1
+
+
 def test_file_skips_reading_a_target_with_a_different_size(tmp_path, monkeypatch):
     path = tmp_path / "file"
     path.write_text("old\n")
@@ -484,7 +509,7 @@ def test_invalid_arguments_are_rejected(tmp_path):
         with pytest.raises(TaskFailed, match="must be a boolean"):
             files.directory(tmp_path / "dir", **{keyword: value})
 
-    for mode in (True, -1, 0o10000):
+    for mode in (True, -1, 0o10000, "0899", "rw-r--r--"):
         with pytest.raises(TaskFailed, match="mode"):
             files.file(tmp_path / "file", content="x", mode=mode)
     for owner in (True, -1):

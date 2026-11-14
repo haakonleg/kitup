@@ -12,9 +12,9 @@ from .._utils.file_primitives import move_path, symlink_path
 from .._utils.paths import expand_path
 from .._utils.validation import (
     State,
+    normalize_mode,
     require_bool,
     require_metadata,
-    require_mode,
     require_path,
     require_regex,
     require_single_line,
@@ -34,7 +34,7 @@ def file(
     *,
     state: State = "present",
     content: str | None = None,
-    mode: int | None = None,
+    mode: int | str | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
     sudo: bool = False,
@@ -47,7 +47,7 @@ def file(
     require_state(state, "file")
     require_path(path, "file path")
     require_metadata(owner, group)
-    require_mode(mode)
+    mode = normalize_mode(mode)
     require_bool(sudo, "file sudo")
 
     target = expand_path(path, error=TaskFailed)
@@ -114,7 +114,7 @@ def copy(
     src: str | Path,
     dest: str | Path,
     *,
-    mode: int | None = None,
+    mode: int | str | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
     sudo: bool = False,
@@ -130,7 +130,7 @@ def copy(
     require_path(src, "copy source")
     require_path(dest, "copy destination")
     require_metadata(owner, group)
-    require_mode(mode)
+    mode = normalize_mode(mode)
     require_bool(sudo, "copy sudo")
     source = ctx.resolve_source(src)
     target = expand_path(dest, error=TaskFailed)
@@ -202,7 +202,7 @@ def move(
     src: str | Path,
     dest: str | Path,
     *,
-    mode: int | None = None,
+    mode: int | str | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
     sudo: bool = False,
@@ -219,7 +219,7 @@ def move(
     require_path(src, "move source")
     require_path(dest, "move destination")
     require_metadata(owner, group)
-    require_mode(mode)
+    mode = normalize_mode(mode)
     require_bool(sudo, "move sudo")
     source = expand_path(src, error=TaskFailed)
     target = expand_path(dest, error=TaskFailed)
@@ -524,7 +524,7 @@ def directory(
     *,
     state: State = "present",
     force: bool = False,
-    mode: int | None = None,
+    mode: int | str | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
     sudo: bool = False,
@@ -534,7 +534,7 @@ def directory(
     require_state(state, "directory")
     require_path(path, "directory path")
     require_metadata(owner, group)
-    require_mode(mode)
+    mode = normalize_mode(mode)
     require_bool(force, "directory force")
     require_bool(sudo, "directory sudo")
 

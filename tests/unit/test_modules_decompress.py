@@ -355,6 +355,16 @@ def test_archive_preserves_or_overrides_existing_modes(tmp_path, tar_archive):
     assert len(ctx.changes) == 1
 
 
+def test_archive_accepts_octal_string_mode(tmp_path, tar_archive):
+    dest = tmp_path / "dest"
+    make_context(tmp_path)
+
+    decompress.archive(tar_archive, dest, mode="0640")
+
+    target = dest / "app/etc/config.ini"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+
+
 def test_archive_strips_and_filters(tmp_path):
     archive = tmp_path / "pkg.tar"
     with tarfile.open(archive, "w") as tar:
@@ -614,6 +624,17 @@ def test_file_preserves_or_overrides_existing_modes(tmp_path):
 
     assert stat.S_IMODE(dest.stat().st_mode) == 0o640
     assert len(ctx.changes) == 1
+
+
+def test_file_accepts_octal_string_mode(tmp_path):
+    source = tmp_path / "data.txt.gz"
+    source.write_bytes(gzip.compress(b"payload\n"))
+    dest = tmp_path / "out.txt"
+
+    make_context(tmp_path)
+    decompress.file(source, dest, mode="0640")
+
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o640
 
 
 def test_file_uses_directory_destinations(tmp_path):

@@ -447,6 +447,17 @@ def test_to_file_creates_new_files_with_the_requested_mode(tmp_path, http_server
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
+def test_to_file_accepts_octal_string_mode(tmp_path, http_server):
+    state, base = http_server
+    target = tmp_path / "file.txt"
+
+    make_context(tmp_path)
+    download.to_file(f"{base}/file.txt", target, mode="0600")
+
+    assert target.read_bytes() == state.payload
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
 def test_to_bytes_returns_content_and_verifies_checksum(tmp_path, http_server):
     state, base = http_server
     ctx = make_context(tmp_path)

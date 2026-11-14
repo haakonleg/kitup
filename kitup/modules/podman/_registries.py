@@ -8,9 +8,9 @@ from ..._utils.paths import expand_path
 from ..._utils.toml import toml_string
 from ..._utils.validation import (
     State,
+    normalize_mode,
     normalize_strings,
     require_bool,
-    require_mode,
     require_path,
     require_scope,
     require_state,
@@ -39,7 +39,7 @@ def registry(
     mirrors: str | Iterable[str] = (),
     scope: str = "system",
     path: str | Path | None = None,
-    mode: int | None = 0o644,
+    mode: int | str | None = 0o644,
 ) -> CallResult:
     """Ensure a ``registries.conf.d`` drop-in exists or is absent.
 
@@ -52,7 +52,7 @@ def registry(
     require_object_name(name, "registry name")
     require_bool(insecure, "registry insecure")
     require_bool(blocked, "registry blocked")
-    require_mode(mode)
+    mode = normalize_mode(mode)
 
     sudo = scope == "system"
     target = _registry_path(name, scope=scope, path=path)

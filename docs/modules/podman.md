@@ -159,7 +159,7 @@ Ensure a `registries.conf.d` drop-in exists or is absent.
 - `mirrors` — one or more mirror locations.
 - `scope` — `"system"` or `"user"`.
 - `path` — override the default path. A missing `.conf` suffix is appended.
-- `mode` — file mode.
+- `mode` — file mode. Accepts an integer or an octal string such as `"0644"`.
 
 Parent directories must already exist; create them with
 [`files.directory`](files.md) first.
@@ -232,7 +232,7 @@ Generate a systemd unit for a container.
   `podman generate systemd` options.
 - `env` — environment variables added to the unit.
 - `wants`, `requires`, and `after` — systemd dependency unit names.
-- `mode` — file mode.
+- `mode` — file mode. Accepts an integer or an octal string such as `"0644"`.
 
 Podman's generated header, which contains a timestamp, is omitted so repeated
 runs produce identical content.
@@ -273,7 +273,7 @@ Write a Quadlet `.container` file.
   system scope and `default.target` for user scope. An empty string omits the
   `[Install]` section.
 - `stop_timeout` — container stop timeout in seconds.
-- `mode` — file mode.
+- `mode` — file mode. Accepts an integer or an octal string such as `"0644"`.
 
 Keys managed by the module (`ContainerName`, `Image`, `Exec`, `StopTimeout`,
 and `PodmanArgs`) cannot be used in `extra_options`. The generated file always

@@ -20,7 +20,7 @@ from .._utils.file_primitives import TempFileError, digest_path, hasher_for, rep
 from .._utils.http import open_url, read_response
 from .._utils.paths import expand_path
 from .._utils.timing import timed
-from .._utils.validation import has_control_characters, require_bool, require_mode, require_path, require_timeout
+from .._utils.validation import has_control_characters, normalize_mode, require_bool, require_path, require_timeout
 from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
@@ -146,7 +146,7 @@ def to_file(
     headers: Mapping[str, str] | None = None,
     timeout: float = 30,
     validate_certs: bool = True,
-    mode: int | None = None,
+    mode: int | str | None = None,
 ) -> CallResult:
     """Download ``url`` to ``dest``, replacing it only when needed.
 
@@ -163,7 +163,7 @@ def to_file(
     request_headers = _build_headers(headers)
     require_timeout(timeout)
     require_bool(validate_certs, "validate_certs")
-    require_mode(mode)
+    mode = normalize_mode(mode)
     require_bool(force, "force")
 
     target, info = _resolve_destination(dest, parts)

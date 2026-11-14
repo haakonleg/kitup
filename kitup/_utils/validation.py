@@ -132,14 +132,32 @@ def require_non_negative_int(value: int, label: str) -> None:
         raise TaskFailed(f"{label} must be a non-negative integer")
 
 
-def require_mode(mode: int | None) -> None:
-    """Validate an optional file mode."""
+def normalize_mode(mode: int | str | None) -> int | None:
+    """Return an optional file mode as an integer, parsing octal strings.
+
+    Integer modes are used as given. String modes are read as octal, with or
+    without a ``0o`` prefix, so ``"0600"``, ``"600"``, and ``"0o600"`` all
+    mean ``0o600``.
+    """
     if mode is None:
-        return
-    if isinstance(mode, bool) or not isinstance(mode, int):
-        raise TaskFailed("mode must be an integer")
-    if not 0 <= mode <= 0o7777:
+        return None
+    if isinstance(mode, bool):
+        raise TaskFailed("mode must be an integer or octal string")
+    if isinstance(mode, int):
+        value = mode
+    elif isinstance(mode, str):
+        text = mode.strip()
+        if not text:
+            raise TaskFailed("mode must be an integer or octal string")
+        try:
+            value = int(text, 8)
+        except ValueError as exc:
+            raise TaskFailed(f"invalid mode: {mode!r}") from exc
+    else:
+        raise TaskFailed("mode must be an integer or octal string")
+    if not 0 <= value <= 0o7777:
         raise TaskFailed("mode must be between 0 and 0o7777")
+    return value
 
 
 def require_choice(value: str, choices: Collection[str], label: str) -> None:
