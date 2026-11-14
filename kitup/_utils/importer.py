@@ -2,7 +2,11 @@
 
 import importlib.util
 import itertools
+import os
 import sys
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 
@@ -11,6 +15,54 @@ from .. import PACKAGE_NAME
 _counter = itertools.count()
 _task_modules: dict[Path, ModuleType] = {}
 _packages: dict[tuple[str, Path], str] = {}
+_pycache_disabled = False
+
+
+def default_pycache_prefix() -> Path:
+    """Return the default bytecode cache directory for project code.
+
+    Follows the XDG base directory specification: ``$XDG_CACHE_HOME`` is used
+    when it holds an absolute path, otherwise ``~/.cache``. Falls back to the
+    system temporary directory when the home directory cannot be determined.
+    """
+    base = os.environ.get("XDG_CACHE_HOME", "")
+    if base and Path(base).is_absolute():
+        return Path(base) / PACKAGE_NAME / "pycache"
+    try:
+        return Path.home() / ".cache" / PACKAGE_NAME / "pycache"
+    except RuntimeError:
+        return Path(tempfile.gettempdir()) / PACKAGE_NAME / "pycache"
+
+
+def configure_pycache(*, disabled: bool = False) -> None:
+    """Enable or disable bytecode caching for project code.
+
+    The cache location comes from :func:`default_pycache_prefix`; ``disabled``
+    prevents writing any cache at all.
+    """
+    global _pycache_disabled
+    _pycache_disabled = disabled
+
+
+@contextmanager
+def project_bytecode_cache() -> Iterator[None]:
+    """Redirect or disable bytecode caching while project code is imported.
+
+    Project modules are imported both by name and by path, so every route wraps
+    its imports in this context. Previous ``sys`` settings are restored
+    afterwards, which keeps nesting safe.
+    """
+    previous_prefix = sys.pycache_prefix
+    previous_disabled = sys.dont_write_bytecode
+    if _pycache_disabled:
+        sys.dont_write_bytecode = True
+    else:
+        sys.pycache_prefix = str(default_pycache_prefix())
+    try:
+        yield
+    finally:
+        sys.pycache_prefix = previous_prefix
+        sys.dont_write_bytecode = previous_disabled
 
 
 def _task_prefix() -> str:
@@ -95,7 +147,8 @@ def _exec_module(module_name: str, path: Path, *, search_path: Path | None = Non
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        with project_bytecode_cache():
+            spec.loader.exec_module(module)
     except BaseException:
         _purge(module_name)
         raise

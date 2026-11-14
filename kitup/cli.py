@@ -9,6 +9,7 @@ from types import ModuleType
 from typing import Any, Final
 
 from . import PACKAGE_NAME, __version__
+from ._utils.importer import configure_pycache
 from ._utils.paths import expand_path
 from ._utils.security import disable_same_uid_ptrace
 from ._utils.validation import split_tags
@@ -167,6 +168,13 @@ _COMMON_OPTIONS: Final = (
         kind="flag",
         help="disable colors",
     ),
+    Option(
+        flags=("--no-pycache",),
+        dest="no_pycache",
+        default=False,
+        kind="flag",
+        help="do not write any bytecode cache for project code",
+    ),
     _VERSION_OPTION,
 )
 _FORCE_OPTION: Final = Option(
@@ -267,6 +275,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args, preset_paths = parse_with_presets(build_parser(), arguments, on_warning=_print_preset_warning)
         _apply_defaults(args)
+        configure_pycache(disabled=args.no_pycache)
         output = Output(no_color=args.no_color, verbose=args.verbose)
         if args.command == "init":
             return _init(args, output)

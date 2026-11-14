@@ -105,6 +105,13 @@ in the plan but runs nothing.
 Option names must be written exactly as shown. Abbreviated long options such as
 `--include-bundl` and combined short options such as `-nm` are rejected.
 
+### Bytecode cache
+
+kitup never writes `__pycache__` folders inside the project. Project bytecode is
+cached under `$XDG_CACHE_HOME/kitup/pycache` (default `~/.cache/kitup/pycache`).
+
+- `--no-pycache` — do not write any bytecode cache while importing project code.
+
 ## Presets and precedence
 
 Options can come from the command line and from one or more preset files.

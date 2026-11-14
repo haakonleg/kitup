@@ -4,6 +4,7 @@ import sys
 
 import pytest
 
+from kitup._utils import importer
 from kitup.context import set_current_context
 from kitup.registry import forget_module_prefix
 
@@ -14,6 +15,12 @@ def clear_ambient_context():
     set_current_context(None)
     yield
     set_current_context(None)
+
+
+@pytest.fixture(autouse=True)
+def isolate_pycache(monkeypatch):
+    """Keep project bytecode caches out of the real home directory."""
+    monkeypatch.setattr(importer, "_pycache_disabled", True)
 
 
 @pytest.fixture(autouse=True)

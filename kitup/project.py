@@ -10,7 +10,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Final
 
-from ._utils.importer import load_package_module
+from ._utils.importer import load_package_module, project_bytecode_cache
 from ._utils.paths import expand_path
 from .errors import KitupError, PresetError, ProjectError
 from .registry import Bundle, Module, discover_task_modules, forget_module_prefix, module_of, registered_modules
@@ -50,13 +50,18 @@ class Project:
 
 @contextmanager
 def on_project_path(root: str | Path) -> Iterator[None]:
-    """Temporarily make a project root importable as ``sys.path[0]``."""
+    """Temporarily make a project root importable as ``sys.path[0]``.
+
+    Project bytecode caches are redirected (or disabled) for the duration, so
+    importing project code never creates ``__pycache__`` folders in the project.
+    """
     path = str(expand_path(root, error=ProjectError, resolve=True))
     old_path = list(sys.path)
     sys.path.insert(0, path)
     importlib.invalidate_caches()
     try:
-        yield
+        with project_bytecode_cache():
+            yield
     finally:
         sys.path[:] = old_path
         importlib.invalidate_caches()
