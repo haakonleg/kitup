@@ -65,6 +65,22 @@ _BUNDLE_PATH_OPTION: Final = Option(
     metavar="DIR",
     help="load bundles from an extra directory (repeatable)",
 )
+_FILES_PATH_OPTION: Final = Option(
+    flags=("--files-path",),
+    dest="files_path",
+    default=(),
+    kind="append",
+    metavar="DIR",
+    help="load overlay files from an extra directory (repeatable)",
+)
+_MODULES_PATH_OPTION: Final = Option(
+    flags=("--modules-path",),
+    dest="modules_path",
+    default=(),
+    kind="append",
+    metavar="DIR",
+    help="load custom modules from an extra directory (repeatable)",
+)
 _VAR_FILE_OPTION: Final = Option(
     flags=("--var-file",),
     dest="var_file",
@@ -189,6 +205,8 @@ _APPLY_OPTIONS: Final = (
     _PROJECT_OPTION,
     _PRESET_OPTION,
     _BUNDLE_PATH_OPTION,
+    _FILES_PATH_OPTION,
+    _MODULES_PATH_OPTION,
     _VAR_FILE_OPTION,
     *_SELECTION_OPTIONS,
     *_RUN_OPTIONS,
@@ -198,13 +216,15 @@ _LIST_OPTIONS: Final = (
     _PROJECT_OPTION,
     _PRESET_OPTION,
     _BUNDLE_PATH_OPTION,
+    _FILES_PATH_OPTION,
+    _MODULES_PATH_OPTION,
     _VAR_FILE_OPTION,
     *_SELECTION_OPTIONS,
     *_COMMON_OPTIONS,
 )
 _CHECK_OPTIONS: Final = _LIST_OPTIONS
 _INIT_OPTIONS: Final = (_PROJECT_OPTION, _FORCE_OPTION, *_COMMON_OPTIONS)
-_LIST_MODULES_OPTIONS: Final = (_PROJECT_OPTION, *_COMMON_OPTIONS)
+_LIST_MODULES_OPTIONS: Final = (_PROJECT_OPTION, _MODULES_PATH_OPTION, *_COMMON_OPTIONS)
 _ALL_OPTIONS: Final = (*_APPLY_OPTIONS, *_LIST_OPTIONS, *_INIT_OPTIONS)
 
 _DEFAULTS: Final[dict[str, Any]] = {
@@ -286,6 +306,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             _project_root(args.project_dir),
             preset_paths=preset_paths,
             bundle_paths=args.bundle_path,
+            files_paths=args.files_path,
+            modules_paths=args.modules_path,
             extra_var_paths=args.var_file,
         )
         with on_project_path(project.root):
@@ -309,10 +331,11 @@ def _project_root(value: str | Path | None) -> Path:
 
 
 def _list_modules(args: Args, output: Output) -> int:
-    project = load_project_modules(_project_root(args.project_dir))
+    project = load_project_modules(_project_root(args.project_dir), modules_paths=args.modules_path)
     output.banner()
     output.write()
     output.write(f"project: {_project_label(project, verbose=args.verbose)}")
+    _write_paths(output, "modules path", project.module_roots, verbose=args.verbose)
     _print_module_group("built-in modules", discover_builtin_modules(), output, verbose=args.verbose, show_path=False)
     _print_module_group(
         "custom modules", discover_custom_modules(project), output, verbose=args.verbose, show_path=True
@@ -414,15 +437,11 @@ def _missing_bundles_message(project: Project) -> str:
 def _print_environment(project: Project, var_paths: Sequence[Path], output: Output, *, verbose: bool) -> None:
     output.write()
     output.write(f"project: {_project_label(project, verbose=verbose)}")
-    if project.bundle_roots:
-        bundle_paths = ", ".join(_path_label(path, verbose=verbose) for path in project.bundle_roots)
-        output.write(f"bundle path: {bundle_paths}")
-    if project.preset_paths:
-        preset_labels = ", ".join(_path_label(path, verbose=verbose) for path in project.preset_paths)
-        output.write(f"preset: {preset_labels}")
-    if var_paths:
-        var_labels = ", ".join(_path_label(path, verbose=verbose) for path in var_paths)
-        output.write(f"vars: {var_labels}")
+    _write_paths(output, "bundle path", project.bundle_roots, verbose=verbose)
+    _write_paths(output, "files path", project.files_roots, verbose=verbose)
+    _write_paths(output, "modules path", project.module_roots, verbose=verbose)
+    _write_paths(output, "preset", project.preset_paths, verbose=verbose)
+    _write_paths(output, "vars", var_paths, verbose=verbose)
 
 
 def _project_label(project: Project, *, verbose: bool) -> str:
@@ -431,6 +450,12 @@ def _project_label(project: Project, *, verbose: bool) -> str:
 
 def _path_label(path: Path, *, verbose: bool) -> str:
     return str(path) if verbose else path.name
+
+
+def _write_paths(output: Output, label: str, paths: Sequence[Path], *, verbose: bool) -> None:
+    if paths:
+        labels = ", ".join(_path_label(path, verbose=verbose) for path in paths)
+        output.write(f"{label}: {labels}")
 
 
 def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:

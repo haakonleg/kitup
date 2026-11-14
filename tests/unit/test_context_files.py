@@ -8,6 +8,7 @@ import pytest
 from kitup._utils.paths import OverlayPath, real_path
 from kitup.errors import TaskFailed
 from kitup.modules import files
+from kitup.project import Project
 from kitup.registry import Bundle
 
 from .helpers import local_sudo_context, make_context
@@ -53,6 +54,34 @@ def test_files_merges_the_overlay_over_the_bundle(tmp_path):
         "overlay-only.conf",
         "shared.conf",
     ]
+
+
+def test_files_merges_extra_overlay_roots_with_later_roots_winning(tmp_path):
+    extra_one = tmp_path / "extra-one"
+    extra_two = tmp_path / "extra-two"
+    write(extra_one / "base" / "shared.conf", "extra-one\n")
+    write(extra_two / "base" / "shared.conf", "extra-two\n")
+    write(extra_one / "base" / "one-only.conf", "one\n")
+    write(extra_two / "base" / "two-only.conf", "two\n")
+    context = make_context(tmp_path, project=Project(root=tmp_path, files_roots=(extra_one, extra_two)))
+    ctx, bundle_dir = project(tmp_path, context=context)
+    write(bundle_dir / "files" / "shared.conf", "bundle\n")
+    write(bundle_dir / "files" / "bundle-only.conf", "bundle\n")
+
+    assert (ctx.files / "shared.conf").read_text(encoding="utf-8") == "extra-two\n"
+    assert (ctx.files / "one-only.conf").read_text(encoding="utf-8") == "one\n"
+    assert (ctx.files / "two-only.conf").read_text(encoding="utf-8") == "two\n"
+    assert (ctx.files / "bundle-only.conf").read_text(encoding="utf-8") == "bundle\n"
+
+
+def test_files_extra_overlays_win_over_the_project_overlay(tmp_path):
+    extra = tmp_path / "extra"
+    write(extra / "base" / "shared.conf", "extra\n")
+    context = make_context(tmp_path, project=Project(root=tmp_path, files_roots=(extra,)))
+    ctx, _ = project(tmp_path, context=context)
+    write(tmp_path / "files" / "base" / "shared.conf", "project\n")
+
+    assert (ctx.files / "shared.conf").read_text(encoding="utf-8") == "extra\n"
 
 
 def test_files_uses_the_overlay_when_the_bundle_has_no_files_directory(tmp_path):

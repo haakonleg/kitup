@@ -38,11 +38,10 @@ my-machine/                     # project root
 At least one bundle is required by `apply` and `check`. `kitup init [DIR]`
 scaffolds a working project with the layout above.
 
-Bundles can also live outside the project. Pass `--bundle-path DIR` to scan an
-extra directory for bundle folders, exactly like `<root>/bundles`. The flag is
-repeatable, relative values resolve against the project root, and bundle ids
+Bundles, overlays, and custom modules can also live outside the project using
+`--bundle-path`, `--files-path`, and `--modules-path`. Bundle and module ids
 must be unique across all roots. See [Presets](presets.md) for reusable option
-sets stored under `presets/`.
+sets.
 
 ## Bundles
 
@@ -205,14 +204,16 @@ def install_base_packages():
 
 ### Resources
 
-Bundles keep resources in a `files/` directory. `ctx.files` returns a read-only
-path that merges that directory with the project's bundle-specific overlay:
+Bundles keep resources in `files/`. `ctx.files` merges that directory with the
+project overlay and any `--files-path` overlays:
 
-- `<bundle>/files/` — the bundle's own resources
-- `<root>/files/<bundle id>/` — project overlay, which wins on conflicts
+- `<bundle>/files/` — bundle resources
+- `<root>/files/<bundle id>/` — project overlay
+- `<files path>/<bundle id>/` — extra overlays
 
-Overlays may add new files as well as replace existing bundle files, and apply
-only to their bundle id, including external bundles.
+Overlays add or replace files for their bundle id, including external bundles.
+Extra overlays win over the project overlay, and all overlays win over the
+bundle's own files.
 
 Iterate the merged view to copy a resource tree, or read entries with `Path`
 methods such as `read_text()`:
@@ -242,8 +243,9 @@ Relative source paths passed to modules such as `files.copy()` and
 `template.file()` resolve like this:
 
 1. A bare name such as `"sshd.conf"`, or a `files/...` path such as
-   `"files/sshd.conf"`, resolves inside `ctx.files`, so
-   `<root>/files/<bundle id>/sshd.conf` wins over `<bundle>/files/sshd.conf`.
+   `"files/sshd.conf"`, resolves inside `ctx.files`, so extra overlays win over
+   `<root>/files/<bundle id>/sshd.conf`, which wins over
+   `<bundle>/files/sshd.conf`.
 2. Any other relative path, such as `"nested/app.conf"`, resolves against the
    bundle directory without overlays.
 3. Absolute paths and `~` are used as-is.
@@ -254,6 +256,10 @@ Reusable, idempotent operation code belongs in an optional top-level `modules/`
 directory. A module is a single file, or a folder with an `__init__.py`; either
 way it calls `module(...)` once. The optional second argument is a
 human-readable description shown by `kitup list-modules`.
+
+`--modules-path` adds a module directory like `<root>/modules`. External
+modules import as `modules.<name>`, so tasks use them normally. Module ids must
+be unique across all module directories.
 
 ```python
 # modules/motd.py
@@ -305,12 +311,10 @@ bundles are ignored. Var ids are file stems, so `vars/laptop.py` has the id
 `laptop`. Use `--include-vars` and `--exclude-vars` to select sources. See
 [CLI](cli.md).
 
-Pass `--var-file PATH` to load an extra Python var source. The flag is
-repeatable; relative values resolve against the project root, and absolute paths
-and `~` are accepted. Discovered `vars/*.py` files load first, then extra files
-in the order given, so later files replace same-named values. Extra files may
-use any filename, but `--include-vars` and `--exclude-vars` still select by file
-stem. Duplicate var ids are errors.
+`--var-file` loads extra Python var sources after discovered `vars/*.py` files,
+so later files replace same-named values. Extra files may use any filename, but
+`--include-vars` and `--exclude-vars` still select by file stem. Duplicate var
+ids are errors.
 
 ### Bundle vars
 
@@ -384,7 +388,7 @@ root:
   the `facts` shortcut: `from kitup import facts`.
 - `ctx.root` — the project root.
 - `ctx.project` — the discovered project: bundles, var paths, preset paths, and
-  external bundle roots.
+  external bundle, files, and module roots.
 - `ctx.bundle` — the bundle that owns the current task and its resources.
 - `ctx.run()` and `ctx.probe()` — command helpers.
 - `ctx.changed()`, `ctx.note()`, `ctx.memo()`, `ctx.skip()`, and `ctx.fail()` —

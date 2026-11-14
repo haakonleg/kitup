@@ -42,7 +42,9 @@ class Project:
     """A discovered project root and its bundles, variables, and presets.
 
     ``bundle_roots`` holds the resolved extra directories scanned through
-    ``--bundle-path``.
+    ``--bundle-path``. ``files_roots`` holds extra overlay directories from
+    ``--files-path``. ``module_roots`` holds extra custom module directories
+    from ``--modules-path``.
     """
 
     root: Path
@@ -51,6 +53,8 @@ class Project:
     preset_paths: tuple[Path, ...] = ()
     bundle_roots: tuple[Path, ...] = ()
     module_paths: tuple[Path, ...] = ()
+    files_roots: tuple[Path, ...] = ()
+    module_roots: tuple[Path, ...] = ()
 
 
 @contextmanager
@@ -77,12 +81,18 @@ def load_project(
     *,
     preset_paths: Sequence[Path] = (),
     bundle_paths: Sequence[str | Path] = (),
+    files_paths: Sequence[str | Path] = (),
+    modules_paths: Sequence[str | Path] = (),
     extra_var_paths: Sequence[str | Path] = (),
 ) -> Project:
     """Discover a project rooted at ``root`` (default: the current directory)."""
     project_root = _resolve_project_root(root)
 
-    bundle_roots = _unique_roots(_resolve_against(project_root, path, error=ProjectError) for path in bundle_paths)
+    bundle_roots = _resolve_roots(project_root, bundle_paths)
+    files_roots = _resolve_roots(project_root, files_paths)
+    module_roots = _resolve_roots(project_root, modules_paths)
+    _require_directories(files_roots, label="files")
+
     resolved_var_paths = tuple(_resolve_against(project_root, path, error=ProjectError) for path in extra_var_paths)
     for path in resolved_var_paths:
         if not path.is_file():
@@ -97,10 +107,11 @@ def load_project(
     _reject_shadowing_file(project_root, MODULES_DIR, label="modules")
     _reject_duplicate_bundle_ids(bundle_dirs)
     var_paths = (*discover_var_paths(project_root), *resolved_var_paths)
-    _reject_duplicate_var_ids(var_paths)
-    module_paths = discover_module_paths(project_root)
-    _purge_project_modules()
+    _reject_duplicate_ids(var_paths, label="var")
+    discovered_module_paths = _discover_project_modules(project_root, module_roots)
     with on_project_path(project_root):
+        if module_roots:
+            _install_modules_package(project_root, module_roots)
         bundles = _load_bundles(bundle_dirs, local_root=local_root)
     # Stable sort: equal priorities keep discovery (prefix, then name) order.
     bundles = tuple(sorted(bundles, key=lambda bundle: bundle.priority))
@@ -110,17 +121,23 @@ def load_project(
         var_paths=var_paths,
         preset_paths=tuple(_resolve_against(project_root, path, error=ProjectError) for path in preset_paths),
         bundle_roots=bundle_roots,
-        module_paths=module_paths,
+        files_roots=files_roots,
+        module_roots=module_roots,
+        module_paths=discovered_module_paths,
     )
 
 
-def load_project_modules(root: str | Path | None = None) -> Project:
+def load_project_modules(
+    root: str | Path | None = None,
+    *,
+    modules_paths: Sequence[str | Path] = (),
+) -> Project:
     """Discover a project's root and custom module paths without loading bundles."""
     project_root = _resolve_project_root(root)
+    module_roots = _resolve_roots(project_root, modules_paths)
     _reject_shadowing_file(project_root, MODULES_DIR, label="modules")
-    module_paths = discover_module_paths(project_root)
-    _purge_project_modules()
-    return Project(root=project_root, module_paths=module_paths)
+    discovered_module_paths = _discover_project_modules(project_root, module_roots)
+    return Project(root=project_root, module_roots=module_roots, module_paths=discovered_module_paths)
 
 
 def discover_custom_modules(project: Project) -> tuple[Module, ...]:
@@ -129,6 +146,8 @@ def discover_custom_modules(project: Project) -> tuple[Module, ...]:
     A module that does not call ``module(...)`` raises ``ProjectError``.
     """
     with on_project_path(project.root):
+        if project.module_roots:
+            _install_modules_package(project.root, project.module_roots)
         for path in project.module_paths:
             name = path.stem
             package = f"{MODULES_DIR}.{name}"
@@ -151,9 +170,9 @@ def discover_bundle_dirs(root: str | Path, *, extra_roots: Sequence[Path] = ()) 
     local_root = Path(root) / BUNDLES_DIR
     if local_root.is_dir():
         bundle_dirs.extend(_bundle_folders(local_root))
-    for directory in _unique_roots(extra_roots):
-        if not directory.is_dir():
-            raise ProjectError(f"bundle path is not a directory: {directory}")
+    roots = _unique_roots(extra_roots)
+    _require_directories(roots, label="bundle")
+    for directory in roots:
         bundle_dirs.extend(_bundle_folders(directory))
     return tuple(bundle_dirs)
 
@@ -163,10 +182,7 @@ def discover_var_paths(root: str | Path) -> tuple[Path, ...]:
     vars_dir = Path(root) / VARS_DIR
     if not vars_dir.is_dir():
         return ()
-    try:
-        entries = list(vars_dir.iterdir())
-    except OSError as exc:
-        raise ProjectError(f"cannot read var directory {vars_dir}: {exc}") from exc
+    entries = _read_entries(vars_dir, label="var")
 
     paths: list[Path] = []
     for path in sorted(entries, key=lambda item: item.name):
@@ -177,20 +193,26 @@ def discover_var_paths(root: str | Path) -> tuple[Path, ...]:
     return tuple(paths)
 
 
-def discover_module_paths(root: str | Path) -> tuple[Path, ...]:
-    """Return public custom module files and packages below ``<root>/modules``.
+def discover_module_paths(root: str | Path, *, extra_roots: Sequence[Path] = ()) -> tuple[Path, ...]:
+    """Return public custom module files and packages below ``<root>/modules`` and extra roots.
 
     Entries whose name starts with ``_`` or ``.`` are private and skipped. A
     public folder must be a package with an ``__init__.py`` that registers the
     module; a public file must be a ``.py`` file.
     """
-    modules_dir = Path(root) / MODULES_DIR
+    paths = _module_entries(Path(root) / MODULES_DIR)
+    roots = _unique_roots(extra_roots)
+    _require_directories(roots, label="modules")
+    for directory in roots:
+        paths.extend(_module_entries(directory))
+    return tuple(paths)
+
+
+def _module_entries(modules_dir: Path) -> list[Path]:
+    """Return public custom module entries directly below ``modules_dir``."""
     if not modules_dir.is_dir():
-        return ()
-    try:
-        entries = list(modules_dir.iterdir())
-    except OSError as exc:
-        raise ProjectError(f"cannot read module directory {modules_dir}: {exc}") from exc
+        return []
+    entries = _read_entries(modules_dir, label="module")
 
     paths: list[Path] = []
     for path in sorted(entries, key=lambda item: item.name):
@@ -209,7 +231,7 @@ def discover_module_paths(root: str | Path) -> tuple[Path, ...]:
                     f'add one that calls module("{path.name}") or prefix the folder with "_"'
                 )
             paths.append(path)
-    return tuple(paths)
+    return paths
 
 
 def resolve_preset(root: str | Path, value: str | Path) -> Path:
@@ -245,16 +267,33 @@ def _resolve_against(root: Path, value: str | Path, *, error: type[KitupError]) 
     return path if path.is_absolute() else root / path
 
 
+def _resolve_roots(root: Path, paths: Sequence[str | Path]) -> tuple[Path, ...]:
+    """Resolve extra roots against ``root`` and drop duplicates."""
+    return _unique_roots(_resolve_against(root, path, error=ProjectError) for path in paths)
+
+
+def _require_directories(roots: Sequence[Path], *, label: str) -> None:
+    """Reject extra roots that do not exist or are not directories."""
+    for directory in roots:
+        if not directory.is_dir():
+            raise ProjectError(f"{label} path is not a directory: {directory}")
+
+
 def _unique_roots(roots: Iterable[Path]) -> tuple[Path, ...]:
     """Return extra roots in order without repeating identical paths."""
     return tuple(dict.fromkeys(Path(root) for root in roots))
 
 
-def _bundle_folders(directory: Path) -> list[Path]:
+def _read_entries(directory: Path, *, label: str) -> list[Path]:
+    """Return a directory's entries, wrapping read errors as ``ProjectError``."""
     try:
-        entries = list(directory.iterdir())
+        return list(directory.iterdir())
     except OSError as exc:
-        raise ProjectError(f"cannot read bundle directory {directory}: {exc}") from exc
+        raise ProjectError(f"cannot read {label} directory {directory}: {exc}") from exc
+
+
+def _bundle_folders(directory: Path) -> list[Path]:
+    entries = _read_entries(directory, label="bundle")
     return sorted(
         (path for path in entries if path.is_dir() and not _ignored(path.name)),
         key=_bundle_sort_key,
@@ -296,13 +335,21 @@ def _reject_duplicate_bundle_ids(bundle_dirs: Sequence[Path]) -> None:
         seen[bundle_id] = folder
 
 
-def _reject_duplicate_var_ids(var_paths: Sequence[Path]) -> None:
+def _reject_duplicate_ids(paths: Sequence[Path], *, label: str) -> None:
     seen: dict[str, Path] = {}
-    for path in var_paths:
+    for path in paths:
         existing = seen.get(path.stem)
         if existing is not None:
-            raise ProjectError(f"duplicate var id {path.stem!r}: {existing} and {path}")
+            raise ProjectError(f"duplicate {label} id {path.stem!r}: {existing} and {path}")
         seen[path.stem] = path
+
+
+def _discover_project_modules(project_root: Path, module_roots: Sequence[Path]) -> tuple[Path, ...]:
+    """Discover custom modules, reject duplicate ids, and reset cached imports."""
+    paths = discover_module_paths(project_root, extra_roots=module_roots)
+    _reject_duplicate_ids(paths, label="module")
+    _purge_project_modules()
+    return paths
 
 
 def _load_bundles(bundle_dirs: Sequence[Path], *, local_root: Path) -> tuple[Bundle, ...]:
@@ -344,18 +391,56 @@ def _discover_bundle_var_paths(bundle: Bundle, folder: Path, *, bundle_id: str) 
         raise ProjectError(f"bundle {bundle_id!r}: {exc}") from exc
 
 
+def _synthetic_package(name: str, roots: Sequence[Path]) -> ModuleType:
+    """Register a synthetic package whose import search path is ``roots``."""
+    package = ModuleType(name)
+    package.__path__ = [str(root) for root in roots]
+    package.__package__ = name
+    package.__file__ = None
+    sys.modules[name] = package
+    return package
+
+
 def _load_external_bundle(folder: Path, package_name: str) -> ModuleType:
     """Load a bundle outside ``bundles/`` under a synthetic package name."""
     init = folder / "__init__.py"
     if init.is_file():
         return load_package_module(init, package_name)
+    return _synthetic_package(package_name, (folder,))
 
-    module = ModuleType(package_name)
-    module.__path__ = [str(folder)]
-    module.__package__ = package_name
-    module.__file__ = None
-    sys.modules[package_name] = module
-    return module
+
+def _install_modules_package(root: Path, extra_roots: Sequence[Path]) -> None:
+    """Make the project's and extra module directories importable as ``modules``."""
+    roots = [path for path in (root / MODULES_DIR, *extra_roots) if path.is_dir()]
+    if not roots:
+        return
+
+    existing = sys.modules.get(MODULES_DIR)
+    if existing is not None and hasattr(existing, "__path__"):
+        _extend_package_path(existing, roots)
+        return
+
+    init = root / MODULES_DIR / "__init__.py"
+    if init.is_file():
+        try:
+            package = load_package_module(init, MODULES_DIR)
+        except KitupError:
+            raise
+        except Exception as exc:
+            raise ProjectError(f"failed to import modules package {init}: {exc}") from exc
+    else:
+        package = _synthetic_package(MODULES_DIR, roots)
+    _extend_package_path(package, roots)
+
+
+def _extend_package_path(package: ModuleType, roots: Sequence[Path]) -> None:
+    """Append missing directories to a package's import search path."""
+    path = list(getattr(package, "__path__", ()))
+    for root in roots:
+        value = str(root)
+        if value not in path:
+            path.append(value)
+    package.__path__ = path
 
 
 def _ignored(name: str) -> bool:

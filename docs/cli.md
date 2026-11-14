@@ -60,12 +60,21 @@ passed.
   names resolve under `presets/`; absolute paths are used as-is. Repeatable:
   later files win. See [Presets](presets.md).
 - `--bundle-path DIR` — scan an extra directory for bundle folders, in addition
-  to `<root>/bundles`. Relative values resolve against the project root;
-  absolute paths and `~` are accepted. Repeatable; values are not comma-split.
+  to `<root>/bundles`. Repeatable. Relative values resolve against the project
+  root; absolute paths and `~` are accepted.
+- `--files-path DIR` — add an overlay directory like `<root>/files`. Each
+  `<bundle id>/` subdirectory overlays that bundle. Repeatable; extra paths win
+  over `<root>/files` and the bundle's `files/`, with later paths winning over
+  earlier ones. Relative paths resolve against the project root; absolute paths
+  and `~` are accepted.
+- `--modules-path DIR` — add a module directory like `<root>/modules`.
+  Repeatable. Modules import as `modules.<name>`, and ids must be unique.
+  Relative paths resolve against the project root; absolute paths and `~` are
+  accepted.
 - `--var-file PATH` — load an extra project-level Python var file after the
-  project's `vars/*.py` files. Relative values resolve against the project root;
-  absolute paths and `~` are accepted. Repeatable; values are not comma-split.
-  The file must exist and end in `.py`.
+  project's `vars/*.py` files. Repeatable. Relative values resolve against the
+  project root; absolute paths and `~` are accepted. The file must exist and end
+  in `.py`.
 
 ### Selection
 
@@ -99,7 +108,7 @@ in the plan but runs nothing.
 
 ### Output
 
-- `-v`, `--verbose` — show project, vars, and task details.
+- `-v`, `--verbose` — show project, source paths, vars, and task details.
 - `-c`, `--no-color` — disable colors.
 - `-V`, `--version` — print the version.
 
@@ -119,8 +128,9 @@ Options can come from the command line and from one or more preset files.
 Values from the command line win over preset values. Among multiple presets,
 later files win. List options replace the previous value rather than merging it.
 
-`--bundle-path` and `--var-file` may also be set from a preset. Their relative
-values resolve against the project root, not the preset file.
+`--bundle-path`, `--files-path`, `--modules-path`, and `--var-file` may also be
+set from a preset. Their relative values resolve against the project root, not
+the preset file.
 
 ## Examples
 
@@ -129,12 +139,15 @@ kitup init my-machine
 kitup check my-machine
 kitup list my-machine -v
 kitup list-modules my-machine -v
+kitup list-modules my-machine --modules-path ~/shared/kitup-modules
 kitup apply my-machine -n
 kitup apply my-machine --preset laptop
 kitup apply my-machine -t packages,docs
 kitup apply my-machine -b base,workstation -n
 kitup apply my-machine -E laptop
 kitup apply my-machine --bundle-path ~/shared/kitup-bundles
+kitup apply my-machine --files-path ~/shared/kitup-files
+kitup apply my-machine --modules-path ~/shared/kitup-modules
 kitup apply my-machine --var-file ~/.config/kitup/secrets.py
 ```
 

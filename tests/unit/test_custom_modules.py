@@ -253,6 +253,75 @@ def test_discover_custom_modules_imports_them(tmp_path):
     assert "modules.mytool" in sys.modules
 
 
+def test_modules_path_discovers_external_modules(tmp_path):
+    root = tmp_path / "machine"
+    root.mkdir()
+    external = tmp_path / "external-modules"
+    write(external / "mytool.py", SINGLE_FILE)
+    write(external / "webserver" / "__init__.py", PACKAGE_INIT)
+
+    project = load_project(root, modules_paths=[external])
+    registered = discover_custom_modules(project)
+
+    assert [path.stem for path in project.module_paths] == ["mytool", "webserver"]
+    assert [entry.name for entry in registered] == ["mytool", "webserver"]
+    assert importlib.import_module("modules.mytool") is not None
+
+
+def test_project_modules_init_is_kept_when_extra_roots_are_added(tmp_path):
+    root = tmp_path / "machine"
+    write(root / "modules" / "__init__.py", "VALUE = 'project init'\n")
+    write(root / "modules" / "local.py", 'from kitup import module\n\nmodule("local")\n')
+    external = tmp_path / "external-modules"
+    write(external / "external.py", 'from kitup import module\n\nmodule("external")\n')
+
+    project = load_project(root, modules_paths=[external])
+    registered = discover_custom_modules(project)
+
+    assert [entry.name for entry in registered] == ["external", "local"]
+    assert importlib.import_module("modules").VALUE == "project init"
+
+
+def test_bundle_tasks_can_import_external_modules(tmp_path):
+    external = tmp_path / "external-modules"
+    write(external / "mytool.py", MYTOOL)
+    root = tmp_path / "machine"
+    write(root / "bundles" / "app" / "__init__.py", 'from kitup import bundle\n\nbundle("App")\n')
+    write(root / "bundles" / "app" / "tasks.py", TASKS)
+
+    project = load_project(root, modules_paths=[external])
+    task = project.bundles[0].tasks[0]
+    context = make_context(root, project=project)
+    context.begin_task(task)
+    task.func()
+
+    assert (root / "out.txt").read_text(encoding="utf-8") == "hello\n"
+    assert [call.action for call in context.calls] == ["files.file", "mytool.install"]
+
+
+def test_external_package_modules_support_relative_imports(tmp_path):
+    external = tmp_path / "external-modules"
+    write(external / "webserver" / "__init__.py", PACKAGE_INIT)
+    write(
+        external / "webserver" / "nginx.py",
+        "from ._helper import VALUE\n\n"
+        "from kitup.context import current_context\n\n\n"
+        "def install():\n"
+        "    ctx = current_context()\n"
+        "    return ctx.changed(summary=VALUE)\n",
+    )
+    write(external / "webserver" / "_helper.py", "VALUE = 'external helper'\n")
+    root = tmp_path / "machine"
+    root.mkdir()
+
+    project = load_project(root, modules_paths=[external])
+    discover_custom_modules(project)
+    nginx = importlib.import_module("modules.webserver.nginx")
+    task_context(root)
+
+    assert nginx.install().summary == "external helper"
+
+
 def test_project_requires_module_registration(tmp_path):
     build_project(tmp_path, {"mytool.py": "def install():\n    pass\n"})
 

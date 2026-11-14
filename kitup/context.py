@@ -127,10 +127,12 @@ class TaskContext:
 
     @property
     def files(self) -> OverlayPath:
-        """Return the merged view of the bundle's ``files`` directory and its overlay.
+        """Return the merged view of the bundle's ``files`` directory and its overlays.
 
-        The project's ``<root>/files/<bundle id>/`` directory overrides the
-        bundle's own ``files/`` directory per entry. The view is read-only, and
+        The project's ``<root>/files/<bundle id>/`` directory and any
+        ``--files-path`` overlays override the bundle's own ``files/`` directory
+        per entry. Extra overlays win over the project's own overlay, and later
+        ``--files-path`` values win over earlier ones. The view is read-only, and
         its path string is a synthetic prefix that never exists on disk; pass
         entries to module functions such as ``files.copy()`` or read them with
         ``Path`` methods.
@@ -138,8 +140,12 @@ class TaskContext:
         bundle = self.bundle
         if self._bundle_path is None or not bundle.id:
             raise TaskFailed(f"no files for bundle {bundle.id!r}")
-        overlay = self.root / FILES_DIR / bundle.id
-        roots = tuple(root for root in (overlay, self._bundle_path / FILES_DIR) if root.is_dir())
+        candidates = (
+            *(root / bundle.id for root in reversed(self.project.files_roots)),
+            self.root / FILES_DIR / bundle.id,
+            self._bundle_path / FILES_DIR,
+        )
+        roots = tuple(root for root in candidates if root.is_dir())
         if not roots:
             raise TaskFailed(f"no files for bundle {bundle.id!r}")
         return OverlayPath.merged(roots, prefix=f"/@kitup-merged/{bundle.id}")

@@ -171,10 +171,11 @@ selection let you apply just the part of a machine you are working on.
 
 ### Shared bundles and extra sources
 
-Bundles can live outside the project with `--bundle-path`, and extra variable
-files can be loaded with `--var-file`. Project `files/<bundle_id>/` overlays can
-override or add resources for that bundle. Absolute paths and `~` are accepted
-anywhere kitup takes a path.
+Bundles, overlays, and custom modules can live outside the project with
+`--bundle-path`, `--files-path`, and `--modules-path`. Extra variable files can
+be loaded with `--var-file`. Project `files/<bundle_id>/` overlays can override
+or add resources for that bundle. Absolute paths and `~` are accepted anywhere
+kitup takes a path.
 
 ### Task results and side effects
 

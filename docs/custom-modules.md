@@ -9,8 +9,8 @@ themselves, inspect the current state before changing anything, honor
 
 ## Create a module
 
-Custom modules live in a top-level `modules/` directory. A module is either a
-single file or a folder.
+Custom modules live in the top-level `modules/` directory or a directory
+supplied by `--modules-path DIR`. A module is a single file or a folder.
 
 A single-file module calls `module()` at the top of the file. This one adds SSH
 key generation, which the built-in modules do not cover:

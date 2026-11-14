@@ -65,11 +65,13 @@ Options that are valid for another command are ignored without a warning, which
 lets a preset be shared between `apply`, `list`, and `check`.
 
 Presets can set the same options as the command line, including
-`--bundle-path` and `--var-file`:
+`--bundle-path`, `--files-path`, `--modules-path`, and `--var-file`:
 
 ```text
 # my-machine/presets/shared
 --bundle-path shared/bundles
+--files-path shared/files
+--modules-path shared/modules
 --var-file secrets.py
 ```
 

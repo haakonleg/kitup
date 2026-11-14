@@ -191,6 +191,17 @@ def test_parse_known_args_raises_on_missing_value(parser):
         parser.parse_known_args(["apply", "--preset"])
 
 
+def test_help_lists_source_path_options(parser, capsys):
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["apply", "--help"])
+
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "--bundle-path" in output
+    assert "--files-path" in output
+    assert "--modules-path" in output
+
+
 def test_help_lists_commands(capsys):
     parser = Parser(
         prog="demo",

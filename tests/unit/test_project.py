@@ -594,6 +594,102 @@ def test_bundle_paths_must_exist_and_be_directories(tmp_path):
         load_project(root, bundle_paths=[target])
 
 
+def test_files_paths_resolve_relative_to_the_project_root(tmp_path):
+    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
+    external = tmp_path / "machine" / "shared" / "files"
+    external.mkdir(parents=True)
+
+    relative = load_project(root, files_paths=["shared/files"])
+    absolute = load_project(root, files_paths=[external])
+
+    for project in (relative, absolute):
+        assert project.files_roots == (external,)
+
+    duplicate = load_project(root, files_paths=[external, external])
+    assert duplicate.files_roots == (external,)
+
+
+def test_files_paths_must_exist_and_be_directories(tmp_path):
+    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
+
+    with pytest.raises(ProjectError, match="files path is not a directory"):
+        load_project(root, files_paths=["missing"])
+
+    target = root / "not-a-directory"
+    target.write_text("", encoding="utf-8")
+    with pytest.raises(ProjectError, match="files path is not a directory"):
+        load_project(root, files_paths=[target])
+
+
+def test_modules_paths_resolve_relative_to_the_project_root(tmp_path):
+    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
+    external = tmp_path / "machine" / "shared" / "modules"
+    write(external / "extra.py", 'from kitup import module\n\nmodule("extra")\n')
+
+    relative = load_project(root, modules_paths=["shared/modules"])
+    absolute = load_project(root, modules_paths=[external])
+
+    for project in (relative, absolute):
+        assert project.module_roots == (external,)
+        assert [path.stem for path in project.module_paths] == ["extra"]
+
+    duplicate = load_project(root, modules_paths=[external, external])
+    assert duplicate.module_roots == (external,)
+    assert [path.stem for path in duplicate.module_paths] == ["extra"]
+
+
+def test_load_project_modules_accepts_modules_paths(tmp_path):
+    root = make_project(tmp_path / "machine")
+    external = tmp_path / "external-modules"
+    write(external / "extra.py", 'from kitup import module\n\nmodule("extra")\n')
+
+    project = load_project_modules(root, modules_paths=[external])
+
+    assert project.module_roots == (external,)
+    assert [path.stem for path in project.module_paths] == ["extra"]
+
+
+def test_modules_paths_must_exist_and_be_directories(tmp_path):
+    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
+
+    with pytest.raises(ProjectError, match="modules path is not a directory"):
+        load_project(root, modules_paths=["missing"])
+
+    target = root / "not-a-directory"
+    target.write_text("", encoding="utf-8")
+    with pytest.raises(ProjectError, match="modules path is not a directory"):
+        load_project(root, modules_paths=[target])
+
+
+def test_duplicate_module_ids_across_roots_are_rejected(tmp_path):
+    root = make_project(
+        tmp_path / "machine",
+        modules={"tool.py": 'from kitup import module\n\nmodule("tool")\n'},
+    )
+    external = tmp_path / "external-modules"
+    write(external / "tool.py", 'from kitup import module\n\nmodule("tool")\n')
+
+    with pytest.raises(ProjectError, match=r"duplicate module id 'tool'.*modules/tool.py.*tool.py"):
+        load_project(root, modules_paths=[external])
+
+
+def test_files_and_modules_paths_expand_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    files = home / "files"
+    files.mkdir()
+    modules = home / "modules"
+    write(modules / "extra.py", 'from kitup import module\n\nmodule("extra")\n')
+    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
+
+    project = load_project(root, files_paths=["~/files"], modules_paths=["~/modules"])
+
+    assert project.files_roots == (files,)
+    assert project.module_roots == (modules,)
+    assert [path.stem for path in project.module_paths] == ["extra"]
+
+
 def test_bundle_paths_and_extra_var_paths_expand_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()

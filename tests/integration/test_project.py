@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ..helpers import make_project
+from ..helpers import make_project, write
 from .helpers import run_kitup
 
 pytestmark = pytest.mark.integration
@@ -105,6 +105,58 @@ def test_bundle_path_loads_external_bundles(tmp_path: Path, capsys: pytest.Captu
     out = capsys.readouterr().out
     assert "Base task" in out
     assert "Extra task" in out
+
+
+def test_files_and_modules_paths_load_external_sources(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = make_project(
+        tmp_path / "machine",
+        bundles={
+            "base": {
+                "tasks.py": """
+                from kitup import ctx, task
+                from modules import external
+
+                @task
+                def show():
+                    result = external.install()
+                    content = (ctx.files / "message.txt").read_text().strip()
+                    ctx.changed(summary=f"{result.summary}; {content}")
+                """
+            }
+        },
+    )
+    external_files = tmp_path / "external-files"
+    write(external_files / "base" / "message.txt", "external files\n")
+    external_modules = tmp_path / "external-modules"
+    write(
+        external_modules / "external.py",
+        """
+        from kitup import module
+        from kitup.context import current_context
+
+        module("external")
+
+
+        def install():
+            ctx = current_context()
+            return ctx.changed(summary="external module")
+        """,
+    )
+
+    assert (
+        run_kitup(
+            "apply",
+            root,
+            "--files-path",
+            str(external_files),
+            "--modules-path",
+            str(external_modules),
+            "--dry-run",
+        )
+        == 0
+    )
+
+    assert "external module; external files" in capsys.readouterr().out
 
 
 def test_var_file_adds_values_after_discovered_vars(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

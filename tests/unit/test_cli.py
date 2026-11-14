@@ -1032,6 +1032,137 @@ def test_bundle_path_option_can_come_from_a_preset(tmp_path, capsys):
     assert "bundle: extra" in capsys.readouterr().out
 
 
+def make_external_module(root, name):
+    write(
+        root / f"{name}.py",
+        f"from kitup import module\nfrom kitup.context import current_context\n\n"
+        f'module("{name}")\n\n\n'
+        "def install():\n"
+        "    ctx = current_context()\n"
+        '    return ctx.changed(summary="external module")\n',
+    )
+    return root / f"{name}.py"
+
+
+def test_files_path_option_loads_external_overlays_for_apply(tmp_path, capsys):
+    root = make_project(
+        tmp_path / "machine",
+        bundles={
+            "base": """
+            from kitup import ctx, task
+
+            @task
+            def show():
+                ctx.changed(summary=(ctx.files / "message.txt").read_text().strip())
+            """
+        },
+    )
+    external = tmp_path / "external-files"
+    write(external / "base" / "message.txt", "from external files\n")
+
+    code = cli.main(["apply", str(root), "--files-path", str(external), "-n", "--no-color"])
+
+    assert code == 0
+    assert "from external files" in capsys.readouterr().out
+
+
+def test_modules_path_option_loads_external_modules_for_apply_check_and_list_modules(tmp_path, capsys):
+    root = make_project(
+        tmp_path / "machine",
+        bundles={
+            "base": """
+            from kitup import ctx, task
+            from modules import external
+
+            @task
+            def show():
+                result = external.install()
+                ctx.changed(summary=f"{result.summary}; used external")
+            """
+        },
+    )
+    external = tmp_path / "external-modules"
+    make_external_module(external, "external")
+
+    code = cli.main(["apply", str(root), "--modules-path", str(external), "-n", "--no-color"])
+
+    assert code == 0
+    assert "external module; used external" in capsys.readouterr().out
+
+    assert cli.main(["check", str(root), "--modules-path", str(external), "--no-color"]) == 0
+    capsys.readouterr()
+
+    code = cli.main(["list-modules", str(root), "--modules-path", str(external), "--no-color"])
+
+    assert code == 0
+    assert "  - external" in capsys.readouterr().out
+
+
+def test_files_and_modules_path_options_can_come_from_a_preset(tmp_path, capsys):
+    external_files = tmp_path / "external-files"
+    write(external_files / "base" / "message.txt", "preset files\n")
+    external_modules = tmp_path / "external-modules"
+    make_external_module(external_modules, "external")
+    root = make_project(
+        tmp_path / "machine",
+        bundles={
+            "base": """
+            from kitup import ctx, task
+            from modules import external
+
+            @task
+            def show():
+                result = external.install()
+                content = (ctx.files / "message.txt").read_text().strip()
+                ctx.changed(summary=f"{result.summary}; {content}")
+            """
+        },
+        preset={"shared": f"--files-path {external_files}\n--modules-path {external_modules}\n"},
+    )
+
+    code = cli.main(["apply", str(root), "--preset", "shared", "-n", "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "external module; preset files" in out
+
+
+def test_verbose_output_shows_files_and_modules_paths(tmp_path, capsys):
+    root = make_project(tmp_path / "machine", bundles={"base": task_source("run")})
+    external_files = tmp_path / "external-files"
+    external_files.mkdir()
+    external_modules = tmp_path / "external-modules"
+    external_modules.mkdir()
+
+    code = cli.main(
+        [
+            "list",
+            str(root),
+            "--files-path",
+            str(external_files),
+            "--modules-path",
+            str(external_modules),
+            "-v",
+            "--no-color",
+        ]
+    )
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert f"files path: {external_files}" in out
+    assert f"modules path: {external_modules}" in out
+
+
+def test_missing_files_or_modules_path_is_exit_2(tmp_path, capsys):
+    root = make_project(tmp_path / "machine", bundles={"base": task_source("run")})
+
+    assert cli.main(["list", str(root), "--files-path", "missing", "--no-color"]) == 2
+    assert "files path is not a directory" in capsys.readouterr().err
+
+    assert cli.main(["list", str(root), "--modules-path", "missing", "--no-color"]) == 2
+    assert "modules path is not a directory" in capsys.readouterr().err
+
+
 def test_var_file_option_accepts_absolute_and_relative_paths(tmp_path, capsys):
     root = make_project(
         tmp_path / "machine",
