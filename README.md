@@ -11,6 +11,9 @@ language.
 kitup is inspired by Ansible but has a smaller scope and a more expressive,
 Python-centric design. It currently manages local machines only.
 
+Runs are fast, too: a full apply usually finishes before Ansible has finished
+gathering its facts. Roughly 100x faster, give or take a sudo prompt.
+
 ## Install
 
 kitup requires Python 3.14 or newer.
