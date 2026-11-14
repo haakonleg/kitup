@@ -797,6 +797,7 @@ def test_tag_filtering_selects_the_registering_task_and_its_side_effect(tmp_path
 
 def test_side_effects_use_the_registering_bundle_context(tmp_path):
     seen = []
+    (tmp_path / "files").mkdir()
     bundle = Bundle("base", path=tmp_path)
 
     def refresh():

@@ -6,12 +6,6 @@ Idempotent file, directory, symlink, file-move, and text-file management.
 from kitup.modules import files
 ```
 
-Parent directories are not created automatically; use `directory()` first.
-Recursive copies are left to task code using `directory()`, `copy()`, and
-`symlink()`.
-
-For remote file download over HTTP(S), use the [download](download.md) module.
-
 ## `file(path, *, state="present", content=None, mode=None, owner=None, group=None, sudo=False)`
 
 Ensure a text file exists with optional content, or is absent.
@@ -59,7 +53,7 @@ refused.
 
 ```python
 files.copy("example.conf", "/etc/example.conf", sudo=True)
-files.copy("dotfiles/.zshrc", "~/.zshrc")
+files.copy("files/dotfiles/.zshrc", "~/.zshrc")
 files.copy("example.conf", "/etc/example.d/", sudo=True)
 ```
 

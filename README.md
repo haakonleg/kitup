@@ -87,7 +87,7 @@ def harden_ssh():
     """Write the hardened SSH configuration."""
     files.file(
         "/etc/ssh/sshd_config.d/99-kitup.conf",
-        content=ctx.bundle.read_resource("files/sshd.conf"),
+        content=(ctx.files / "sshd.conf").read_text(encoding="utf-8"),
         mode=0o644,
         sudo=True,
     )
@@ -99,9 +99,9 @@ def enable_firewall():
     systemd.unit("firewalld.service", enabled=True, state="started")
 ```
 
-The optional project `files/` tree overlays bundle resources. Relative source
-paths check `files/<bundle_id>/<path>`, then `files/<path>`, then the bundle's
-own resolution, so project files can override or add bundle files.
+The optional project `files/<bundle_id>/` tree overlays a bundle's own `files/`
+directory, so project files can override or add bundle resources. `ctx.files`
+returns the merged view.
 
 Variable files hold machine-specific values. Later files replace same-named
 values:
@@ -169,8 +169,8 @@ selection let you apply just the part of a machine you are working on.
 ### Shared bundles and extra sources
 
 Bundles can live outside the project with `--bundle-path`, and extra variable
-files can be loaded with `--var-file`. Project `files/` overlays can override or
-add resources globally or for one bundle id. Absolute paths and `~` are accepted
+files can be loaded with `--var-file`. Project `files/<bundle_id>/` overlays can
+override or add resources for that bundle. Absolute paths and `~` are accepted
 anywhere kitup takes a path.
 
 ### Task results and side effects

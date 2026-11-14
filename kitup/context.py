@@ -11,7 +11,7 @@ from types import FrameType
 from typing import Any, Final, Never, cast, overload
 
 from ._privileged.client import PrivilegedWorker
-from ._utils.paths import expand_path
+from ._utils.paths import OverlayPath, expand_path, real_path
 from ._utils.validation import require_text
 from .commands import CommandRunner, raise_for_status
 from .errors import SkipTask, TaskFailed
@@ -125,27 +125,42 @@ class TaskContext:
         """Directory of the bundle owning the current task."""
         return self._bundle_path
 
-    def resolve_source(self, path: str | Path) -> Path:
-        """Resolve a source path against the project and current bundle.
+    @property
+    def files(self) -> OverlayPath:
+        """Return the merged view of the bundle's ``files`` directory and its overlay.
 
-        Absolute paths are returned unchanged. Relative paths are checked first
-        under ``files/<bundle id>/`` and then under the project's ``files/``
-        directory. A missing overlay falls back to the bundle: a bare name to
-        the bundle's ``files`` directory, and other relative paths to the
-        bundle directory.
+        The project's ``<root>/files/<bundle id>/`` directory overrides the
+        bundle's own ``files/`` directory per entry. The view is read-only, and
+        its path string is a synthetic prefix that never exists on disk; pass
+        entries to module functions such as ``files.copy()`` or read them with
+        ``Path`` methods.
         """
-        source = expand_path(path, error=TaskFailed)
+        bundle = self.bundle
+        if self._bundle_path is None or not bundle.id:
+            raise TaskFailed(f"no files for bundle {bundle.id!r}")
+        overlay = self.root / FILES_DIR / bundle.id
+        roots = tuple(root for root in (overlay, self._bundle_path / FILES_DIR) if root.is_dir())
+        if not roots:
+            raise TaskFailed(f"no files for bundle {bundle.id!r}")
+        return OverlayPath.merged(roots, prefix=f"/@kitup-merged/{bundle.id}")
+
+    def resolve_source(self, path: str | Path) -> Path:
+        """Resolve a module source path against the bundle's merged files view.
+
+        Absolute paths are returned unchanged. A bare name or a ``files/...``
+        path resolves inside :attr:`files`, so project overlays apply. Any other
+        relative path resolves against the bundle directory without overlays.
+        """
+        source = expand_path(real_path(path), error=TaskFailed)
         if source.is_absolute():
             return source
         if self._bundle_path is None:
             raise TaskFailed(f"cannot resolve relative source path: {source}")
-        project_files = self.root / FILES_DIR
-        for overlay in (project_files / self.bundle.id, project_files):
-            candidate = overlay / source
-            if candidate.exists():
-                return candidate
-        if len(source.parts) == 1:
-            return self._bundle_path / FILES_DIR / source
+        parts = source.parts
+        if len(parts) == 1:
+            return real_path(self.files / source)
+        if parts and parts[0] == FILES_DIR:
+            return real_path(self.files / Path(*parts[1:]))
         return self._bundle_path / source
 
     def begin_task(self, task: Task, *, is_side_effect: bool = False) -> None:

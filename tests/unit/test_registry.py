@@ -599,8 +599,7 @@ def test_bundle_paths_and_resources(tmp_path):
     bundle = Bundle("Base", path=resource_root)
 
     assert bundle.path == resource_root
-    assert bundle.resource_path("files", "example.conf") == resource
-    assert bundle.read_resource("files", "example.conf") == "value = 1\n"
+    assert (bundle.path / "files" / "example.conf").read_text(encoding="utf-8") == "value = 1\n"
 
 
 def test_unknown_user_in_bundle_path_is_a_bundle_error():

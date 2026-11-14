@@ -26,7 +26,6 @@ my-machine/                     # project root
 │   └── desktop/                # package module; calls module("desktop")
 │       └── __init__.py
 ├── files/                      # optional project-level source overlays
-│   ├── common.conf             # global override
 │   └── base/                   # overrides for the base bundle
 │       └── sshd.conf
 ├── vars/
@@ -206,41 +205,48 @@ def install_base_packages():
 
 ### Resources
 
-Bundles keep resources in a `files/` directory, which is also available through
-`ctx.bundle`:
+Bundles keep resources in a `files/` directory. `ctx.files` returns a read-only
+path that merges that directory with the project's bundle-specific overlay:
+
+- `<bundle>/files/` — the bundle's own resources
+- `<root>/files/<bundle id>/` — project overlay, which wins on conflicts
+
+Overlays may add new files as well as replace existing bundle files, and apply
+only to their bundle id, including external bundles.
+
+Iterate the merged view to copy a resource tree, or read entries with `Path`
+methods such as `read_text()`:
 
 ```python
-content = ctx.bundle.read_resource("files/example.conf")
-source = ctx.bundle.resource_path("files/dotfiles")
+from pathlib import Path
+
+from kitup.modules import files
+
+
+def install_tree(source: Path, target: Path) -> None:
+    for entry in source.iterdir():
+        destination = target / entry.name
+        if entry.is_symlink():
+            files.symlink(entry.readlink(), destination)
+        elif entry.is_dir():
+            files.directory(destination)
+            install_tree(entry, destination)
+        else:
+            files.copy(entry, destination)
+
+
+install_tree(ctx.files / "dotfiles", Path.home())
 ```
 
-The project root may also contain a `files/` tree that overlays bundle sources.
-Relative paths passed to modules such as `files.copy()` and `template.file()`
-are resolved in this order:
+Relative source paths passed to modules such as `files.copy()` and
+`template.file()` resolve like this:
 
-1. `<root>/files/<bundle id>/<source>` — bundle-specific override
-2. `<root>/files/<source>` — global override
-3. Bundle fallback:
-   - a bare name resolves under the bundle's `files/` directory
-   - any other relative path resolves against the bundle directory
-
-The source path is used literally in the overlay paths. For a task in bundle
-`base`, `"sshd.conf"` checks `<root>/files/base/sshd.conf`, then
-`<root>/files/sshd.conf`, then `<bundle>/files/sshd.conf`. A source such as
-`"nested/app.conf"` checks `<root>/files/base/nested/app.conf`, then
-`<root>/files/nested/app.conf`, then `<bundle>/nested/app.conf`.
-
-An explicit `files/...` source is also literal, so `"files/nested/app.conf"`
-checks `<root>/files/base/files/nested/app.conf`, then
-`<root>/files/files/nested/app.conf`, then `<bundle>/files/nested/app.conf`.
-
-Overlays may add new files as well as replace existing bundle files. Global
-overrides apply to every bundle; bundle-specific overrides apply only to their
-bundle id, including external bundles. Absolute paths and `~` are used as-is.
-`ctx.bundle.read_resource()` and `ctx.bundle.resource_path()` remain bundle-only
-and do not consult project overlays. Not every module path uses this lookup; for
-example, `dnf.repository()` and `dnf.rpm()` treat local inputs as ordinary paths
-relative to the current working directory.
+1. A bare name such as `"sshd.conf"`, or a `files/...` path such as
+   `"files/sshd.conf"`, resolves inside `ctx.files`, so
+   `<root>/files/<bundle id>/sshd.conf` wins over `<bundle>/files/sshd.conf`.
+2. Any other relative path, such as `"nested/app.conf"`, resolves against the
+   bundle directory without overlays.
+3. Absolute paths and `~` are used as-is.
 
 ## Custom modules
 

@@ -7,7 +7,7 @@ from kitup.modules import files
 @task(tags={"dotfiles"})
 def install_dotfiles():
     """Install shell and editor dotfiles."""
-    _copy_dotfiles(ctx.bundle.resource_path("files/dotfiles"), Path.home())
+    _copy_dotfiles(ctx.files / "dotfiles", Path.home())
 
 
 def _copy_dotfiles(source: Path, target: Path) -> None:

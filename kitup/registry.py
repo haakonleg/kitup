@@ -313,16 +313,6 @@ class Bundle:
         self._add_task(_make_task_spec(func, name, tags, description, declared_in=None))
         return func
 
-    def resource_path(self, *parts: str) -> Path:
-        """Resolve a file below the bundle folder."""
-        if self.path is None:
-            raise BundleError(f"bundle {self.name!r} has no resource path")
-        return self.path.joinpath(*parts)
-
-    def read_resource(self, *parts: str) -> str:
-        """Read a UTF-8 resource file below the bundle folder."""
-        return self.resource_path(*parts).read_text(encoding="utf-8")
-
 
 def bundle(
     name: str | None = None,

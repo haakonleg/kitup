@@ -6,16 +6,13 @@ import json
 import os
 import subprocess
 import zipfile
-from pathlib import Path
 
 import pytest
 
 from kitup.commands import CommandRunner
 from kitup.modules import command, decompress, dnf, download, files, git, pip, podman, sysctl, template, users, uv
 from kitup.privileges import PrivilegeManager
-from kitup.registry import Bundle
 
-from ..helpers import write
 from .helpers import FakeCommandRunner, FakeSudo, argvs, make_context, plain_output, response, serve_http
 
 
@@ -35,98 +32,6 @@ def context(tmp_path, *, command_runner=None, dry_run=False, sudo=None):
         sudo=sudo or FakeSudo(),
         output=plain_output(),
     )
-
-
-def test_resolve_source_expands_home(tmp_path, home):
-    bundle_dir = tmp_path / "bundles" / "base"
-    bundle_dir.mkdir(parents=True)
-    bundle = Bundle("base", path=bundle_dir)
-    bundle.task("Task")(lambda: None)
-    ctx = context(tmp_path)
-    ctx.begin_task(bundle.tasks[0])
-
-    assert ctx.resolve_source("~/config") == home / "config"
-    assert ctx.resolve_source("/srv/config") == Path("/srv/config")
-    assert ctx.resolve_source("config") == bundle_dir / "files" / "config"
-
-
-def test_resolve_source_prefers_project_overlays_then_bundle(tmp_path):
-    bundle_dir = tmp_path / "bundles" / "base"
-    project_files = tmp_path / "files"
-    project_bundle = project_files / "base"
-    bundle_files = bundle_dir / "files"
-
-    write(project_bundle / "shared.conf", "bundle-specific\n")
-    write(project_files / "shared.conf", "global\n")
-    write(bundle_files / "shared.conf", "bundle\n")
-    write(project_files / "global.conf", "global\n")
-    write(bundle_files / "global.conf", "bundle\n")
-    write(bundle_files / "bundle.conf", "bundle\n")
-    write(project_bundle / "nested" / "specific.conf", "bundle-specific\n")
-    write(project_files / "nested" / "specific.conf", "global\n")
-    write(bundle_dir / "nested" / "specific.conf", "bundle\n")
-    write(project_files / "nested" / "global.conf", "global\n")
-    write(bundle_dir / "nested" / "global.conf", "bundle\n")
-    write(bundle_dir / "nested" / "bundle.conf", "bundle\n")
-
-    bundle = Bundle("base", path=bundle_dir)
-    bundle.task("Task")(lambda: None)
-    ctx = context(tmp_path)
-    ctx.begin_task(bundle.tasks[0])
-
-    assert ctx.resolve_source("shared.conf") == project_bundle / "shared.conf"
-    assert ctx.resolve_source("global.conf") == project_files / "global.conf"
-    assert ctx.resolve_source("bundle.conf") == bundle_files / "bundle.conf"
-    assert ctx.resolve_source("nested/specific.conf") == project_bundle / "nested" / "specific.conf"
-    assert ctx.resolve_source("nested/global.conf") == project_files / "nested" / "global.conf"
-    assert ctx.resolve_source("nested/bundle.conf") == bundle_dir / "nested" / "bundle.conf"
-
-
-def test_resolve_source_uses_files_path_literally_for_overlays(tmp_path):
-    bundle_dir = tmp_path / "bundles" / "base"
-    project_files = tmp_path / "files"
-    project_bundle = project_files / "base"
-    bundle_files = bundle_dir / "files"
-
-    write(project_bundle / "files" / "nested" / "specific.conf", "bundle-specific\n")
-    write(project_files / "files" / "nested" / "specific.conf", "global\n")
-    write(bundle_files / "nested" / "specific.conf", "bundle\n")
-    write(project_files / "files" / "nested" / "global.conf", "global\n")
-    write(bundle_files / "nested" / "global.conf", "bundle\n")
-    write(bundle_files / "nested" / "bundle.conf", "bundle\n")
-
-    bundle = Bundle("base", path=bundle_dir)
-    bundle.task("Task")(lambda: None)
-    ctx = context(tmp_path)
-    ctx.begin_task(bundle.tasks[0])
-
-    assert ctx.resolve_source("files/nested/specific.conf") == (project_bundle / "files" / "nested" / "specific.conf")
-    assert ctx.resolve_source("files/nested/global.conf") == project_files / "files" / "nested" / "global.conf"
-    assert ctx.resolve_source("files/nested/bundle.conf") == bundle_files / "nested" / "bundle.conf"
-
-
-def test_resolve_source_overlays_are_bundle_scoped(tmp_path):
-    base_dir = tmp_path / "bundles" / "base"
-    other_dir = tmp_path / "bundles" / "other"
-    write(tmp_path / "files" / "base" / "only-base.conf", "bundle-specific\n")
-    write(tmp_path / "files" / "shared.conf", "global\n")
-    write(base_dir / "files" / "shared.conf", "base\n")
-    write(other_dir / "files" / "only-base.conf", "other\n")
-    write(other_dir / "files" / "shared.conf", "other\n")
-
-    base = Bundle("base", path=base_dir)
-    other = Bundle("other", path=other_dir)
-    base.task("Base")(lambda: None)
-    other.task("Other")(lambda: None)
-    ctx = context(tmp_path)
-
-    ctx.begin_task(base.tasks[0])
-    assert ctx.resolve_source("only-base.conf") == tmp_path / "files" / "base" / "only-base.conf"
-    assert ctx.resolve_source("shared.conf") == tmp_path / "files" / "shared.conf"
-
-    ctx.begin_task(other.tasks[0])
-    assert ctx.resolve_source("only-base.conf") == other_dir / "files" / "only-base.conf"
-    assert ctx.resolve_source("shared.conf") == tmp_path / "files" / "shared.conf"
 
 
 def test_command_runner_expands_cwd(tmp_path, home, monkeypatch):

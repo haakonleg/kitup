@@ -121,9 +121,10 @@ def copy(
 ) -> CallResult:
     """Copy one regular file, preserving its mode unless overridden.
 
-    Relative paths resolve through project file overlays before falling back to
-    the bundle. Absolute paths are used as-is. When ``dest`` ends with a slash
-    it is treated as a directory and the source filename is appended.
+    Relative ``src`` paths resolve against the bundle's merged ``files`` view, so
+    project overlays apply; absolute paths are used as-is. When ``dest`` ends
+    with a slash it is treated as a directory and the source filename is
+    appended.
     """
     ctx = current_context()
     require_path(src, "copy source")

@@ -918,17 +918,19 @@ def test_project_files_overlay_bundle_files(tmp_path):
                 "tasks.py": copy_task(base_dest),
                 "files/shared.conf": "bundle\n",
             },
-            "other": {"tasks.py": copy_task(other_dest)},
+            "other": {
+                "tasks.py": copy_task(other_dest),
+                "files/shared.conf": "other\n",
+            },
         },
     )
     write(tmp_path / "files" / "base" / "shared.conf", "bundle-specific\n")
-    write(tmp_path / "files" / "shared.conf", "global\n")
 
     code = cli.main(["apply", str(tmp_path), "--no-color"])
 
     assert code == 0
     assert base_dest.read_text(encoding="utf-8") == "bundle-specific\n"
-    assert other_dest.read_text(encoding="utf-8") == "global\n"
+    assert other_dest.read_text(encoding="utf-8") == "other\n"
 
 
 def test_write_marker_task_uses_project_root(tmp_path):
