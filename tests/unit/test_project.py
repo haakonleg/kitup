@@ -12,6 +12,7 @@ from kitup.project import (
     on_project_path,
     resolve_preset,
 )
+from kitup.resolver import resolve
 from kitup.variables import load_vars
 
 from ..helpers import make_project, write
@@ -19,6 +20,11 @@ from ..helpers import make_project, write
 
 def task_source(name: str) -> str:
     return f"from kitup import task\n\n@task\ndef {name}(ctx):\n    pass\n"
+
+
+def bundle_source(priority: int = 0, *, depends_on: tuple[str, ...] = ()) -> str:
+    depends = f", depends_on={list(depends_on)!r}" if depends_on else ""
+    return f"from kitup import bundle\n\nbundle(priority={priority}{depends})\n"
 
 
 def test_load_project_requires_an_existing_directory(tmp_path):
@@ -104,6 +110,7 @@ def test_discovered_bundles_are_immutable(tmp_path):
         ("description", "other"),
         ("path", tmp_path),
         ("var_paths", (tmp_path / "vars.py",)),
+        ("priority", 1),
     ):
         with pytest.raises(AttributeError, match="immutable after discovery"):
             setattr(bundle, attribute, value)
@@ -182,6 +189,116 @@ def test_keyword_var_name_is_an_error(tmp_path):
 
     with pytest.raises(ProjectError, match="invalid var name 'for'"):
         load_project(tmp_path)
+
+
+def test_numbered_bundle_folders_sort_numerically_before_unnumbered(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={
+            "10_ten": task_source("ten"),
+            "2_two": task_source("two"),
+            "01_one": task_source("one"),
+            "alpha": task_source("alpha"),
+            "zeta": task_source("zeta"),
+        },
+    )
+
+    project = load_project(tmp_path)
+
+    assert [bundle.id for bundle in project.bundles] == ["one", "two", "ten", "alpha", "zeta"]
+
+
+def test_numbered_bundle_prefix_is_stripped_from_the_id(tmp_path):
+    make_project(tmp_path, bundles={"01_setup": task_source("install")})
+
+    (bundle,) = load_project(tmp_path).bundles
+
+    assert bundle.id == "setup"
+    assert bundle.name == "setup"
+    assert [task.id for task in bundle.tasks] == ["setup.install"]
+
+
+def test_numbered_bundle_keeps_an_explicit_display_name(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={
+            "01_setup": {"__init__.py": "from kitup import bundle\n\nbundle('Setup')\n", "tasks.py": task_source("x")},
+        },
+    )
+
+    (bundle,) = load_project(tmp_path).bundles
+
+    assert bundle.id == "setup"
+    assert bundle.name == "Setup"
+
+
+def test_numbered_and_plain_folders_with_the_same_id_are_rejected(tmp_path):
+    make_project(tmp_path, bundles={"01_setup": task_source("a"), "setup": task_source("b")})
+
+    with pytest.raises(ProjectError, match=r"duplicate bundle id 'setup'.*01_setup.*setup"):
+        load_project(tmp_path)
+
+
+@pytest.mark.parametrize("name", ["01_", "01_bad-name", "123", "01_2bad"])
+def test_invalid_numbered_bundle_folder_names_are_errors(tmp_path, name):
+    write(tmp_path / "bundles" / name / "__init__.py", "from kitup import bundle\n\nbundle()\n")
+
+    with pytest.raises(ProjectError, match="invalid bundle name"):
+        load_project(tmp_path)
+
+
+def test_priority_orders_bundles_before_folder_names(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={
+            "base": {"__init__.py": bundle_source(20), "tasks.py": task_source("b")},
+            "alpha": {"__init__.py": bundle_source(10), "tasks.py": task_source("a")},
+        },
+    )
+
+    assert [bundle.id for bundle in load_project(tmp_path).bundles] == ["alpha", "base"]
+
+
+def test_equal_priorities_keep_folder_order(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={
+            "02_b": {"__init__.py": bundle_source(5), "tasks.py": task_source("b")},
+            "01_a": {"__init__.py": bundle_source(5), "tasks.py": task_source("a")},
+        },
+    )
+
+    assert [bundle.id for bundle in load_project(tmp_path).bundles] == ["a", "b"]
+
+
+def test_priority_takes_precedence_over_numbered_prefixes(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={
+            "01_first": {"__init__.py": bundle_source(10), "tasks.py": task_source("f")},
+            "02_second": {"__init__.py": bundle_source(5), "tasks.py": task_source("s")},
+        },
+    )
+
+    assert [bundle.id for bundle in load_project(tmp_path).bundles] == ["second", "first"]
+
+
+def test_dependencies_win_over_priority_and_prefixes(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={
+            "01_first": {"__init__.py": bundle_source(100), "tasks.py": task_source("f")},
+            "02_second": {
+                "__init__.py": bundle_source(1, depends_on=("first",)),
+                "tasks.py": task_source("s"),
+            },
+        },
+    )
+
+    project = load_project(tmp_path)
+    plan = resolve(project.bundles, registry={bundle.id: bundle for bundle in project.bundles})
+
+    assert [bundle.id for bundle in plan.bundles] == ["first", "second"]
 
 
 def test_bundles_py_shadowing_is_reported(tmp_path):
@@ -411,6 +528,18 @@ def test_external_bundle_with_init_and_without_init(tmp_path):
     assert [task.func.__name__ for task in bundles["withinit"].tasks] == ["run_withinit"]
     assert bundles["plain"].name == "plain"
     assert [task.func.__name__ for task in bundles["plain"].tasks] == ["run_plain"]
+
+
+def test_external_bundles_support_numeric_prefixes(tmp_path):
+    external = tmp_path / "shared"
+    external_bundle(external, "02_extra", init=False)
+    root = make_project(tmp_path / "machine", bundles={"01_local": task_source("local")})
+
+    project = load_project(root, bundle_paths=[external])
+
+    assert [bundle.id for bundle in project.bundles] == ["local", "extra"]
+    assert project.bundles[1].name == "extra"
+    assert [task.func.__name__ for task in project.bundles[1].tasks] == ["run_02_extra"]
 
 
 def test_relative_imports_inside_an_external_bundle(tmp_path):

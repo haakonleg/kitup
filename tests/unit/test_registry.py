@@ -53,6 +53,17 @@ def test_bundle_name_is_optional_and_validated():
         Bundle(1)  # type: ignore[arg-type]
 
 
+def test_bundle_priority_defaults_and_is_validated():
+    assert Bundle("Base").priority == 0
+    assert Bundle("Base", priority=5).priority == 5
+    assert define_bundle("Base", priority=-3).priority == -3
+
+    with pytest.raises(BundleError, match="bundle priority must be an integer"):
+        Bundle("Base", priority="high")  # type: ignore[arg-type]
+    with pytest.raises(BundleError, match="bundle priority must be an integer"):
+        Bundle("Base", priority=True)
+
+
 def test_package_reexports_the_authoring_api():
     assert kitup.Bundle is Bundle
     assert kitup.bundle is define_bundle

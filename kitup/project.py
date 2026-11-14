@@ -2,6 +2,7 @@
 
 import importlib
 import keyword
+import re
 import sys
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
@@ -30,6 +31,10 @@ _PROJECT_MODULE_PREFIXES: Final = (
     "_kitup_task_",
     "_kitup_var_",
 )
+
+# A bundle folder may start with digits and an underscore, for example
+# ``01_setup``. The prefix orders bundles and is stripped from the bundle id.
+_BUNDLE_PREFIX: Final = re.compile(r"(?P<number>\d+)_(?P<id>.+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +102,8 @@ def load_project(
     _purge_project_modules()
     with on_project_path(project_root):
         bundles = _load_bundles(bundle_dirs, local_root=local_root)
+    # Stable sort: equal priorities keep discovery (prefix, then name) order.
+    bundles = tuple(sorted(bundles, key=lambda bundle: bundle.priority))
     return Project(
         root=project_root,
         bundles=bundles,
@@ -250,17 +257,43 @@ def _bundle_folders(directory: Path) -> list[Path]:
         raise ProjectError(f"cannot read bundle directory {directory}: {exc}") from exc
     return sorted(
         (path for path in entries if path.is_dir() and not _ignored(path.name)),
-        key=lambda path: path.name,
+        key=_bundle_sort_key,
     )
+
+
+def _parse_bundle_folder(folder_name: str) -> tuple[int | None, str]:
+    """Return the optional numeric prefix and bundle id for a folder name."""
+    match = _BUNDLE_PREFIX.fullmatch(folder_name)
+    if match is None:
+        return None, folder_name
+    return int(match.group("number")), match.group("id")
+
+
+def _bundle_sort_key(path: Path) -> tuple[bool, int, str]:
+    """Sort numbered folders first by numeric prefix, then other folders by name."""
+    prefix, _ = _parse_bundle_folder(path.name)
+    return (prefix is None, prefix or 0, path.name)
+
+
+def _require_bundle_id(folder_name: str) -> str:
+    """Validate a bundle folder name and return its bundle id."""
+    _, bundle_id = _parse_bundle_folder(folder_name)
+    if not bundle_id.isidentifier() or keyword.iskeyword(bundle_id):
+        raise ProjectError(
+            f"invalid bundle name {folder_name!r}: must be a valid, non-keyword Python identifier, "
+            "optionally preceded by a numeric prefix such as '01_'"
+        )
+    return bundle_id
 
 
 def _reject_duplicate_bundle_ids(bundle_dirs: Sequence[Path]) -> None:
     seen: dict[str, Path] = {}
     for folder in bundle_dirs:
-        existing = seen.get(folder.name)
+        _, bundle_id = _parse_bundle_folder(folder.name)
+        existing = seen.get(bundle_id)
         if existing is not None:
-            raise ProjectError(f"duplicate bundle id {folder.name!r}: {existing} and {folder}")
-        seen[folder.name] = folder
+            raise ProjectError(f"duplicate bundle id {bundle_id!r}: {existing} and {folder}")
+        seen[bundle_id] = folder
 
 
 def _reject_duplicate_var_ids(var_paths: Sequence[Path]) -> None:
@@ -275,7 +308,7 @@ def _reject_duplicate_var_ids(var_paths: Sequence[Path]) -> None:
 def _load_bundles(bundle_dirs: Sequence[Path], *, local_root: Path) -> tuple[Bundle, ...]:
     bundles: list[Bundle] = []
     for folder in bundle_dirs:
-        _require_identifier(folder.name, "bundle")
+        bundle_id = _require_bundle_id(folder.name)
         is_local = folder.parent == local_root
         package = f"{BUNDLES_DIR}.{folder.name}" if is_local else f"_kitup_bundle_{folder.name}"
         try:
@@ -292,10 +325,10 @@ def _load_bundles(bundle_dirs: Sequence[Path], *, local_root: Path) -> tuple[Bun
         elif not isinstance(bundle, Bundle):
             raise ProjectError(f"bundle {folder.name!r} has a non-Bundle __kitup_bundle__")
 
-        var_paths = _discover_bundle_var_paths(bundle, folder, bundle_id=folder.name)
+        var_paths = _discover_bundle_var_paths(bundle, folder, bundle_id=bundle_id)
         bundle._finalize(
-            id=folder.name,
-            name=bundle.name or folder.name,
+            id=bundle_id,
+            name=bundle.name or bundle_id,
             var_paths=var_paths,
         )
         bundles.append(bundle)

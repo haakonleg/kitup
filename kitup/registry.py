@@ -122,6 +122,10 @@ class Bundle:
     values are always treated as paths, never import names. ``var_paths`` is
     populated by project discovery with the bundle's optional ``vars/*.py``
     files.
+
+    Bundles with a lower ``priority`` run first, and equal priorities keep
+    discovery order. ``priority`` takes precedence over numeric folder prefixes,
+    while ``depends_on`` always wins over both.
     """
 
     def __init__(
@@ -132,6 +136,7 @@ class Bundle:
         modules: Sequence[ModuleType | str | Path] | None = None,
         depends_on: Sequence[str | Bundle] = (),
         path: str | Path | None = None,
+        priority: int = 0,
     ) -> None:
         if name is not None:
             if not isinstance(name, str):
@@ -141,6 +146,8 @@ class Bundle:
             name = name.strip()
         if not isinstance(description, str):
             raise BundleError("bundle description must be a string")
+        if not isinstance(priority, int) or isinstance(priority, bool):
+            raise BundleError("bundle priority must be an integer")
 
         self._frozen = False
         self._tasks: list[Task] = []
@@ -148,6 +155,7 @@ class Bundle:
         self.id = name or ""
         self.name = name or ""
         self.description = description
+        self.priority = priority
         self.path = expand_path(Path(path), error=BundleError, resolve=True) if path is not None else None
         self.var_paths: tuple[Path, ...] = ()
         self.depends_on = self._normalize_dependencies(depends_on)
@@ -323,6 +331,7 @@ def bundle(
     modules: Sequence[ModuleType | str | Path] | None = None,
     depends_on: Sequence[str | Bundle] = (),
     path: str | Path | None = None,
+    priority: int = 0,
 ) -> Bundle:
     """Create a bundle and register it on the calling package.
 
@@ -333,6 +342,10 @@ def bundle(
 
     When ``modules`` is omitted inside a package, sibling ``*.py`` task modules
     are discovered automatically; elsewhere the bundle starts with no tasks.
+
+    ``priority`` controls run order: lower values run first, and equal values
+    keep discovery order. It takes precedence over numeric bundle folder
+    prefixes, while ``depends_on`` still runs dependencies before dependents.
     """
     caller = sys._getframe(1).f_globals
     caller_file = caller.get("__file__")
@@ -346,7 +359,7 @@ def bundle(
             raise BundleError("cannot auto-discover task modules outside a package")
         modules = discover_task_modules(package, Path(str(caller_file)).parent)
 
-    created = Bundle(name, description, modules=modules, depends_on=depends_on, path=path)
+    created = Bundle(name, description, modules=modules, depends_on=depends_on, path=path, priority=priority)
     if is_package:
         caller["__kitup_bundle__"] = created
     return created

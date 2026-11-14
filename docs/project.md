@@ -49,8 +49,9 @@ sets stored under `presets/`.
 
 A bundle is a Python package below `bundles/`. Its folder name is the bundle id,
 must be a valid Python identifier, and is used in task ids and dependency
-references. The `__init__.py` is optional; when present it should stay
-declarative and construct the bundle:
+references. An optional numeric prefix such as `01_setup` orders bundles and is
+stripped from the id; see [Run order](#run-order). The `__init__.py` is optional;
+when present it should stay declarative and construct the bundle:
 
 ```python
 # bundles/base/__init__.py
@@ -60,12 +61,34 @@ bundle("Base system", "Core packages and services")
 ```
 
 The first argument is the display name shown by `kitup list`; it defaults to the
-folder name. The description is optional. The bundle id always comes from the
+bundle id. The description is optional. The bundle id always comes from the
 folder name, so the factory has no `id` argument.
 
 `bundle()` returns the bundle when you need the object, but the return value can
 be discarded: calls made from a package `__init__.py` register the bundle
 automatically.
+
+### Run order
+
+Bundles run in this order, from highest to lowest precedence:
+
+1. `depends_on` — dependencies always run before the bundles that need them.
+2. `priority` — lower values run first; equal values keep folder order.
+3. Numeric folder prefix — folders such as `01_setup` or `2_packages` order
+   numerically (`2_x` before `10_x`, regardless of zero-padding). Numbered
+   folders run before unnumbered ones, which stay in name order.
+
+The prefix is not part of the id: folder `01_setup` has id `setup`, so use
+`depends_on=["setup"]`, `-b setup`, and `files/setup/`. The part after the prefix
+must still be a valid, non-keyword Python identifier, and ids must be unique, so
+`01_setup` and `setup` cannot coexist.
+
+```python
+# bundles/02_packages/__init__.py: priority beats the folder prefix
+from kitup import bundle
+
+bundle("Packages", priority=-10)  # runs before default-priority (0) bundles
+```
 
 ### Task modules
 

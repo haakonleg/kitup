@@ -149,7 +149,9 @@ kitup apply my-machine --preset laptop
 
 Bundles are Python packages under `bundles/`. Sibling task modules are
 discovered automatically, or you can list them explicitly for exact ordering
-and reuse. Bundles can depend on each other with `depends_on`.
+and reuse. Bundles can depend on each other with `depends_on`. Run order also
+follows an optional `priority=` on `bundle(...)` and numeric folder prefixes
+such as `01_setup`, with `depends_on` taking precedence over both.
 
 ### Variables and facts
 
