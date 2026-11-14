@@ -5,10 +5,9 @@ an existing checkout at the desired version.
 
 ```python
 from kitup.modules import git
-from kitup import task
 ```
 
-## `repo(ctx, url, dest, *, version="HEAD", single_branch=False, depth=None, update=True, force=False)`
+## `repo(url, dest, *, version="HEAD", single_branch=False, depth=None, update=True, force=False)`
 
 Ensure the repository `url` is checked out at `dest`.
 
@@ -48,26 +47,17 @@ Ensure the repository `url` is checked out at `dest`.
 ```python
 from pathlib import Path
 
-
-@task("Clone dotfiles", tags={"dotfiles"})
-def clone_dotfiles(ctx):
-    git.repo(
-        ctx,
-        "https://github.com/example/dotfiles.git",
-        Path.home() / "src/dotfiles",
-    )
-
-
-@task("Clone a single branch, shallow", tags={"dotfiles"})
-def clone_single_branch(ctx):
-    git.repo(
-        ctx,
-        "git@github.com:example/dotfiles.git",
-        Path.home() / "src/dotfiles",
-        version="main",
-        single_branch=True,
-        depth=1,
-    )
+git.repo(
+    "https://github.com/example/dotfiles.git",
+    Path.home() / "src/dotfiles",
+)
+git.repo(
+    "git@github.com:example/dotfiles.git",
+    Path.home() / "src/dotfiles",
+    version="main",
+    single_branch=True,
+    depth=1,
+)
 ```
 
 ## Behavior

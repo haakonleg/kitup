@@ -72,21 +72,20 @@ step idempotent:
 
 ```python
 # bundles/workstation/tasks.py
-from kitup import task
+from kitup import ctx, task, vars
 from kitup.modules import dnf, files, systemd
 
 
 @task(tags={"packages"})
-def install_packages(ctx):
+def install_packages():
     """Install the base package set."""
-    dnf.packages(ctx, ctx.vars.PACKAGES)
+    dnf.packages(vars.PACKAGES)
 
 
 @task(tags={"security"})
-def harden_ssh(ctx):
+def harden_ssh():
     """Write the hardened SSH configuration."""
     files.file(
-        ctx,
         "/etc/ssh/sshd_config.d/99-kitup.conf",
         content=ctx.bundle.read_resource("files/sshd.conf"),
         mode=0o644,
@@ -95,9 +94,9 @@ def harden_ssh(ctx):
 
 
 @task(tags={"services"})
-def enable_firewall(ctx):
+def enable_firewall():
     """Enable and start firewalld."""
-    systemd.unit(ctx, "firewalld.service", enabled=True, state="started")
+    systemd.unit("firewalld.service", enabled=True, state="started")
 ```
 
 The optional project `files/` tree overlays bundle resources. Relative source
@@ -154,11 +153,11 @@ and reuse. Bundles can depend on each other with `depends_on`.
 
 ### Variables and facts
 
-`ctx.vars` exposes merged values from `vars/*.py`, additional `--var-file`
-sources, and the current bundle's optional `vars/` folder. Bundle vars are
-scoped to their bundle and act as defaults; project values win on collisions.
-`ctx.facts` provides read-only system information such as the hostname,
-distribution, kernel, and mounted filesystems.
+`vars` exposes merged values from `vars/*.py`, additional `--var-file` sources,
+and the current bundle's optional `vars/` folder. Bundle vars are scoped to
+their bundle and act as defaults; project values win on collisions. `facts`
+provides read-only system information such as the hostname, distribution,
+kernel, and mounted filesystems.
 
 ### Presets and selection
 

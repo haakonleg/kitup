@@ -79,9 +79,8 @@ def test_system_remote_add_and_remove(tmp_path: Path) -> None:
         from kitup.modules import flatpak
 
         @task("add flatpak remote")
-        def add_remote(ctx):
+        def add_remote():
             flatpak.remote(
-                ctx,
                 {FLATPAK_REMOTE!r},
                 {REPO_URL!r},
                 gpg_verify=False,
@@ -98,8 +97,8 @@ def test_system_remote_add_and_remove(tmp_path: Path) -> None:
         from kitup.modules import flatpak
 
         @task("remove flatpak remote")
-        def remove_remote(ctx):
-            flatpak.remote(ctx, {FLATPAK_REMOTE!r}, state="absent")
+        def remove_remote():
+            flatpak.remote({FLATPAK_REMOTE!r}, state="absent")
         """,
     )
     assert run_kitup("apply", remove_root) == 0
@@ -114,8 +113,8 @@ def test_system_package_install_and_remove(tmp_path: Path, system_remote: None) 
         from kitup.modules import flatpak
 
         @task("install flatpak app")
-        def install_app(ctx):
-            flatpak.packages(ctx, [{FLATPAK_APP!r}], remote={FLATPAK_REMOTE!r})
+        def install_app():
+            flatpak.packages([{FLATPAK_APP!r}], remote={FLATPAK_REMOTE!r})
         """,
     )
     assert run_kitup("apply", install_root) == 0
@@ -130,8 +129,8 @@ def test_system_package_install_and_remove(tmp_path: Path, system_remote: None) 
         from kitup.modules import flatpak
 
         @task("remove flatpak app")
-        def remove_app(ctx):
-            flatpak.packages(ctx, [{FLATPAK_APP!r}], state="absent")
+        def remove_app():
+            flatpak.packages([{FLATPAK_APP!r}], state="absent")
         """,
     )
     assert run_kitup("apply", remove_root) == 0
@@ -146,9 +145,8 @@ def test_user_remote_add_and_remove(tmp_path: Path) -> None:
         from kitup.modules import flatpak
 
         @task("add user flatpak remote")
-        def add_remote(ctx):
+        def add_remote():
             flatpak.remote(
-                ctx,
                 {FLATPAK_USER_REMOTE!r},
                 {REPO_URL!r},
                 scope="user",
@@ -166,8 +164,8 @@ def test_user_remote_add_and_remove(tmp_path: Path) -> None:
         from kitup.modules import flatpak
 
         @task("remove user flatpak remote")
-        def remove_remote(ctx):
-            flatpak.remote(ctx, {FLATPAK_USER_REMOTE!r}, state="absent", scope="user")
+        def remove_remote():
+            flatpak.remote({FLATPAK_USER_REMOTE!r}, state="absent", scope="user")
         """,
     )
     assert run_kitup("apply", remove_root) == 0

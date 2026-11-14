@@ -17,10 +17,10 @@ def test_project_merges_vars_and_resolves_dependencies(tmp_path: Path, capsys: p
             "base": {
                 "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task
-                def show(ctx):
+                def show():
                     value = f"{ctx.vars.BASE}/{ctx.vars.CHILD}"
                     ctx.changed(summary=value, value=value)
                 """,
@@ -28,10 +28,10 @@ def test_project_merges_vars_and_resolves_dependencies(tmp_path: Path, capsys: p
             "extra": {
                 "__init__.py": "from kitup import bundle\n\nbundle('Extra', depends_on=['base'])\n",
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task
-                def extra(ctx):
+                def extra():
                     ctx.changed(summary="extra")
                 """,
             },
@@ -54,20 +54,20 @@ def test_preset_selects_bundles(tmp_path: Path, capsys: pytest.CaptureFixture[st
             "base": {
                 "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task
-                def base_task(ctx):
+                def base_task():
                     ctx.changed(summary="base")
                 """,
             },
             "extra": {
                 "__init__.py": "from kitup import bundle\n\nbundle('Extra')\n",
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task
-                def extra_task(ctx):
+                def extra_task():
                     ctx.changed(summary="extra")
                 """,
             },
@@ -88,7 +88,7 @@ def test_bundle_path_loads_external_bundles(tmp_path: Path, capsys: pytest.Captu
         bundles={
             "base": {
                 "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
-                "tasks.py": "from kitup import task\n\n@task\ndef base_task(ctx):\n    ctx.changed(summary='base')\n",
+                "tasks.py": "from kitup import ctx, task\n\n@task\ndef base_task():\n    ctx.changed(summary='base')\n",
             }
         },
     )
@@ -96,7 +96,7 @@ def test_bundle_path_loads_external_bundles(tmp_path: Path, capsys: pytest.Captu
     folder = external / "extra"
     folder.mkdir(parents=True)
     (folder / "tasks.py").write_text(
-        "from kitup import task\n\n@task\ndef extra_task(ctx):\n    ctx.changed(summary='external')\n",
+        "from kitup import ctx, task\n\n@task\ndef extra_task():\n    ctx.changed(summary='external')\n",
         encoding="utf-8",
     )
 
@@ -114,10 +114,10 @@ def test_var_file_adds_values_after_discovered_vars(tmp_path: Path, capsys: pyte
             "base": {
                 "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task
-                def show(ctx):
+                def show():
                     ctx.changed(summary=f"secret={ctx.vars.SECRET}")
                 """,
             }

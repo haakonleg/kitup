@@ -3,7 +3,7 @@
 from typing import Final, Literal
 
 from .._utils.validation import require_bool, require_scope, require_state, require_text
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -31,14 +31,10 @@ _PAST_TENSE: Final = {
 
 
 def unit(
-    ctx: TaskContext,
-    unit: str,
-    *,
-    enabled: bool | None = None,
-    state: SystemdState | None = None,
-    scope: str = "system",
+    unit: str, *, enabled: bool | None = None, state: SystemdState | None = None, scope: str = "system"
 ) -> CallResult:
     """Ensure a unit's enabled and active state."""
+    ctx = current_context()
     require_text(unit, "systemd unit")
     if enabled is None and state is None:
         raise TaskFailed("systemd unit requires enabled or state")
@@ -79,8 +75,9 @@ def unit(
     return ctx.changed(changed=bool(actions), summary=summary, unit=unit, scope=scope, actions=actions)
 
 
-def daemon_reload(ctx: TaskContext, *, scope: str = "system") -> CallResult:
+def daemon_reload(*, scope: str = "system") -> CallResult:
     """Reload systemd manager configuration."""
+    ctx = current_context()
     base = _command(ctx, scope)
     if ctx.dry_run:
         return ctx.changed(summary=f"would reload systemd ({scope})", scope=scope)

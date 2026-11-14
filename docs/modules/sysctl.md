@@ -5,10 +5,9 @@ persist them in a sysctl configuration file.
 
 ```python
 from kitup.modules import sysctl
-from kitup import task
 ```
 
-## `key(ctx, name, value=None, *, state="present", file=None)`
+## `key(name, value=None, *, state="present", file=None)`
 
 Set a sysctl key, or remove its entry from a configuration file.
 
@@ -34,19 +33,9 @@ Set a sysctl key, or remove its entry from a configuration file.
   results).
 
 ```python
-@task("Reduce swap usage", tags={"tuning"})
-def reduce_swappiness(ctx):
-    sysctl.key(ctx, "vm.swappiness", 10, file="/etc/sysctl.d/99-kitup.conf")
-
-
-@task("Enable IPv4 forwarding for now", tags={"network"})
-def enable_forwarding(ctx):
-    sysctl.key(ctx, "net.ipv4.ip_forward", True)
-
-
-@task("Stop managing kernel.panic", tags={"tuning"})
-def forget_panic(ctx):
-    sysctl.key(ctx, "kernel.panic", state="absent", file="/etc/sysctl.d/99-kitup.conf")
+sysctl.key("vm.swappiness", 10, file="/etc/sysctl.d/99-kitup.conf")
+sysctl.key("net.ipv4.ip_forward", True)
+sysctl.key("kernel.panic", state="absent", file="/etc/sysctl.d/99-kitup.conf")
 ```
 
 ## Behavior

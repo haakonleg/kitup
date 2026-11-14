@@ -7,7 +7,7 @@ from typing import Any, Final
 from .._utils.executables import require_command
 from .._utils.paths import expand_path
 from .._utils.validation import require_bool, require_path, require_success, require_text
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -20,7 +20,6 @@ _GIT_ENV: Final = {"GIT_TERMINAL_PROMPT": "0"}
 
 
 def repo(
-    ctx: TaskContext,
     url: str,
     dest: str | Path,
     *,
@@ -37,6 +36,7 @@ def repo(
     is enabled (or the URL changed) the remote is fetched and the checkout
     is moved to ``version`` when it differs.
     """
+    ctx = current_context()
     require_text(url, "git repository URL")
     require_path(dest, "git destination path")
     require_text(version, "git version")
@@ -61,14 +61,7 @@ def repo(
 
 
 def _clone(
-    ctx: TaskContext,
-    git: str,
-    url: str,
-    path: Path,
-    *,
-    version: str,
-    single_branch: bool,
-    depth: int | None,
+    ctx: TaskContext, git: str, url: str, path: Path, *, version: str, single_branch: bool, depth: int | None
 ) -> CallResult:
     command = [git, "clone"]
     if depth is not None:
@@ -89,14 +82,7 @@ def _clone(
 
 
 def _reconcile(
-    ctx: TaskContext,
-    git: str,
-    url: str,
-    path: Path,
-    *,
-    version: str,
-    update: bool,
-    force: bool,
+    ctx: TaskContext, git: str, url: str, path: Path, *, version: str, update: bool, force: bool
 ) -> CallResult:
     dest = str(path)
     current_url = _remote_url(ctx, git, dest)

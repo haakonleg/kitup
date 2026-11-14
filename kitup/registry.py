@@ -22,7 +22,7 @@ _MODULE_ATTR: Final = "__kitup_module__"
 _MODULES_SEQUENCE: Final = "bundle modules must be a sequence of task modules or task module paths"
 _ORDER: Final = count()
 
-type TaskFunc = Callable[[Any], Any]
+type TaskFunc = Callable[[], Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,19 +280,11 @@ class Bundle:
 
     @overload
     def task(
-        self,
-        name: str | None = None,
-        *,
-        tags: Iterable[str] = (),
-        description: str | None = None,
+        self, name: str | None = None, *, tags: Iterable[str] = (), description: str | None = None
     ) -> Callable[[TaskFunc], TaskFunc]: ...
 
     def task(
-        self,
-        name: str | TaskFunc | None = None,
-        *,
-        tags: Iterable[str] = (),
-        description: str | None = None,
+        self, name: str | TaskFunc | None = None, *, tags: Iterable[str] = (), description: str | None = None
     ) -> TaskFunc | Callable[[TaskFunc], TaskFunc]:
         """Register a task and return the original function.
 
@@ -308,11 +300,7 @@ class Bundle:
         return lambda func: self._register_task(func, name, tag_values, description)
 
     def _register_task(
-        self,
-        func: TaskFunc,
-        name: str | None,
-        tags: tuple[str, ...],
-        description: str | None,
+        self, func: TaskFunc, name: str | None, tags: tuple[str, ...], description: str | None
     ) -> TaskFunc:
         self._add_task(_make_task_spec(func, name, tags, description, declared_in=None))
         return func
@@ -453,6 +441,8 @@ def _module_task_specs(module: ModuleType) -> tuple[TaskSpec, ...]:
     """Return the task declarations made in ``module``, in declaration order."""
     found: dict[int, TaskSpec] = {}
     for value in vars(module).values():
+        if not inspect.isfunction(value):
+            continue
         for spec in getattr(value, _SPECS_ATTR, ()):
             if isinstance(spec, TaskSpec) and spec.declared_in == module.__name__:
                 found[spec.order] = spec
@@ -481,18 +471,12 @@ def task(name: TaskFunc, *, tags: Iterable[str] = (), description: str | None = 
 
 @overload
 def task(
-    name: str | None = None,
-    *,
-    tags: Iterable[str] = (),
-    description: str | None = None,
+    name: str | None = None, *, tags: Iterable[str] = (), description: str | None = None
 ) -> Callable[[TaskFunc], TaskFunc]: ...
 
 
 def task(
-    name: str | TaskFunc | None = None,
-    *,
-    tags: Iterable[str] = (),
-    description: str | None = None,
+    name: str | TaskFunc | None = None, *, tags: Iterable[str] = (), description: str | None = None
 ) -> TaskFunc | Callable[[TaskFunc], TaskFunc]:
     """Declare a task for the module's bundle.
 
@@ -522,18 +506,12 @@ def side_effect(name: TaskFunc, *, one_shot: bool = True, description: str | Non
 
 @overload
 def side_effect(
-    name: str | None = None,
-    *,
-    one_shot: bool = True,
-    description: str | None = None,
+    name: str | None = None, *, one_shot: bool = True, description: str | None = None
 ) -> Callable[[TaskFunc], SideEffect]: ...
 
 
 def side_effect(
-    name: str | TaskFunc | None = None,
-    *,
-    one_shot: bool = True,
-    description: str | None = None,
+    name: str | TaskFunc | None = None, *, one_shot: bool = True, description: str | None = None
 ) -> SideEffect | Callable[[TaskFunc], SideEffect]:
     """Declare a side effect that tasks can register."""
     if not isinstance(one_shot, bool):
@@ -628,12 +606,7 @@ def _resolve_description(description: str | None, func: TaskFunc) -> str:
 
 
 def _make_task_spec(
-    func: TaskFunc,
-    name: str | None,
-    tags: tuple[str, ...],
-    description: str | None,
-    *,
-    declared_in: str | None,
+    func: TaskFunc, name: str | None, tags: tuple[str, ...], description: str | None, *, declared_in: str | None
 ) -> TaskSpec:
     _require_task_function(func)
     return TaskSpec(

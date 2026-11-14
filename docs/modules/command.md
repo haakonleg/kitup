@@ -4,10 +4,9 @@ Run guarded one-off commands.
 
 ```python
 from kitup.modules import command
-from kitup import task
 ```
 
-## `run(ctx, cmd, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None)`
+## `run(cmd, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None)`
 
 Run `cmd` unless a guard is already satisfied.
 
@@ -36,16 +35,13 @@ Run `cmd` unless a guard is already satisfied.
 - `duration` — elapsed time in seconds (executed results only).
 
 ```python
-@task("Create marker", tags={"config"})
-def create_marker(ctx):
-    command.run(
-        ctx,
-        ["install", "-m", "0644", "/dev/null", "/var/lib/example/ready"],
-        creates="/var/lib/example/ready",
-    )
+command.run(
+    ["install", "-m", "0644", "/dev/null", "/var/lib/example/ready"],
+    creates="/var/lib/example/ready",
+)
 ```
 
-## `shell(ctx, cmd, *, shell=None, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None)`
+## `shell(cmd, *, shell=None, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None)`
 
 Run a command string through a shell. Other arguments match `run()`.
 
@@ -60,14 +56,11 @@ Run a command string through a shell. Other arguments match `run()`.
 The same fields as `run()`, with the shell invocation as `cmd`.
 
 ```python
-@task("Install via shell pipeline", tags={"config"})
-def install_with_pipeline(ctx):
-    command.shell(
-        ctx,
-        "cat data.txt | grep useful > /var/lib/example/result.txt",
-        shell="/bin/bash",
-        creates="/var/lib/example/result.txt",
-    )
+command.shell(
+    "cat data.txt | grep useful > /var/lib/example/result.txt",
+    shell="/bin/bash",
+    creates="/var/lib/example/result.txt",
+)
 ```
 
 ## Notes

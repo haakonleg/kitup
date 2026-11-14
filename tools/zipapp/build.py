@@ -219,11 +219,7 @@ def _find_packages(python: Path, distributions: tuple[str, ...]) -> dict[str, Pa
 
 
 def _run(
-    command: list[str],
-    description: str,
-    *,
-    cwd: Path | None = None,
-    env: Mapping[str, str] | None = None,
+    command: list[str], description: str, *, cwd: Path | None = None, env: Mapping[str, str] | None = None
 ) -> None:
     """Run a command and turn failures into a user-facing build error."""
     result = subprocess.run(

@@ -229,12 +229,7 @@ class Output:
         self.write(f"Interrupted.{suffix}")
 
     def command(
-        self,
-        argv: list[str] | tuple[str, ...],
-        duration: float,
-        returncode: int,
-        stdout: str = "",
-        stderr: str = "",
+        self, argv: list[str] | tuple[str, ...], duration: float, returncode: int, stdout: str = "", stderr: str = ""
     ) -> None:
         """Print a command and its captured output when verbose."""
         self.write(self._paint(f"  $ {' '.join(argv)}", _DIM))

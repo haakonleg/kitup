@@ -11,7 +11,7 @@ def test_enabled_active_unit_is_a_noop(tmp_path):
     command.responses = [response(0, "enabled\n"), response(0, "active\n")]
     ctx = make_context(tmp_path, command=command)
 
-    systemd.unit(ctx, "sshd.service", enabled=True, state="started")
+    systemd.unit("sshd.service", enabled=True, state="started")
 
     assert argvs(command) == [
         ["systemctl", "is-enabled", "sshd.service"],
@@ -31,7 +31,6 @@ def test_enable_and_start(tmp_path):
     ctx = make_context(tmp_path, command=command)
 
     systemd.unit(
-        ctx,
         "sshd.service",
         enabled=True,
         state="started",
@@ -56,9 +55,9 @@ def test_disable_and_stop(tmp_path):
         response(0, "active\n"),
         response(0),
     ]
-    ctx = make_context(tmp_path, command=command)
+    make_context(tmp_path, command=command)
 
-    systemd.unit(ctx, "sshd.service", enabled=False, state="stopped")
+    systemd.unit("sshd.service", enabled=False, state="stopped")
 
     assert command.calls[1][0] == ["systemctl", "disable", "sshd.service"]
     assert command.calls[3][0] == ["systemctl", "stop", "sshd.service"]
@@ -67,9 +66,9 @@ def test_disable_and_stop(tmp_path):
 def test_user_scope_uses_user_commands_without_sudo(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1), response(0), response(3), response(0)]
-    ctx = make_context(tmp_path, command=command)
+    make_context(tmp_path, command=command)
 
-    systemd.unit(ctx, "app.service", enabled=True, state="started", scope="user")
+    systemd.unit("app.service", enabled=True, state="started", scope="user")
 
     assert command.calls[1][0] == ["systemctl", "--user", "enable", "app.service"]
     assert command.calls[1][1]["sudo"] is False
@@ -77,35 +76,35 @@ def test_user_scope_uses_user_commands_without_sudo(tmp_path):
 
 
 def test_user_scope_refuses_root(tmp_path):
-    ctx = make_context(tmp_path, sudo=FakeSudo(is_root=True))
+    make_context(tmp_path, sudo=FakeSudo(is_root=True))
 
     with pytest.raises(TaskFailed, match="cannot run as root"):
-        systemd.unit(ctx, "app.service", state="started", scope="user")
+        systemd.unit("app.service", state="started", scope="user")
 
 
 def test_invalid_arguments_are_rejected(tmp_path):
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid systemd scope"):
-        systemd.unit(ctx, "app.service", state="started", scope="session")
+        systemd.unit("app.service", state="started", scope="session")
     with pytest.raises(TaskFailed, match="invalid systemd state"):
-        systemd.unit(ctx, "app.service", state="sleeping")
+        systemd.unit("app.service", state="sleeping")
     with pytest.raises(TaskFailed, match="invalid systemd state"):
-        systemd.unit(ctx, "app.service", state="running")
+        systemd.unit("app.service", state="running")
     with pytest.raises(TaskFailed, match="systemd unit must not be empty"):
-        systemd.unit(ctx, "  ")
+        systemd.unit("  ")
     with pytest.raises(TaskFailed, match="requires enabled or state"):
-        systemd.unit(ctx, "app.service")
+        systemd.unit("app.service")
     with pytest.raises(TaskFailed, match="systemd enabled must be a boolean"):
-        systemd.unit(ctx, "app.service", enabled="yes")  # type: ignore[arg-type]
+        systemd.unit("app.service", enabled="yes")  # type: ignore[arg-type]
 
 
 def test_dry_run_does_not_enable_or_start(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1), response(3)]
-    ctx = make_context(tmp_path, dry_run=True, command=command)
+    make_context(tmp_path, dry_run=True, command=command)
 
-    result = systemd.unit(ctx, "sshd.service", enabled=True, state="started")
+    result = systemd.unit("sshd.service", enabled=True, state="started")
 
     assert argvs(command) == [
         ["systemctl", "is-enabled", "sshd.service"],
@@ -125,14 +124,14 @@ def test_unit_is_idempotent_when_already_enabled_and_active(tmp_path):
     command.responses = [response(1), response(0), response(3), response(0)]
     ctx = make_context(tmp_path, command=command)
 
-    first = systemd.unit(ctx, "sshd.service", enabled=True, state="started")
+    first = systemd.unit("sshd.service", enabled=True, state="started")
     assert first.changed is True
 
     before = len(command.calls)
     command.responses = [response(0, "enabled\n"), response(0, "active\n")]
     ctx = make_context(tmp_path, command=command)
 
-    second = systemd.unit(ctx, "sshd.service", enabled=True, state="started")
+    second = systemd.unit("sshd.service", enabled=True, state="started")
 
     assert argvs(command)[before:] == [
         ["systemctl", "is-enabled", "sshd.service"],
@@ -145,9 +144,9 @@ def test_unit_is_idempotent_when_already_enabled_and_active(tmp_path):
 
 def test_daemon_reload_dry_run_does_not_run_systemctl(tmp_path):
     command = FakeCommandRunner()
-    ctx = make_context(tmp_path, dry_run=True, command=command)
+    make_context(tmp_path, dry_run=True, command=command)
 
-    result = systemd.daemon_reload(ctx)
+    result = systemd.daemon_reload()
 
     assert argvs(command) == []
     assert result.changed is True
@@ -159,7 +158,7 @@ def test_daemon_reload_records_a_change(tmp_path):
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
 
-    systemd.daemon_reload(ctx)
+    systemd.daemon_reload()
 
     assert command.calls[0][0] == ["systemctl", "daemon-reload"]
     assert len(ctx.changes) == 1

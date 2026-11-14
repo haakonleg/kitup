@@ -14,13 +14,7 @@ from .file_primitives import CHUNK_SIZE
 
 
 def open_url(
-    url: str,
-    *,
-    headers: Mapping[str, str],
-    timeout: float,
-    validate_certs: bool = True,
-    label: str,
-    context: str,
+    url: str, *, headers: Mapping[str, str], timeout: float, validate_certs: bool = True, label: str, context: str
 ) -> Any:
     """Open a GET request and translate transport errors into task failures.
 

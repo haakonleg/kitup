@@ -12,7 +12,7 @@ from .._utils.validation import (
     require_success,
     require_text,
 )
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -42,12 +42,13 @@ _LOCALE_KEYS: Final = frozenset(
 type _HostnameKind = Literal["static", "pretty"]
 
 
-def hostname(ctx: TaskContext, name: str | None = None, *, pretty: str | None = None) -> CallResult:
+def hostname(name: str | None = None, *, pretty: str | None = None) -> CallResult:
     """Ensure the static and/or pretty system hostname.
 
     ``name`` manages the static hostname. ``pretty`` manages the pretty
     hostname; an empty string clears it. At least one must be given.
     """
+    ctx = current_context()
     if name is None and pretty is None:
         raise TaskFailed("hostname requires name or pretty")
 
@@ -69,8 +70,9 @@ def hostname(ctx: TaskContext, name: str | None = None, *, pretty: str | None = 
     )
 
 
-def timezone(ctx: TaskContext, zone: str) -> CallResult:
+def timezone(zone: str) -> CallResult:
     """Ensure the system time zone."""
+    ctx = current_context()
     _require_token(zone, "time zone")
     try:
         ZoneInfo(zone)
@@ -90,11 +92,9 @@ def timezone(ctx: TaskContext, zone: str) -> CallResult:
     return ctx.changed(call)
 
 
-def ntp(
-    ctx: TaskContext,
-    enabled: bool,  # noqa: FBT001 - positional boolean matches the module API
-) -> CallResult:
+def ntp(enabled: bool) -> CallResult:  # noqa: FBT001 - positional boolean matches the module API
     """Enable or disable network time synchronization."""
+    ctx = current_context()
     require_bool(enabled, "enabled")
 
     values = _timedatectl_show(ctx, "CanNTP", "NTP")
@@ -115,11 +115,9 @@ def ntp(
     return ctx.changed(call)
 
 
-def rtc_local(
-    ctx: TaskContext,
-    enabled: bool = False,  # noqa: FBT001, FBT002 - positional boolean matches the module API
-) -> CallResult:
+def rtc_local(enabled: bool = False) -> CallResult:  # noqa: FBT001, FBT002 - positional boolean matches the module API
     """Configure whether the hardware clock is interpreted as local time."""
+    ctx = current_context()
     require_bool(enabled, "enabled")
 
     current = _parse_yes_no(_timedatectl_property(ctx, "LocalRTC"), "LocalRTC")
@@ -139,8 +137,9 @@ def rtc_local(
     return ctx.changed(call)
 
 
-def locale(ctx: TaskContext, values: Mapping[str, str]) -> CallResult:
+def locale(values: Mapping[str, str]) -> CallResult:
     """Ensure system locale variables, leaving unmanaged variables unchanged."""
+    ctx = current_context()
     if not isinstance(values, Mapping):
         raise TaskFailed("locale values must be a mapping")
     require_collection(values, "locale values")

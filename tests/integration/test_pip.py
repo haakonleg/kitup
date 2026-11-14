@@ -43,8 +43,8 @@ def test_install_latest_and_remove_in_venv(tmp_path: Path, capsys) -> None:
         from kitup.modules import pip
 
         @task("install fixture package")
-        def install_fixture(ctx):
-            pip.packages(ctx, ["{PACKAGE}==1.0"], venv=r"{venv}", extra_args={EXTRA_ARGS!r})
+        def install_fixture():
+            pip.packages(["{PACKAGE}==1.0"], venv=r"{venv}", extra_args={EXTRA_ARGS!r})
         """,
     )
     assert run_kitup("apply", install) == 0
@@ -65,8 +65,8 @@ def test_install_latest_and_remove_in_venv(tmp_path: Path, capsys) -> None:
         from kitup.modules import pip
 
         @task("upgrade fixture package to the latest version")
-        def upgrade_fixture(ctx):
-            pip.packages(ctx, ["{PACKAGE}"], state="latest", venv=r"{venv}", extra_args={EXTRA_ARGS!r})
+        def upgrade_fixture():
+            pip.packages(["{PACKAGE}"], state="latest", venv=r"{venv}", extra_args={EXTRA_ARGS!r})
         """,
     )
     assert run_kitup("apply", latest) == 0
@@ -85,8 +85,8 @@ def test_install_latest_and_remove_in_venv(tmp_path: Path, capsys) -> None:
         from kitup.modules import pip
 
         @task("remove fixture package")
-        def remove_fixture(ctx):
-            pip.packages(ctx, ["{PACKAGE}"], state="absent", venv=r"{venv}")
+        def remove_fixture():
+            pip.packages(["{PACKAGE}"], state="absent", venv=r"{venv}")
         """,
     )
     assert run_kitup("apply", remove) == 0
@@ -107,9 +107,8 @@ def test_install_multiple_packages_in_one_venv(tmp_path: Path, capsys) -> None:
         from kitup.modules import pip
 
         @task("install fixture packages")
-        def install_fixtures(ctx):
+        def install_fixtures():
             pip.packages(
-                ctx,
                 ["{PACKAGE}==1.0", "{EXTRA_PACKAGE}==1.0"],
                 venv=r"{venv}",
                 extra_args={EXTRA_ARGS!r},
@@ -131,8 +130,8 @@ def test_install_multiple_packages_in_one_venv(tmp_path: Path, capsys) -> None:
         from kitup.modules import pip
 
         @task("remove fixture packages")
-        def remove_fixtures(ctx):
-            pip.packages(ctx, ["{PACKAGE}", "{EXTRA_PACKAGE}"], state="absent", venv=r"{venv}")
+        def remove_fixtures():
+            pip.packages(["{PACKAGE}", "{EXTRA_PACKAGE}"], state="absent", venv=r"{venv}")
         """,
     )
     assert run_kitup("apply", remove) == 0
@@ -153,8 +152,8 @@ def test_dry_run_does_not_create_the_venv(tmp_path: Path, capsys) -> None:
         from kitup.modules import pip
 
         @task("install fixture package in dry-run")
-        def install_dry(ctx):
-            pip.packages(ctx, ["{PACKAGE}"], venv=r"{venv}", extra_args={EXTRA_ARGS!r})
+        def install_dry():
+            pip.packages(["{PACKAGE}"], venv=r"{venv}", extra_args={EXTRA_ARGS!r})
         """,
     )
 
@@ -182,11 +181,10 @@ def test_config_site_scope_written_and_read_by_pip(tmp_path: Path, capsys) -> No
         from kitup.modules import pip
 
         @task("configure pip in the venv")
-        def configure(ctx):
-            pip.config(ctx, "timeout", 30, scope="site", venv=r"{venv}")
-            pip.config(ctx, "find-links", ["{WHEELS}"], scope="site", venv=r"{venv}")
+        def configure():
+            pip.config("timeout", 30, scope="site", venv=r"{venv}")
+            pip.config("find-links", ["{WHEELS}"], scope="site", venv=r"{venv}")
             pip.config(
-                ctx,
                 "trusted-host",
                 ["mirror1.example.com", "mirror2.example.com"],
                 scope="site",

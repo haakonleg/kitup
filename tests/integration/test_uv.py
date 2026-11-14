@@ -59,8 +59,8 @@ def test_dependencies_present_latest_and_absent(tmp_path: Path, capsys) -> None:
         from kitup.modules import uv
 
         @task("declare the fixture dependency")
-        def declare(ctx):
-            uv.dependencies(ctx, ["{PACKAGE}==1.0"], project=r"{project}", extra_args={EXTRA_ARGS!r})
+        def declare():
+            uv.dependencies(["{PACKAGE}==1.0"], project=r"{project}", extra_args={EXTRA_ARGS!r})
         """,
     )
     assert run_kitup("apply", deps) == 0
@@ -84,8 +84,8 @@ def test_dependencies_present_latest_and_absent(tmp_path: Path, capsys) -> None:
         from kitup.modules import uv
 
         @task("upgrade the fixture dependency")
-        def upgrade(ctx):
-            uv.dependencies(ctx, ["{PACKAGE}"], project=r"{project}", state="latest", extra_args={EXTRA_ARGS!r})
+        def upgrade():
+            uv.dependencies(["{PACKAGE}"], project=r"{project}", state="latest", extra_args={EXTRA_ARGS!r})
         """,
     )
     assert run_kitup("apply", latest) == 0
@@ -104,8 +104,8 @@ def test_dependencies_present_latest_and_absent(tmp_path: Path, capsys) -> None:
         from kitup.modules import uv
 
         @task("remove the fixture dependency")
-        def remove_dep(ctx):
-            uv.dependencies(ctx, ["{PACKAGE}"], project=r"{project}", state="absent")
+        def remove_dep():
+            uv.dependencies(["{PACKAGE}"], project=r"{project}", state="absent")
         """,
     )
     assert run_kitup("apply", remove) == 0
@@ -127,8 +127,8 @@ def test_dependencies_in_a_group(tmp_path: Path, capsys) -> None:
         from kitup.modules import uv
 
         @task("manage the lint dependency group")
-        def lint(ctx):
-            uv.dependencies(ctx, ["{PACKAGE}==1.0"], project=r"{project}", group="lint", extra_args={EXTRA_ARGS!r})
+        def lint():
+            uv.dependencies(["{PACKAGE}==1.0"], project=r"{project}", group="lint", extra_args={EXTRA_ARGS!r})
         """,
     )
     assert run_kitup("apply", group) == 0
@@ -152,8 +152,8 @@ def test_dependencies_dry_run_does_not_create_the_project(tmp_path: Path, capsys
         from kitup.modules import uv
 
         @task("dry-run a dependency declaration")
-        def dry(ctx):
-            uv.dependencies(ctx, ["{PACKAGE}"], project=r"{project}", extra_args={EXTRA_ARGS!r})
+        def dry():
+            uv.dependencies(["{PACKAGE}"], project=r"{project}", extra_args={EXTRA_ARGS!r})
         """,
     )
 
@@ -171,8 +171,8 @@ def test_tools_install_latest_and_uninstall(tmp_path: Path, capsys) -> None:
         from kitup.modules import uv
 
         @task("install the fixture tool")
-        def install_tool(ctx):
-            uv.tools(ctx, ["{TOOL}==1.0"], extra_args={EXTRA_ARGS!r})
+        def install_tool():
+            uv.tools(["{TOOL}==1.0"], extra_args={EXTRA_ARGS!r})
         """,
     )
     assert run_kitup("apply", tools) == 0
@@ -190,8 +190,8 @@ def test_tools_install_latest_and_uninstall(tmp_path: Path, capsys) -> None:
         from kitup.modules import uv
 
         @task("upgrade the fixture tool")
-        def upgrade_tool(ctx):
-            uv.tools(ctx, ["{TOOL}"], state="latest", extra_args={EXTRA_ARGS!r})
+        def upgrade_tool():
+            uv.tools(["{TOOL}"], state="latest", extra_args={EXTRA_ARGS!r})
         """,
     )
     assert run_kitup("apply", latest) == 0
@@ -209,8 +209,8 @@ def test_tools_install_latest_and_uninstall(tmp_path: Path, capsys) -> None:
         from kitup.modules import uv
 
         @task("uninstall the fixture tool")
-        def remove_tool(ctx):
-            uv.tools(ctx, ["{TOOL}"], state="absent")
+        def remove_tool():
+            uv.tools(["{TOOL}"], state="absent")
         """,
     )
     assert run_kitup("apply", remove) == 0
@@ -233,8 +233,8 @@ def test_tools_batch_multiple_tools_through_install_upgrade_and_uninstall(tmp_pa
         from kitup.modules import uv
 
         @task("install the fixture tools")
-        def install_tools(ctx):
-            uv.tools(ctx, ["{TOOL}", "{EXTRA_TOOL}"], extra_args={args!r})
+        def install_tools():
+            uv.tools(["{TOOL}", "{EXTRA_TOOL}"], extra_args={args!r})
         """,
     )
     assert run_kitup("apply", install) == 0
@@ -251,8 +251,8 @@ def test_tools_batch_multiple_tools_through_install_upgrade_and_uninstall(tmp_pa
         from kitup.modules import uv
 
         @task("upgrade the fixture tools")
-        def upgrade_tools(ctx):
-            uv.tools(ctx, ["{TOOL}", "{EXTRA_TOOL}"], state="latest", extra_args={args!r})
+        def upgrade_tools():
+            uv.tools(["{TOOL}", "{EXTRA_TOOL}"], state="latest", extra_args={args!r})
         """,
     )
     assert run_kitup("apply", upgrade) == 0
@@ -270,8 +270,8 @@ def test_tools_batch_multiple_tools_through_install_upgrade_and_uninstall(tmp_pa
         from kitup.modules import uv
 
         @task("uninstall the fixture tools")
-        def remove_tools(ctx):
-            uv.tools(ctx, ["{TOOL}", "{EXTRA_TOOL}"], state="absent")
+        def remove_tools():
+            uv.tools(["{TOOL}", "{EXTRA_TOOL}"], state="absent")
         """,
     )
     assert run_kitup("apply", remove) == 0
@@ -291,10 +291,10 @@ def test_config_user_scope_written_and_read_by_uv(tmp_path: Path, capsys) -> Non
         from kitup.modules import uv
 
         @task("configure uv for the user")
-        def configure(ctx):
-            uv.config(ctx, "concurrent-downloads", 4, scope="user")
-            uv.config(ctx, "default-groups", ["dev"], scope="user")
-            uv.config(ctx, "native-tls", True, scope="user")
+        def configure():
+            uv.config("concurrent-downloads", 4, scope="user")
+            uv.config("default-groups", ["dev"], scope="user")
+            uv.config("native-tls", True, scope="user")
         """,
     )
     assert run_kitup("apply", root) == 0
@@ -315,8 +315,8 @@ def test_config_user_scope_written_and_read_by_uv(tmp_path: Path, capsys) -> Non
         from kitup.modules import uv
 
         @task("remove a uv user option")
-        def remove_option(ctx):
-            uv.config(ctx, "native-tls", state="absent", scope="user")
+        def remove_option():
+            uv.config("native-tls", state="absent", scope="user")
         """,
     )
     assert run_kitup("apply", remove) == 0
@@ -334,8 +334,8 @@ def test_config_system_scope_with_sudo(tmp_path: Path) -> None:
         from kitup.modules import uv
 
         @task("configure uv system-wide")
-        def configure(ctx):
-            uv.config(ctx, "python-downloads", "never", scope="system")
+        def configure():
+            uv.config("python-downloads", "never", scope="system")
         """,
     )
     assert run_kitup("apply", root) == 0
@@ -348,8 +348,8 @@ def test_config_system_scope_with_sudo(tmp_path: Path) -> None:
         from kitup.modules import uv
 
         @task("remove the system uv option")
-        def remove_option(ctx):
-            uv.config(ctx, "python-downloads", state="absent", scope="system")
+        def remove_option():
+            uv.config("python-downloads", state="absent", scope="system")
         """,
     )
     assert run_kitup("apply", remove) == 0

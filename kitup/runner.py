@@ -5,7 +5,7 @@ import traceback
 from collections.abc import Sequence
 from typing import Any
 
-from .context import TaskContext
+from .context import TaskContext, reset_current_context, set_current_context
 from .errors import PrivilegeError, SkipTask, TaskFailed
 from .output import Output, bundle_label
 from .registry import Bundle, SideEffect, Task, TaskSpec
@@ -121,13 +121,7 @@ class Runner:
         return selected
 
     def _run_side_effects(
-        self,
-        state: BundleState,
-        side_effects: list[SideEffect],
-        *,
-        start: float,
-        total: int,
-        completed: int,
+        self, state: BundleState, side_effects: list[SideEffect], *, start: float, total: int, completed: int
     ) -> int:
         self.output.fit_task_names(side_effect.name for side_effect in side_effects)
 
@@ -162,8 +156,9 @@ class Runner:
         error: BaseException | None = None
         value: Any = None
 
+        token = set_current_context(self.context)
         try:
-            value = task.func(self.context)
+            value = task.func()
         except SkipTask as exc:
             status = Status.SKIPPED
             detail = exc.reason
@@ -178,6 +173,8 @@ class Runner:
             status = Status.FAILED
             detail = f"{type(exc).__name__}: {exc}"
             error = exc
+        finally:
+            reset_current_context(token)
 
         calls = self.context.calls
         notes = [] if status is Status.SKIPPED else self.context.notes

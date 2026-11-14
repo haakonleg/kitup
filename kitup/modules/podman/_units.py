@@ -14,7 +14,7 @@ from ..._utils.validation import (
     require_success,
     require_text,
 )
-from ...context import TaskContext
+from ...context import current_context
 from ...errors import TaskFailed
 from ...results import CallResult
 from ._common import (
@@ -27,7 +27,6 @@ from ._common import (
 
 
 def generate_systemd(
-    ctx: TaskContext,
     name: str,
     *,
     dest: str | Path | None = None,
@@ -53,6 +52,7 @@ def generate_systemd(
     generated header, which contains a timestamp, is omitted so repeated runs
     produce identical content.
     """
+    ctx = current_context()
     require_scope(scope, "podman", is_root=ctx.sudo.is_root)
     require_text(name, "container name")
     require_bool(new, "systemd new")

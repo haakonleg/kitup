@@ -7,7 +7,7 @@ from pathlib import Path
 from ..._utils import file_actions
 from ..._utils.paths import expand_path
 from ..._utils.validation import require_mode, require_non_negative_int, require_scope, require_text
-from ...context import TaskContext
+from ...context import current_context
 from ...errors import TaskFailed
 from ...results import CallResult
 from ._common import (
@@ -23,7 +23,6 @@ from ._common import (
 
 
 def quadlet(
-    ctx: TaskContext,
     name: str,
     *,
     image: str,
@@ -41,6 +40,7 @@ def quadlet(
     The parent directory must already exist. The Quadlet is written but not
     reloaded; use :func:`kitup.modules.systemd.daemon_reload` afterwards.
     """
+    ctx = current_context()
     require_scope(scope, "podman", is_root=ctx.sudo.is_root)
     require_object_name(name, "container name")
     require_text(image, "container image")

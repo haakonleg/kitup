@@ -29,10 +29,7 @@ def asset_payload(name: str, *, asset_id: int = 1, digest: str | None = DIGEST) 
 
 
 def release_payload(
-    tag: str = "v1.2.3",
-    *,
-    assets: list[dict[str, object]] | None = None,
-    **overrides: object,
+    tag: str = "v1.2.3", *, assets: list[dict[str, object]] | None = None, **overrides: object
 ) -> dict[str, object]:
     if assets is None:
         assets = [
@@ -149,7 +146,7 @@ def test_latest_returns_release_and_assets(tmp_path, api_server):
     state = api_server
     ctx = make_context(tmp_path)
 
-    release = github_release.latest(ctx, "owner/repo")
+    release = github_release.latest("owner/repo")
 
     assert release.project == "owner/repo"
     assert release.id == 42
@@ -189,29 +186,29 @@ def test_latest_returns_release_and_assets(tmp_path, api_server):
 
 def test_by_tag_encodes_the_tag(tmp_path, api_server):
     state = api_server
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
-    release = github_release.by_tag(ctx, "owner/repo", "v1/2")
+    release = github_release.by_tag("owner/repo", "v1/2")
 
     assert release.tag == "v1/2"
     assert state.paths == ["/repos/owner/repo/releases/tags/v1%2F2"]
 
 
 def test_missing_release_is_a_task_failure(tmp_path, api_server):
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="not found"):
-        github_release.by_tag(ctx, "owner/repo", "missing")
+        github_release.by_tag("owner/repo", "missing")
 
     with pytest.raises(TaskFailed, match="not found"):
-        github_release.latest(ctx, "missing/repo")
+        github_release.latest("missing/repo")
 
 
 def test_rate_limit_failure_includes_reset_time(tmp_path, api_server):
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed) as error:
-        github_release.latest(ctx, "rate/repo")
+        github_release.latest("rate/repo")
 
     message = str(error.value)
     assert "rate limit" in message
@@ -220,28 +217,29 @@ def test_rate_limit_failure_includes_reset_time(tmp_path, api_server):
 
 
 def test_invalid_json_is_a_task_failure(tmp_path, api_server):
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid JSON"):
-        github_release.latest(ctx, "bad-json/repo")
+        github_release.latest("bad-json/repo")
 
 
 def test_malformed_payload_is_a_task_failure(tmp_path, api_server):
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid GitHub release response"):
-        github_release.latest(ctx, "bad-schema/repo")
+        github_release.latest("bad-schema/repo")
 
 
 def test_generic_http_error_is_a_task_failure(tmp_path, api_server):
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="HTTP 500"):
-        github_release.latest(ctx, "generic-error/repo")
+        github_release.latest("generic-error/repo")
 
 
 def test_assets_matching_supports_regex(tmp_path, api_server):
-    release = github_release.latest(make_context(tmp_path), "owner/repo")
+    make_context(tmp_path)
+    release = github_release.latest("owner/repo")
 
     matches = release.assets_matching(r"^tool-linux-.*\.tar\.gz$")
 
@@ -252,7 +250,8 @@ def test_assets_matching_supports_regex(tmp_path, api_server):
 
 
 def test_asset_fails_for_missing_or_ambiguous_matches(tmp_path, api_server):
-    release = github_release.latest(make_context(tmp_path), "owner/repo")
+    make_context(tmp_path)
+    release = github_release.latest("owner/repo")
 
     with pytest.raises(TaskFailed, match="no asset matching regex"):
         release.asset(r"^tool-windows-.*\.zip$")
@@ -263,9 +262,9 @@ def test_asset_fails_for_missing_or_ambiguous_matches(tmp_path, api_server):
 
 def test_by_asset_returns_a_single_regex_match(tmp_path, api_server):
     state = api_server
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
-    result = github_release.by_asset(ctx, "owner/repo", r"^tool-linux-x86_64\.tar\.gz$")
+    result = github_release.by_asset("owner/repo", r"^tool-linux-x86_64\.tar\.gz$")
 
     assert result.name == "tool-linux-x86_64.tar.gz"
     assert result.digest == DIGEST
@@ -274,10 +273,9 @@ def test_by_asset_returns_a_single_regex_match(tmp_path, api_server):
 
 def test_by_asset_uses_the_requested_tag(tmp_path, api_server):
     state = api_server
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     result = github_release.by_asset(
-        ctx,
         "owner/repo",
         r"^tool-checksums\.txt$",
         tag="v1.2.3",
@@ -289,24 +287,24 @@ def test_by_asset_uses_the_requested_tag(tmp_path, api_server):
 
 def test_by_asset_validates_the_regex_before_fetching(tmp_path, api_server):
     state = api_server
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="asset pattern must be a string"):
-        github_release.by_asset(ctx, "owner/repo", 1)
+        github_release.by_asset("owner/repo", 1)
     with pytest.raises(TaskFailed, match="asset pattern must not be empty"):
-        github_release.by_asset(ctx, "owner/repo", "")
+        github_release.by_asset("owner/repo", "")
     with pytest.raises(TaskFailed, match="invalid asset regex"):
-        github_release.by_asset(ctx, "owner/repo", "[")
+        github_release.by_asset("owner/repo", "[")
 
     assert state.paths == []
 
 
 def test_results_are_cached_per_run(tmp_path, api_server):
     state = api_server
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
-    first = github_release.latest(ctx, "owner/repo")
-    second = github_release.latest(ctx, "owner/repo")
+    first = github_release.latest("owner/repo")
+    second = github_release.latest("owner/repo")
 
     assert first is second
     assert state.paths == ["/repos/owner/repo/releases/latest"]
@@ -316,7 +314,7 @@ def test_dry_run_still_fetches_and_records_no_changes(tmp_path, api_server):
     state = api_server
     ctx = make_context(tmp_path, dry_run=True)
 
-    release = github_release.latest(ctx, "owner/repo")
+    release = github_release.latest("owner/repo")
 
     assert release.tag == "v1.2.3"
     assert state.paths == ["/repos/owner/repo/releases/latest"]
@@ -329,36 +327,37 @@ def test_environment_tokens_are_ignored(tmp_path, api_server, monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "secret")
     monkeypatch.setenv("GH_TOKEN", "other-secret")
 
-    github_release.latest(make_context(tmp_path), "owner/repo")
+    make_context(tmp_path)
+    github_release.latest("owner/repo")
 
     assert state.header(0, "Authorization") is None
 
 
 def test_arguments_are_validated_without_network_access(tmp_path, api_server):
     state = api_server
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="project must be a string"):
-        github_release.latest(ctx, 1)
+        github_release.latest(1)
     with pytest.raises(TaskFailed, match="project must not be empty"):
-        github_release.latest(ctx, " ")
+        github_release.latest(" ")
     with pytest.raises(TaskFailed, match="owner/repo"):
-        github_release.latest(ctx, "owner")
+        github_release.latest("owner")
     with pytest.raises(TaskFailed, match="owner/repo"):
-        github_release.latest(ctx, "owner/repo/extra")
+        github_release.latest("owner/repo/extra")
     with pytest.raises(TaskFailed, match="whitespace"):
-        github_release.latest(ctx, "own er/repo")
+        github_release.latest("own er/repo")
 
     with pytest.raises(TaskFailed, match="tag must be a string"):
-        github_release.by_tag(ctx, "owner/repo", 1)
+        github_release.by_tag("owner/repo", 1)
     with pytest.raises(TaskFailed, match="tag must not be empty"):
-        github_release.by_tag(ctx, "owner/repo", " ")
+        github_release.by_tag("owner/repo", " ")
     with pytest.raises(TaskFailed, match="whitespace"):
-        github_release.by_tag(ctx, "owner/repo", "v1 2")
+        github_release.by_tag("owner/repo", "v1 2")
 
     with pytest.raises(TaskFailed, match="timeout"):
-        github_release.latest(ctx, "owner/repo", timeout=0)
+        github_release.latest("owner/repo", timeout=0)
     with pytest.raises(TaskFailed, match="timeout"):
-        github_release.latest(ctx, "owner/repo", timeout=True)
+        github_release.latest("owner/repo", timeout=True)
 
     assert state.paths == []

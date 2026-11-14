@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kitup.facts import collect_facts, collect_mounts, parse_mountinfo, parse_os_release
+from kitup.host_facts import collect_facts, collect_mounts, parse_mountinfo, parse_os_release
 
 
 def test_parse_os_release_handles_quotes_comments_and_blanks():

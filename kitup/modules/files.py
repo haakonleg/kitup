@@ -21,7 +21,7 @@ from .._utils.validation import (
     require_state,
     require_text,
 )
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -30,7 +30,6 @@ module("files", "Files, directories, symlinks, lines, blocks, INI files, and mov
 
 
 def file(
-    ctx: TaskContext,
     path: str | Path,
     *,
     state: State = "present",
@@ -44,6 +43,7 @@ def file(
 
     ``sudo=True`` performs the operation through the privileged worker.
     """
+    ctx = current_context()
     require_state(state, "file")
     require_path(path, "file path")
     require_metadata(owner, group)
@@ -111,7 +111,6 @@ def file(
 
 
 def copy(
-    ctx: TaskContext,
     src: str | Path,
     dest: str | Path,
     *,
@@ -126,6 +125,7 @@ def copy(
     the bundle. Absolute paths are used as-is. When ``dest`` ends with a slash
     it is treated as a directory and the source filename is appended.
     """
+    ctx = current_context()
     require_path(src, "copy source")
     require_path(dest, "copy destination")
     require_metadata(owner, group)
@@ -198,7 +198,6 @@ def copy(
 
 
 def move(
-    ctx: TaskContext,
     src: str | Path,
     dest: str | Path,
     *,
@@ -215,6 +214,7 @@ def move(
     ``dest`` exists, the move is treated as complete. ``mode``, ``owner``, and
     ``group`` are applied to the destination after the move.
     """
+    ctx = current_context()
     require_path(src, "move source")
     require_path(dest, "move destination")
     require_metadata(owner, group)
@@ -286,15 +286,10 @@ def move(
 
 
 def line(
-    ctx: TaskContext,
-    path: str | Path,
-    line: str,
-    *,
-    match: str | None = None,
-    state: State = "present",
-    sudo: bool = False,
+    path: str | Path, line: str, *, match: str | None = None, state: State = "present", sudo: bool = False
 ) -> CallResult:
     """Add, replace, or remove a line selected by an exact value or regex."""
+    ctx = current_context()
     require_state(state, "line")
     require_path(path, "line path")
     require_single_line(line, "line")
@@ -343,16 +338,9 @@ def line(
     )
 
 
-def block(
-    ctx: TaskContext,
-    path: str | Path,
-    marker: str,
-    content: str,
-    *,
-    state: State = "present",
-    sudo: bool = False,
-) -> CallResult:
+def block(path: str | Path, marker: str, content: str, *, state: State = "present", sudo: bool = False) -> CallResult:
     """Create, update, or remove a marked block in a file."""
+    ctx = current_context()
     require_state(state, "block")
     require_path(path, "block path")
     require_text(marker, "block marker")
@@ -408,7 +396,6 @@ def block(
 
 
 def ini(
-    ctx: TaskContext,
     path: str | Path,
     *,
     section: str | None = None,
@@ -426,6 +413,7 @@ def ini(
     are written canonically as ``option = value``. ``match`` selects one of
     several same-named sections and is never written to the file.
     """
+    ctx = current_context()
     require_state(state, "ini")
     require_path(path, "ini path")
     require_bool(create, "ini create")
@@ -466,7 +454,6 @@ def ini(
 
 
 def toml(
-    ctx: TaskContext,
     path: str | Path,
     *,
     table: str | None = None,
@@ -495,6 +482,7 @@ def toml(
     an absent edit on a missing file is a no-op. ``sudo=True`` edits through
     the privileged worker.
     """
+    ctx = current_context()
     require_state(state, "toml")
     require_path(path, "toml path")
     require_bool(create, "toml create")
@@ -531,7 +519,6 @@ def toml(
 
 
 def directory(
-    ctx: TaskContext,
     path: str | Path,
     *,
     state: State = "present",
@@ -542,6 +529,7 @@ def directory(
     sudo: bool = False,
 ) -> CallResult:
     """Ensure a directory exists or is absent."""
+    ctx = current_context()
     require_state(state, "directory")
     require_path(path, "directory path")
     require_metadata(owner, group)
@@ -602,8 +590,9 @@ def directory(
     )
 
 
-def symlink(ctx: TaskContext, target: str | Path, path: str | Path, *, sudo: bool = False) -> CallResult:
+def symlink(target: str | Path, path: str | Path, *, sudo: bool = False) -> CallResult:
     """Create a symlink, replacing an existing file or symlink."""
+    ctx = current_context()
     require_text(str(target), "symlink target")
     require_path(path, "symlink path")
     require_bool(sudo, "symlink sudo")

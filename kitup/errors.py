@@ -37,12 +37,7 @@ class TaskFailed(KitupError):
     """A task (usually a module) failed in an expected way."""
 
     def __init__(
-        self,
-        message: str,
-        *,
-        command: list[str] | tuple[str, ...] | None = None,
-        stdout: str = "",
-        stderr: str = "",
+        self, message: str, *, command: list[str] | tuple[str, ...] | None = None, stdout: str = "", stderr: str = ""
     ) -> None:
         super().__init__(message)
         self.message = message

@@ -92,13 +92,12 @@ def test_create_user_and_group(tmp_path: Path, capsys) -> None:
         from kitup.modules import users
 
         @task("create group")
-        def create_group(ctx):
-            users.group(ctx, {GROUP!r}, gid={gid})
+        def create_group():
+            users.group({GROUP!r}, gid={gid})
 
         @task("create user")
-        def create_user(ctx):
+        def create_user():
             users.user(
-                ctx,
                 {USER!r},
                 uid={uid},
                 group={GROUP!r},
@@ -128,11 +127,11 @@ def test_membership_add_and_remove(tmp_path: Path, capsys) -> None:
         from kitup.modules import users
 
         @task("create user and groups")
-        def create(ctx):
-            users.group(ctx, {GROUP!r})
-            users.group(ctx, {OTHER_GROUP!r})
-            users.user(ctx, {USER!r}, group={GROUP!r}, create_home=False)
-            users.membership(ctx, {USER!r}, {OTHER_GROUP!r})
+        def create():
+            users.group({GROUP!r})
+            users.group({OTHER_GROUP!r})
+            users.user({USER!r}, group={GROUP!r}, create_home=False)
+            users.membership({USER!r}, {OTHER_GROUP!r})
         """,
     )
 
@@ -149,8 +148,8 @@ def test_membership_add_and_remove(tmp_path: Path, capsys) -> None:
         from kitup.modules import users
 
         @task("remove membership")
-        def remove(ctx):
-            users.membership(ctx, {USER!r}, {OTHER_GROUP!r}, state="absent")
+        def remove():
+            users.membership({USER!r}, {OTHER_GROUP!r}, state="absent")
         """,
     )
 
@@ -167,8 +166,8 @@ def test_password_is_idempotent(tmp_path: Path, capsys) -> None:
         from kitup.modules import users
 
         @task("create user")
-        def create(ctx):
-            users.user(ctx, {USER!r}, create_home=False)
+        def create():
+            users.user({USER!r}, create_home=False)
         """,
     )
     assert run_kitup("apply", create_root) == 0
@@ -181,8 +180,8 @@ def test_password_is_idempotent(tmp_path: Path, capsys) -> None:
         from kitup.modules import users
 
         @task("set password")
-        def set_password(ctx):
-            users.user(ctx, {USER!r}, password={PASSWORD_HASH!r})
+        def set_password():
+            users.user({USER!r}, password={PASSWORD_HASH!r})
         """,
     )
 
@@ -203,9 +202,8 @@ def test_modify_user_shell_and_home(tmp_path: Path, capsys) -> None:
         from kitup.modules import users
 
         @task("create user")
-        def create(ctx):
+        def create():
             users.user(
-                ctx,
                 {USER!r},
                 home={str(HOME)!r},
                 shell="/bin/bash",
@@ -223,8 +221,8 @@ def test_modify_user_shell_and_home(tmp_path: Path, capsys) -> None:
         from kitup.modules import users
 
         @task("modify user")
-        def modify(ctx):
-            users.user(ctx, {USER!r}, home={str(ALT_HOME)!r}, shell="/bin/zsh")
+        def modify():
+            users.user({USER!r}, home={str(ALT_HOME)!r}, shell="/bin/zsh")
         """,
     )
 
@@ -249,8 +247,8 @@ def test_remove_user_leaves_home(tmp_path: Path) -> None:
         from kitup.modules import users
 
         @task("create user")
-        def create(ctx):
-            users.user(ctx, {USER!r}, home={str(HOME)!r}, create_home=True)
+        def create():
+            users.user({USER!r}, home={str(HOME)!r}, create_home=True)
         """,
     )
     assert run_kitup("apply", create_root) == 0
@@ -263,8 +261,8 @@ def test_remove_user_leaves_home(tmp_path: Path) -> None:
         from kitup.modules import users
 
         @task("remove user")
-        def remove(ctx):
-            users.user(ctx, {USER!r}, state="absent")
+        def remove():
+            users.user({USER!r}, state="absent")
         """,
     )
 
@@ -281,8 +279,8 @@ def test_remove_group(tmp_path: Path) -> None:
         from kitup.modules import users
 
         @task("create group")
-        def create(ctx):
-            users.group(ctx, {GROUP!r})
+        def create():
+            users.group({GROUP!r})
         """,
     )
     assert run_kitup("apply", create_root) == 0
@@ -295,8 +293,8 @@ def test_remove_group(tmp_path: Path) -> None:
         from kitup.modules import users
 
         @task("remove group")
-        def remove(ctx):
-            users.group(ctx, {GROUP!r}, state="absent")
+        def remove():
+            users.group({GROUP!r}, state="absent")
         """,
     )
 
@@ -312,9 +310,9 @@ def test_dry_run_does_not_create(tmp_path: Path) -> None:
         from kitup.modules import users
 
         @task("create user and group")
-        def create(ctx):
-            users.group(ctx, {GROUP!r})
-            users.user(ctx, {USER!r}, group={GROUP!r}, create_home=False)
+        def create():
+            users.group({GROUP!r})
+            users.user({USER!r}, group={GROUP!r}, create_home=False)
         """,
     )
 
@@ -331,10 +329,10 @@ def test_remove_primary_group_membership_fails(tmp_path: Path, capsys) -> None:
         from kitup.modules import users
 
         @task("create user and remove primary membership")
-        def create(ctx):
-            users.group(ctx, {GROUP!r})
-            users.user(ctx, {USER!r}, group={GROUP!r}, create_home=False)
-            users.membership(ctx, {USER!r}, {GROUP!r}, state="absent")
+        def create():
+            users.group({GROUP!r})
+            users.user({USER!r}, group={GROUP!r}, create_home=False)
+            users.membership({USER!r}, {GROUP!r}, state="absent")
         """,
     )
 

@@ -1,11 +1,11 @@
 # Modules
 
-Built-in modules provide idempotent operations for bundle tasks. Each function
-accepts `ctx` first. Methods inspect the current system state and change only
-what is needed, and mutating operations honor `--dry-run`.
+Built-in modules provide idempotent operations for bundle tasks. Functions that
+need the task context retrieve it themselves. Methods inspect the current system
+state and change only what is needed, and mutating operations honor `--dry-run`.
 
 ```python
-from kitup import task
+from kitup import ctx
 from kitup.modules import dnf, files
 ```
 
@@ -24,8 +24,7 @@ did and the data fields documented on each module page:
 - Method-specific fields, such as `path` for `files.file()`.
 
 ```python
-result = files.file(ctx, "/etc/example.conf", content="value\n")
-
+result = files.file("/etc/example.conf", content="value\n")
 if result.changed:
     ctx.note(result.summary)
 ```

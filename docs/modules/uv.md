@@ -4,10 +4,9 @@ Manage uv projects, per-user CLI tools, and uv configuration files with uv's nat
 
 ```python
 from kitup.modules import uv
-from kitup import task
 ```
 
-## `dependencies(ctx, names, *, project, state="present", group=None, python=None, extra_args=None)`
+## `dependencies(names, *, project, state="present", group=None, python=None, extra_args=None)`
 
 Declare dependencies of a uv project in its `pyproject.toml`, then sync the project (`uv.lock` and `.venv`) with `uv sync`.
 
@@ -28,32 +27,14 @@ Declare dependencies of a uv project in its `pyproject.toml`, then sync the proj
 - `project` — the project directory.
 
 ```python
-@task("Declare project dependencies", tags={"python"})
-def project_dependencies(ctx):
-    uv.dependencies(ctx, ["requests>=2.32", "psycopg[binary]"], project="~/src/myapp")
-
-
-@task("Pin a dependency", tags={"python"})
-def pin_requests(ctx):
-    uv.dependencies(ctx, ["requests==2.32.3"], project="~/src/myapp")
-
-
-@task("Update a dependency to the newest version", tags={"python"})
-def update_requests(ctx):
-    uv.dependencies(ctx, ["requests"], project="~/src/myapp", state="latest")
-
-
-@task("Manage a dev dependency group", tags={"python"})
-def dev_group(ctx):
-    uv.dependencies(ctx, ["ruff"], project="~/src/myapp", group="dev")
-
-
-@task("Remove a dependency", tags={"python"})
-def remove_legacy(ctx):
-    uv.dependencies(ctx, ["old-lib"], project="~/src/myapp", state="absent")
+uv.dependencies(["requests>=2.32", "psycopg[binary]"], project="~/src/myapp")
+uv.dependencies(["requests==2.32.3"], project="~/src/myapp")
+uv.dependencies(["requests"], project="~/src/myapp", state="latest")
+uv.dependencies(["ruff"], project="~/src/myapp", group="dev")
+uv.dependencies(["old-lib"], project="~/src/myapp", state="absent")
 ```
 
-## `tools(ctx, names, *, state="present", python=None, extra_args=None)`
+## `tools(names, *, state="present", python=None, extra_args=None)`
 
 Ensure per-user uv CLI tools are installed, up to date, or uninstalled.
 
@@ -71,22 +52,12 @@ Ensure per-user uv CLI tools are installed, up to date, or uninstalled.
 - `tools` — the requested names, as given.
 
 ```python
-@task("Install CLI tools with uv", tags={"python"})
-def install_tools(ctx):
-    uv.tools(ctx, ["ruff", "httpie==3.2.2"])
-
-
-@task("Upgrade CLI tools", tags={"python"})
-def upgrade_tools(ctx):
-    uv.tools(ctx, ["ruff", "httpie"], state="latest")
-
-
-@task("Remove a CLI tool", tags={"python"})
-def remove_tool(ctx):
-    uv.tools(ctx, ["httpie"], state="absent")
+uv.tools(["ruff", "httpie==3.2.2"])
+uv.tools(["ruff", "httpie"], state="latest")
+uv.tools(["httpie"], state="absent")
 ```
 
-## `config(ctx, option, value=None, *, state="present", scope="user", project=None, path=None, sudo=None)`
+## `config(option, value=None, *, state="present", scope="user", project=None, path=None, sudo=None)`
 
 Set or remove one option in a uv configuration file: system (`/etc/uv/uv.toml`), user (`$XDG_CONFIG_HOME/uv/uv.toml`, default `~/.config/uv/uv.toml`), or project (a project-level `uv.toml` or `[tool.uv]` in `pyproject.toml`). Precedence is project > user > system for scalars; a project-level `uv.toml` beats `[tool.uv]`.
 
@@ -107,24 +78,10 @@ Set or remove one option in a uv configuration file: system (`/etc/uv/uv.toml`),
 - `toml_action` — `"added"`, `"replaced"`, `"removed"`, or `"unchanged"`.
 
 ```python
-@task("Use a corporate package index", tags={"python"})
-def corporate_index(ctx):
-    uv.config(ctx, "index-url", "https://pypi.example.com/simple", scope="system")
-
-
-@task("Speed up uv for this user", tags={"python"})
-def user_settings(ctx):
-    uv.config(ctx, "concurrent-downloads", 8, scope="user")
-
-
-@task("Configure uv for a project", tags={"python"})
-def project_settings(ctx):
-    uv.config(ctx, "python-downloads", "manual", scope="project", project="~/src/myapp")
-
-
-@task("Remove a custom option", tags={"python"})
-def remove_custom_option(ctx):
-    uv.config(ctx, "native-tls", state="absent", scope="user")
+uv.config("index-url", "https://pypi.example.com/simple", scope="system")
+uv.config("concurrent-downloads", 8, scope="user")
+uv.config("python-downloads", "manual", scope="project", project="~/src/myapp")
+uv.config("native-tls", state="absent", scope="user")
 ```
 
 ## Notes

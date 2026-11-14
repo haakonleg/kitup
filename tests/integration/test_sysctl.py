@@ -42,8 +42,8 @@ def test_runtime_only_set(tmp_path: Path, capsys) -> None:
         from kitup.modules import sysctl
 
         @task("set key at runtime only")
-        def set_runtime(ctx):
-            sysctl.key(ctx, {KEY!r}, 1)
+        def set_runtime():
+            sysctl.key({KEY!r}, 1)
         """,
     )
     assert run_kitup("apply", root) == 0
@@ -65,8 +65,8 @@ def test_persist_to_file(tmp_path: Path, capsys) -> None:
         from kitup.modules import sysctl
 
         @task("set key and persist it")
-        def set_and_persist(ctx):
-            sysctl.key(ctx, {KEY!r}, 1, file={CONF!r})
+        def set_and_persist():
+            sysctl.key({KEY!r}, 1, file={CONF!r})
         """,
     )
     assert run_kitup("apply", root) == 0
@@ -91,8 +91,8 @@ def test_preexisting_no_space_entry_is_idempotent(tmp_path: Path, capsys) -> Non
         from kitup.modules import sysctl
 
         @task("set key and persist it")
-        def set_and_persist(ctx):
-            sysctl.key(ctx, {KEY!r}, 1, file={CONF!r})
+        def set_and_persist():
+            sysctl.key({KEY!r}, 1, file={CONF!r})
         """,
     )
     run(sudo("sysctl", "-w", f"{KEY}=1"))
@@ -113,8 +113,8 @@ def test_absent_removes_file_entry(tmp_path: Path, capsys) -> None:
         from kitup.modules import sysctl
 
         @task("persist key")
-        def persist(ctx):
-            sysctl.key(ctx, {KEY!r}, 1, file={CONF!r})
+        def persist():
+            sysctl.key({KEY!r}, 1, file={CONF!r})
         """,
     )
     assert run_kitup("apply", present_root) == 0
@@ -128,8 +128,8 @@ def test_absent_removes_file_entry(tmp_path: Path, capsys) -> None:
         from kitup.modules import sysctl
 
         @task("remove persisted key")
-        def forget(ctx):
-            sysctl.key(ctx, {KEY!r}, state="absent", file={CONF!r})
+        def forget():
+            sysctl.key({KEY!r}, state="absent", file={CONF!r})
         """,
     )
     assert run_kitup("apply", absent_root) == 0
@@ -145,8 +145,8 @@ def test_unknown_key_fails(tmp_path: Path) -> None:
         from kitup.modules import sysctl
 
         @task("set unknown key")
-        def set_unknown(ctx):
-            sysctl.key(ctx, "kitup.no_such_key", 1, file={CONF!r})
+        def set_unknown():
+            sysctl.key("kitup.no_such_key", 1, file={CONF!r})
         """,
     )
     assert run_kitup("apply", root) == 1

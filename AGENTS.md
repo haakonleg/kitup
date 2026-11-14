@@ -18,6 +18,9 @@ fail-fast, with a shared `TaskContext`, changing only what is needed.
 ```text
 kitup/             # application package and run orchestration
 ├── modules/       # built-in idempotent task modules (public task API)
+├── host_facts.py  # host fact collection
+├── variables.py   # variable loading and merging
+├── _proxy.py      # ambient ctx, vars, and facts proxies
 ├── _privileged/   # privileged worker client, protocol, and server
 ├── _utils/        # shared internal helpers (files, HTTP, security)
 └── output/        # terminal output and progress rendering
@@ -126,7 +129,10 @@ When changing packaging or the zipapp builder:
 
 ### Module conventions
 
-- Every public function in `kitup/modules/` takes `ctx: TaskContext` first.
+- Public functions in `kitup/modules/` that need the task context retrieve it
+  with `ctx = current_context()` as the first statement after the docstring.
+  Never use the `ctx`, `vars`, or `facts` proxies in library code; they are for
+  user code. Private helpers keep an explicit `ctx: TaskContext` parameter.
 - Modules MUST be idempotent: inspect current state first and change only what
   is needed. Use `ctx.changed(action=..., summary=..., **data)` for inline
   results or `ctx.changed(result)` when a helper already returns a `CallResult`.

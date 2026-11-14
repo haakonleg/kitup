@@ -132,6 +132,19 @@ def test_modules_do_not_hard_code_actions():
     assert not offenders, "modules must not pass action explicitly: " + ", ".join(offenders)
 
 
+def test_public_module_functions_take_no_context_parameter():
+    """Public module functions retrieve the task context themselves."""
+    offenders: list[str] = []
+    for name in sorted(_module_names()):
+        module = importlib.import_module(f"{PACKAGE_NAME}.modules.{name}")
+        for function_name in sorted(_public_functions(module)):
+            function = getattr(module, function_name)
+            if "ctx" in inspect.signature(function).parameters:
+                offenders.append(f"{name}.{function_name}")
+
+    assert not offenders, "public module functions must not take ctx: " + ", ".join(offenders)
+
+
 def test_modules_have_documentation():
     """Every built-in module has a matching page in ``docs/modules``."""
     module_names = _module_names()

@@ -11,7 +11,7 @@ def test_matching_value_is_a_noop(tmp_path):
     command.responses = [response(0, "'dark'\n")]
     ctx = make_context(tmp_path, command=command)
 
-    gsettings.key(ctx, "org.example", "theme", "dark")
+    gsettings.key("org.example", "theme", "dark")
 
     assert argvs(command) == [["gsettings", "get", "org.example", "theme"]]
     assert ctx.changes == []
@@ -22,7 +22,7 @@ def test_string_value_is_set_with_gvariant_quoting(tmp_path):
     command.responses = [response(0, "'light'\n"), response(0)]
     ctx = make_context(tmp_path, command=command)
 
-    gsettings.key(ctx, "org.example", "theme", "it's dark")
+    gsettings.key("org.example", "theme", "it's dark")
 
     assert command.calls[1][0] == [
         "gsettings",
@@ -45,11 +45,11 @@ def test_bool_int_and_list_values_are_formatted(tmp_path):
         response(0, "[]\n"),
         response(0),
     ]
-    ctx = make_context(tmp_path, command=command)
+    make_context(tmp_path, command=command)
 
-    gsettings.key(ctx, "org.example", "enabled", value=True)
-    gsettings.key(ctx, "org.example", "count", 3)
-    gsettings.key(ctx, "org.example", "items", ["a", 2])
+    gsettings.key("org.example", "enabled", value=True)
+    gsettings.key("org.example", "count", 3)
+    gsettings.key("org.example", "items", ["a", 2])
 
     assert command.calls[1][0][-1] == "true"
     assert command.calls[3][0][-1] == "3"
@@ -59,18 +59,18 @@ def test_bool_int_and_list_values_are_formatted(tmp_path):
 def test_tuple_values_use_gvariant_tuple_syntax(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "[]\n"), response(0)]
-    ctx = make_context(tmp_path, command=command)
+    make_context(tmp_path, command=command)
 
-    gsettings.key(ctx, "org.example", "sources", [("xkb", "us")])
+    gsettings.key("org.example", "sources", [("xkb", "us")])
 
     assert command.calls[1][0][-1] == "[('xkb', 'us')]"
 
 
 def test_gsettings_refuses_root(tmp_path):
-    ctx = make_context(tmp_path, sudo=FakeSudo(is_root=True))
+    make_context(tmp_path, sudo=FakeSudo(is_root=True))
 
     with pytest.raises(TaskFailed, match="must run as the target user"):
-        gsettings.key(ctx, "org.example", "theme", "dark")
+        gsettings.key("org.example", "theme", "dark")
 
 
 def test_dry_run_does_not_set(tmp_path):
@@ -78,7 +78,7 @@ def test_dry_run_does_not_set(tmp_path):
     command.responses = [response(0, "'light'\n")]
     ctx = make_context(tmp_path, dry_run=True, command=command)
 
-    gsettings.key(ctx, "org.example", "theme", "dark")
+    gsettings.key("org.example", "theme", "dark")
 
     assert len(command.calls) == 1
     assert len(ctx.changes) == 1
@@ -93,7 +93,7 @@ def test_absent_resets_the_key(tmp_path):
     ]
     ctx = make_context(tmp_path, command=command)
 
-    gsettings.key(ctx, "org.example", "theme", state="absent")
+    gsettings.key("org.example", "theme", state="absent")
 
     assert argvs(command) == [
         ["gsettings", "get", "org.example", "theme"],
@@ -118,22 +118,22 @@ def test_absent_is_a_noop_at_the_schema_default(tmp_path):
     ]
     ctx = make_context(tmp_path, command=command)
 
-    gsettings.key(ctx, "org.example", "theme", state="absent")
+    gsettings.key("org.example", "theme", state="absent")
 
     assert len(command.calls) == 2
     assert ctx.changes == []
 
 
 def test_invalid_arguments_are_rejected(tmp_path):
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="value is required"):
-        gsettings.key(ctx, "org.example", "theme")
+        gsettings.key("org.example", "theme")
     with pytest.raises(TaskFailed, match="state 'absent' does not take a value"):
-        gsettings.key(ctx, "org.example", "theme", "dark", state="absent")
+        gsettings.key("org.example", "theme", "dark", state="absent")
     with pytest.raises(TaskFailed, match="invalid gsettings state"):
-        gsettings.key(ctx, "org.example", "theme", state="unknown")
+        gsettings.key("org.example", "theme", state="unknown")
     with pytest.raises(TaskFailed, match="gsettings schema must not be empty"):
-        gsettings.key(ctx, "  ", "theme", "dark")
+        gsettings.key("  ", "theme", "dark")
     with pytest.raises(TaskFailed, match="gsettings key must not be empty"):
-        gsettings.key(ctx, "org.example", "  ", "dark")
+        gsettings.key("org.example", "  ", "dark")

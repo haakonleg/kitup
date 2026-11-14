@@ -4,10 +4,9 @@ Manage Flatpak remote repositories, applications, and runtimes.
 
 ```python
 from kitup.modules import flatpak
-from kitup import task
 ```
 
-## `remote(ctx, name, url=None, *, state="present", scope="system", gpg_verify=True)`
+## `remote(name, url=None, *, state="present", scope="system", gpg_verify=True)`
 
 Manage a Flatpak remote repository.
 
@@ -31,26 +30,18 @@ applications still use it, the task fails.
 - `url` — repository URL (present-state results only).
 
 ```python
-@task("Add Flathub", tags={"flatpak"})
-def add_flathub(ctx):
-    flatpak.remote(
-        ctx,
-        "flathub",
-        "https://dl.flathub.org/repo/flathub.flatpakrepo",
-    )
-
-
-@task("Add local Flatpak repository", tags={"flatpak"})
-def add_local_repository(ctx):
-    flatpak.remote(
-        ctx,
-        "local",
-        "file:///srv/flatpak-repo",
-        gpg_verify=False,
-    )
+flatpak.remote(
+    "flathub",
+    "https://dl.flathub.org/repo/flathub.flatpakrepo",
+)
+flatpak.remote(
+    "local",
+    "file:///srv/flatpak-repo",
+    gpg_verify=False,
+)
 ```
 
-## `packages(ctx, names, *, state="present", scope="system", remote=None)`
+## `packages(names, *, state="present", scope="system", remote=None)`
 
 Ensure Flatpak applications or runtimes are installed or removed.
 
@@ -79,18 +70,11 @@ not moved or reinstalled.
 No-change results use an empty `added` or `removed` list.
 
 ```python
-@task("Install Flatpak apps", tags={"flatpak"})
-def install_flatpak_apps(ctx):
-    flatpak.packages(
-        ctx,
-        ["org.gnome.Calculator", "org.gnome.TextEditor"],
-        remote="flathub",
-    )
-
-
-@task("Remove Flatpak app", tags={"flatpak"})
-def remove_flatpak_app(ctx):
-    flatpak.packages(ctx, "org.gnome.Calculator", state="absent")
+flatpak.packages(
+    ["org.gnome.Calculator", "org.gnome.TextEditor"],
+    remote="flathub",
+)
+flatpak.packages("org.gnome.Calculator", state="absent")
 ```
 
 ## Notes

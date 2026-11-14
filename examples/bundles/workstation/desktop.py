@@ -1,13 +1,12 @@
-from kitup import task
+from kitup import task, vars
 from kitup.modules import gsettings
 
 
 @task(tags={"desktop"})
-def use_dark_theme(ctx):
+def use_dark_theme():
     """Use the dark GNOME color scheme."""
     gsettings.key(
-        ctx,
         "org.gnome.desktop.interface",
         "color-scheme",
-        ctx.vars.GNOME_COLOR_SCHEME,
+        vars.GNOME_COLOR_SCHEME,
     )

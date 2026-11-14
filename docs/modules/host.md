@@ -5,10 +5,9 @@ time zone, network time synchronization, RTC mode, and system locale.
 
 ```python
 from kitup.modules import host
-from kitup import task
 ```
 
-## `hostname(ctx, name=None, *, pretty=None)`
+## `hostname(name=None, *, pretty=None)`
 
 Ensure the static and/or pretty system hostname.
 
@@ -23,14 +22,8 @@ At least one of `name` or `pretty` is required. Static hostnames must be valid
 lower-case DNS names.
 
 ```python
-@task("Configure the hostname")
-def configure_hostname(ctx):
-    host.hostname(ctx, "workstation", pretty="Workstation")
-
-
-@task("Clear the pretty hostname")
-def clear_pretty_hostname(ctx):
-    host.hostname(ctx, pretty="")
+host.hostname("workstation", pretty="Workstation")
+host.hostname(pretty="")
 ```
 
 Only the requested hostname forms are changed.
@@ -39,7 +32,7 @@ Only the requested hostname forms are changed.
 
 - `hostnames` — mapping of the requested `"static"` and `"pretty"` names.
 
-## `timezone(ctx, zone)`
+## `timezone(zone)`
 
 Ensure the system time zone.
 
@@ -48,9 +41,7 @@ Ensure the system time zone.
 - `zone` — IANA time zone name, for example `Europe/Oslo`.
 
 ```python
-@task("Set the time zone")
-def set_timezone(ctx):
-    host.timezone(ctx, "Europe/Oslo")
+host.timezone("Europe/Oslo")
 ```
 
 Setting the time zone may also adjust the RTC when it is configured as local
@@ -60,7 +51,7 @@ time.
 
 - `timezone` — requested time zone.
 
-## `ntp(ctx, enabled)`
+## `ntp(enabled)`
 
 Enable or disable network time synchronization.
 
@@ -69,9 +60,7 @@ Enable or disable network time synchronization.
 - `enabled` — `True` to enable, `False` to disable.
 
 ```python
-@task("Enable network time synchronization")
-def enable_ntp(ctx):
-    host.ntp(ctx, True)
+host.ntp(True)
 ```
 
 Fails when network time synchronization is unavailable.
@@ -80,7 +69,7 @@ Fails when network time synchronization is unavailable.
 
 - `ntp` — requested boolean state.
 
-## `rtc_local(ctx, enabled=False)`
+## `rtc_local(enabled=False)`
 
 Configure whether the hardware clock is interpreted as local time.
 
@@ -90,9 +79,7 @@ Configure whether the hardware clock is interpreted as local time.
   local time.
 
 ```python
-@task("Keep the RTC in UTC")
-def keep_rtc_utc(ctx):
-    host.rtc_local(ctx, False)
+host.rtc_local(False)
 ```
 
 Changing the RTC mode may adjust the system clock.
@@ -101,7 +88,7 @@ Changing the RTC mode may adjust the system clock.
 
 - `rtc_local` — requested boolean state.
 
-## `locale(ctx, values)`
+## `locale(values)`
 
 Ensure system locale variables, leaving variables that are not listed
 unchanged.
@@ -117,9 +104,7 @@ Supported keys are `LANG`, `LANGUAGE`, and the `LC_*` variables accepted by
 `LC_MEASUREMENT`, and `LC_IDENTIFICATION`.
 
 ```python
-@task("Set the system locale")
-def set_locale(ctx):
-    host.locale(ctx, {"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"})
+host.locale({"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"})
 ```
 
 `LC_ALL` is not supported, and `LANGUAGE` must be a single locale name.

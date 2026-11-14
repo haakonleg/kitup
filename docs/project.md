@@ -142,14 +142,14 @@ humanized from the function name, and the default description is the docstring:
 
 ```python
 # bundles/base/packages.py
-from kitup import task
+from kitup import task, vars
 from kitup.modules import dnf
 
 
 @task(tags={"packages"})
-def install_base_packages(ctx):
+def install_base_packages():
     """Install the base package set."""
-    dnf.packages(ctx, ctx.vars.PACKAGES)
+    dnf.packages(vars.PACKAGES)
 ```
 
 The task above is shown as **Install base packages** with the description
@@ -158,7 +158,7 @@ to override the docstring:
 
 ```python
 @task("Install packages", tags={"packages"}, description="Base package set")
-def install_base_packages(ctx): ...
+def install_base_packages(): ...
 ```
 
 `tags` is a sequence of strings. Entries may be comma-separated, and surrounding
@@ -168,14 +168,17 @@ Use `@bundle.task` for tasks declared inline in `__init__.py`; it accepts the
 same forms. Task ids are `<bundle id>.<function name>` and must be unique within
 a bundle.
 
-To annotate the context parameter, import the type from the package root:
+Read variables with the `vars` proxy. Reach the rest of the task context with
+the `ctx` proxy exported from the package root:
 
 ```python
-from kitup import TaskContext
+from kitup import ctx, task, vars
 
 
 @task
-def install_base_packages(ctx: TaskContext): ...
+def install_base_packages():
+    ctx.note("installing base packages")
+    dnf.packages(vars.PACKAGES)
 ```
 
 ### Resources
@@ -231,22 +234,22 @@ from kitup.modules import files
 module("motd", "Write the message of the day.")
 
 
-def message(ctx, text: str) -> CallResult:
+def message(text: str) -> CallResult:
     """Write the message of the day."""
-    return files.file(ctx, "/etc/motd", content=text + "\n", sudo=True)
+    return files.file("/etc/motd", content=text + "\n", sudo=True)
 ```
 
 Tasks import custom modules like any other Python module:
 
 ```python
-from kitup import task
+from kitup import task, vars
 from modules import motd
 
 
 @task
-def configure_machine(ctx):
+def configure_machine():
     """Write the message of the day."""
-    motd.message(ctx, ctx.vars.MOTD)
+    motd.message(vars.MOTD)
 ```
 
 See [Custom modules](custom-modules.md) for package modules and the full
@@ -302,14 +305,16 @@ A task in `workstation` sees `PACKAGES == ["git", "ripgrep"]`; a task in another
 bundle does not see the workstation defaults. When the project does not define
 a key, the bundle value is used. `--include-vars` and `--exclude-vars` apply
 only to project-level sources, and `--var-file` sources are also project-level.
-Bundle values are still read through `ctx.vars`.
+Bundle values are still read through `vars`.
 
-The merged result is available as `ctx.vars`. Read an optional value with
-`get()` or require one with `require()`:
+The merged result is available as `vars`. Read an optional value with `get()`
+or require one with `require()`:
 
 ```python
-packages = ctx.vars.get("PACKAGES", [])
-color_scheme = ctx.vars.require("GNOME_COLOR_SCHEME")
+from kitup import vars
+
+packages = vars.get("PACKAGES", [])
+color_scheme = vars.require("GNOME_COLOR_SCHEME")
 ```
 
 `require()` raises a vars error naming the missing key and listing the available
@@ -324,8 +329,10 @@ SERVERS = [{"host": "example", "port": 443}]
 ```
 
 ```python
-theme = ctx.vars.SETTINGS.theme.name
-port = ctx.vars.SERVERS[0].port
+from kitup import vars
+
+theme = vars.SETTINGS.theme.name
+port = vars.SERVERS[0].port
 ```
 
 Var files may import each other through the `vars` package:
@@ -339,10 +346,13 @@ Keep var files side-effect-free and limited to public constants.
 
 ## Context
 
-Every task receives `ctx`:
+Tasks reach the task context through the `ctx` proxy exported from the package
+root:
 
-- `ctx.vars` — merged variable values.
-- `ctx.facts` — read-only host facts; see [Facts](facts.md).
+- `ctx.vars` — merged variable values. Also available as the `vars` shortcut:
+  `from kitup import vars`.
+- `ctx.facts` — read-only host facts; see [Facts](facts.md). Also available as
+  the `facts` shortcut: `from kitup import facts`.
 - `ctx.root` — the project root.
 - `ctx.project` — the discovered project: bundles, var paths, preset paths, and
   external bundle roots.
@@ -360,9 +370,9 @@ value:
 ```python
 # bundles/base/packages.py
 @task
-def install_packages(ctx):
+def install_packages():
     """Install packages."""
-    dnf.packages(ctx, ctx.vars.PACKAGES)
+    dnf.packages(vars.PACKAGES)
 
 
 # bundles/base/services.py
@@ -370,7 +380,7 @@ from .packages import install_packages
 
 
 @task
-def enable_services(ctx):
+def enable_services():
     """Enable services when packages changed."""
     if not ctx.result(install_packages).changed:
         ctx.skip("packages unchanged")
@@ -395,33 +405,33 @@ Side effects run only when the registering task changes something. Declare them
 with `@side_effect` and register them from a task:
 
 ```python
-from kitup import side_effect, task
+from kitup import ctx, side_effect, task, vars
 from kitup.modules import command, dnf, files
 
 
 @side_effect
-def refresh_metadata(ctx):
+def refresh_metadata():
     """Refresh package metadata."""
-    command.run(ctx, ["dnf5", "makecache"], sudo=True)
+    command.run(["dnf5", "makecache"], sudo=True)
 
 
 @side_effect(one_shot=False)
-def reload_nginx(ctx):
+def reload_nginx():
     """Reload nginx."""
-    command.run(ctx, ["systemctl", "reload", "nginx"], sudo=True)
+    command.run(["systemctl", "reload", "nginx"], sudo=True)
 
 
 @task(tags={"packages"})
-def install_packages(ctx):
+def install_packages():
     """Install packages."""
-    dnf.packages(ctx, ctx.vars.PACKAGES)
+    dnf.packages(vars.PACKAGES)
     ctx.side_effect(refresh_metadata)
 
 
 @task(tags={"web"})
-def configure_nginx(ctx):
+def configure_nginx():
     """Configure nginx."""
-    files.file(ctx, "/etc/nginx/nginx.conf", content="...")
+    files.file("/etc/nginx/nginx.conf", content="...")
     ctx.side_effect(reload_nginx)
 ```
 
@@ -433,10 +443,9 @@ bundle and can be read with `ctx.result()` from that bundle only.
 A side effect runs only when the registering task reports a change; tasks that
 are `ok`, `skipped`, or `failed` do not trigger theirs. Side effects inherit tag
 selection from the registering task, use the registering bundle's context, and
-can inspect earlier task results. They take only `ctx`; use closures for
-parameters. Within a bundle, side-effect function names must be unique and must
-not collide with task function names. Re-registering the same `SideEffect` is
-allowed.
+can inspect earlier task results. They take no parameters. Within a bundle,
+side-effect function names must be unique and must not collide with task
+function names. Re-registering the same `SideEffect` is allowed.
 
 - `one_shot=True` (the default) defers the side effect to the end of the bundle
   and runs it at most once per bundle per apply run. A side effect shared by two

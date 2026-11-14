@@ -12,7 +12,7 @@ def test_guarded_command_is_skipped(tmp_path):
     marker = tmp_path / "marker"
     marker.write_text("exists")
 
-    result = command.run(ctx, ["touch", str(marker)], creates=marker)
+    result = command.run(["touch", str(marker)], creates=marker)
 
     assert runner.calls == []
     assert ctx.changes == []
@@ -23,11 +23,11 @@ def test_guarded_command_is_skipped(tmp_path):
 
 def test_broken_symlink_marker_skips_the_command(tmp_path):
     runner = FakeCommandRunner()
-    ctx = make_context(tmp_path, command=runner)
+    make_context(tmp_path, command=runner)
     marker = tmp_path / "marker"
     marker.symlink_to(tmp_path / "missing")
 
-    result = command.run(ctx, ["true"], creates=marker)
+    result = command.run(["true"], creates=marker)
 
     assert runner.calls == []
     assert result.changed is False
@@ -38,7 +38,7 @@ def test_unguarded_command_runs_and_records_change(tmp_path):
     runner = FakeCommandRunner()
     ctx = make_context(tmp_path, command=runner)
 
-    result = command.run(ctx, ["true"])
+    result = command.run(["true"])
 
     assert runner.calls[0][0] == ["true"]
     assert ctx.changes == [result]
@@ -50,10 +50,10 @@ def test_unguarded_command_runs_and_records_change(tmp_path):
 
 def test_cmd_keyword_is_accepted_by_run_and_shell(tmp_path):
     runner = FakeCommandRunner()
-    ctx = make_context(tmp_path, command=runner)
+    make_context(tmp_path, command=runner)
 
-    result = command.run(ctx, cmd=["true"])
-    shell_result = command.shell(ctx, cmd="echo hello", shell="/bin/bash")
+    result = command.run(cmd=["true"])
+    shell_result = command.shell(cmd="echo hello", shell="/bin/bash")
 
     assert result.cmd == ["true"]
     assert result.action == "command.run"
@@ -65,7 +65,7 @@ def test_changed_false_records_a_no_change_call(tmp_path):
     runner = FakeCommandRunner()
     ctx = make_context(tmp_path, command=runner)
 
-    result = command.run(ctx, ["true"], changed=False)
+    result = command.run(["true"], changed=False)
 
     assert runner.calls[0][0] == ["true"]
     assert ctx.changes == []
@@ -76,10 +76,10 @@ def test_changed_false_records_a_no_change_call(tmp_path):
 def test_sudo_is_forwarded_and_requested_only_when_set(tmp_path):
     runner = FakeCommandRunner()
     sudo = FakeSudo()
-    ctx = make_context(tmp_path, command=runner, sudo=sudo)
+    make_context(tmp_path, command=runner, sudo=sudo)
 
-    command.run(ctx, ["first"])
-    command.run(ctx, ["second"], sudo=True)
+    command.run(["first"])
+    command.run(["second"], sudo=True)
 
     assert runner.calls[0][1]["sudo"] is False
     assert runner.calls[1][1]["sudo"] is True
@@ -89,7 +89,7 @@ def test_dry_run_does_not_execute_mutating_command(tmp_path):
     runner = FakeCommandRunner()
     ctx = make_context(tmp_path, dry_run=True, command=runner)
 
-    result = command.run(ctx, ["touch", "file"])
+    result = command.run(["touch", "file"])
 
     assert runner.calls == []
     assert ctx.changes == [result]
@@ -101,7 +101,7 @@ def test_dry_run_does_not_execute_changed_false_commands(tmp_path):
     runner = FakeCommandRunner()
     ctx = make_context(tmp_path, dry_run=True, command=runner)
 
-    result = command.run(ctx, ["true"], changed=False)
+    result = command.run(["true"], changed=False)
 
     assert runner.calls == []
     assert ctx.changes == []
@@ -111,9 +111,9 @@ def test_dry_run_does_not_execute_changed_false_commands(tmp_path):
 
 def test_shell_uses_explicit_shell(tmp_path):
     runner = FakeCommandRunner()
-    ctx = make_context(tmp_path, command=runner)
+    make_context(tmp_path, command=runner)
 
-    command.shell(ctx, "echo hello", shell="/bin/bash")
+    command.shell("echo hello", shell="/bin/bash")
 
     assert runner.calls[0][0] == ["/bin/bash", "-c", "echo hello"]
 
@@ -121,9 +121,9 @@ def test_shell_uses_explicit_shell(tmp_path):
 def test_shell_uses_default_shell_from_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("SHELL", "/bin/zsh")
     runner = FakeCommandRunner()
-    ctx = make_context(tmp_path, command=runner)
+    make_context(tmp_path, command=runner)
 
-    command.shell(ctx, "echo hello")
+    command.shell("echo hello")
 
     assert runner.calls[0][0] == ["/bin/zsh", "-c", "echo hello"]
 
@@ -132,7 +132,7 @@ def test_shell_unless_runs_through_shell(tmp_path):
     runner = FakeCommandRunner()
     ctx = make_context(tmp_path, command=runner)
 
-    command.shell(ctx, "install", shell="/bin/bash", unless="test -e /thing")
+    command.shell("install", shell="/bin/bash", unless="test -e /thing")
 
     assert runner.calls == [
         (
@@ -152,20 +152,20 @@ def test_shell_unless_runs_through_shell(tmp_path):
 
 
 def test_invalid_arguments_are_rejected(tmp_path):
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="creates path must not be empty"):
-        command.run(ctx, ["true"], creates="")
+        command.run(["true"], creates="")
     with pytest.raises(TaskFailed, match="cwd must not be empty"):
-        command.run(ctx, ["true"], cwd="")
+        command.run(["true"], cwd="")
     with pytest.raises(TaskFailed, match="unless must not be empty"):
-        command.run(ctx, ["true"], unless=" ")
+        command.run(["true"], unless=" ")
     with pytest.raises(TaskFailed, match="shell command must not be empty"):
-        command.shell(ctx, "  ")
+        command.shell("  ")
     with pytest.raises(TaskFailed, match="shell unless must not be empty"):
-        command.shell(ctx, "true", unless="  ")
+        command.shell("true", unless="  ")
     with pytest.raises(TaskFailed, match="shell must not be empty"):
-        command.shell(ctx, "true", shell="")
+        command.shell("true", shell="")
 
     for keyword, value in (
         ("changed", "yes"),
@@ -175,4 +175,4 @@ def test_invalid_arguments_are_rejected(tmp_path):
         ("timeout", float("inf")),
     ):
         with pytest.raises(TaskFailed, match="must be"):
-            command.run(ctx, ["true"], **{keyword: value})
+            command.run(["true"], **{keyword: value})

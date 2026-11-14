@@ -6,7 +6,7 @@ Remote file download over HTTP(S).
 from kitup.modules import download
 ```
 
-## `to_file(ctx, url, dest, *, checksum=None, force=False, headers=None, timeout=30, validate_certs=True, mode=None)`
+## `to_file(url, dest, *, checksum=None, force=False, headers=None, timeout=30, validate_certs=True, mode=None)`
 
 Download a URL to a destination file.
 
@@ -39,27 +39,22 @@ Download a URL to a destination file.
 ```python
 from pathlib import Path
 
-from kitup.modules import files
+from kitup.modules import download, files
 
-
-@task("Install example repository key", tags={"repos"})
-def install_example_key(ctx):
-    key = Path("/tmp/example-key.asc")
-    download.to_file(
-        ctx,
-        "https://example.test/repo/key.asc",
-        key,
-        checksum="sha256:...",
-    )
-    files.move(
-        ctx,
-        key,
-        "/etc/pki/rpm-gpg/RPM-GPG-KEY-example",
-        mode=0o644,
-        owner="root",
-        group="root",
-        sudo=True,
-    )
+key = Path("/tmp/example-key.asc")
+download.to_file(
+    "https://example.test/repo/key.asc",
+    key,
+    checksum="sha256:...",
+)
+files.move(
+    key,
+    "/etc/pki/rpm-gpg/RPM-GPG-KEY-example",
+    mode=0o644,
+    owner="root",
+    group="root",
+    sudo=True,
+)
 ```
 
 Existing destination symlinks are rejected rather than followed. Parent
@@ -69,7 +64,7 @@ With `force=False` and no checksum, an existing file is never re-downloaded.
 Use `force=True` to check the remote content on each run; the file is reported
 as changed only when its bytes differ. Dry runs do not contact the remote server.
 
-## `to_bytes(ctx, url, *, checksum=None, headers=None, timeout=30, validate_certs=True, max_bytes=10485760)`
+## `to_bytes(url, *, checksum=None, headers=None, timeout=30, validate_certs=True, max_bytes=10485760)`
 
 Download a URL into memory and return its raw bytes.
 
@@ -86,10 +81,12 @@ Download a URL into memory and return its raw bytes.
 Returns the raw response body as `bytes`. This method records no call.
 
 ```python
-@task("Read example metadata")
-def read_example_metadata(ctx):
-    content = download.to_bytes(ctx, "https://example.test/metadata.json")
-    metadata = json.loads(content)
+import json
+
+from kitup.modules import download
+
+content = download.to_bytes("https://example.test/metadata.json")
+metadata = json.loads(content)
 ```
 
 Prefer `to_file()` for large files.

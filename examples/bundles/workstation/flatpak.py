@@ -1,18 +1,17 @@
-from kitup import task
+from kitup import task, vars
 from kitup.modules import flatpak
 
 
 @task(tags={"flatpak"})
-def add_flathub(ctx):
+def add_flathub():
     """Add the Flathub remote."""
-    flatpak.remote(ctx, ctx.vars.FLATPAK_REMOTE, ctx.vars.FLATPAK_URL)
+    flatpak.remote(vars.FLATPAK_REMOTE, vars.FLATPAK_URL)
 
 
 @task(tags={"flatpak"})
-def install_flatpak_apps(ctx):
+def install_flatpak_apps():
     """Install the configured Flatpak applications."""
     flatpak.packages(
-        ctx,
-        ctx.vars.FLATPAK_APPLICATIONS,
-        remote=ctx.vars.FLATPAK_REMOTE,
+        vars.FLATPAK_APPLICATIONS,
+        remote=vars.FLATPAK_REMOTE,
     )

@@ -15,16 +15,16 @@ from .helpers import FakeSudo, PassthroughSudo, make_context
 
 
 @pytest.fixture
-def ctx(tmp_path):
-    context = make_context(tmp_path, sudo=PassthroughSudo())
+def context(tmp_path):
+    task_context = make_context(tmp_path, sudo=PassthroughSudo())
     try:
-        yield context
+        yield task_context
     finally:
-        context.close()
+        task_context.close()
 
 
-def test_worker_stays_in_parent_session(ctx):
-    worker = PrivilegedWorker(ctx)
+def test_worker_stays_in_parent_session(context):
+    worker = PrivilegedWorker(context)
 
     try:
         worker.start()
@@ -35,19 +35,19 @@ def test_worker_stays_in_parent_session(ctx):
         worker.close()
 
 
-def test_worker_rejects_oversized_header_before_start(ctx, monkeypatch):
+def test_worker_rejects_oversized_header_before_start(context, monkeypatch):
     monkeypatch.setattr(client_module, "MAX_HEADER_BYTES", 10)
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         with pytest.raises(TaskFailed, match="too large"):
-            worker.request(Request("stat", {"path": str(ctx.root)}))
+            worker.request(Request("stat", {"path": str(context.root)}))
         assert worker._process is None
     finally:
         worker.close()
 
 
-def test_worker_closes_on_fatal_error(ctx, tmp_path, monkeypatch):
+def test_worker_closes_on_fatal_error(context, tmp_path, monkeypatch):
     monkeypatch.setattr(
         client_module,
         "_embedded_script",
@@ -60,7 +60,7 @@ print('{"error":"fatal boom","fatal":true}', flush=True)
 """
         ),
     )
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         with pytest.raises(TaskFailed, match="fatal boom"):
@@ -70,13 +70,13 @@ print('{"error":"fatal boom","fatal":true}', flush=True)
         worker.close()
 
 
-def test_worker_reports_startup_error(ctx, monkeypatch):
+def test_worker_reports_startup_error(context, monkeypatch):
     monkeypatch.setattr(
         client_module,
         "_embedded_script",
         lambda: 'import sys\nprint(\'{"error":"boom"}\', flush=True)\n',
     )
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         with pytest.raises(TaskFailed, match="boom"):
@@ -85,9 +85,9 @@ def test_worker_reports_startup_error(ctx, monkeypatch):
         worker.close()
 
 
-def test_worker_file_actions(ctx, tmp_path):
+def test_worker_file_actions(context, tmp_path):
     path = tmp_path / "file"
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         assert (
@@ -118,9 +118,9 @@ def test_worker_file_actions(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_reads_and_writes_empty_files(ctx, tmp_path):
+def test_worker_reads_and_writes_empty_files(context, tmp_path):
     path = tmp_path / "empty"
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         worker.request(Request("write", {"path": str(path)}, content_length=0), content=b"")
@@ -131,10 +131,10 @@ def test_worker_reads_and_writes_empty_files(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_round_trips_content_larger_than_the_header_limit(ctx, tmp_path):
+def test_worker_round_trips_content_larger_than_the_header_limit(context, tmp_path):
     path = tmp_path / "large"
     content = b"x" * (2 * 1024 * 1024)
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         worker.request(Request("write", {"path": str(path)}, content_length=len(content)), content=content)
@@ -145,10 +145,10 @@ def test_worker_round_trips_content_larger_than_the_header_limit(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_snapshot_skips_content_on_size_mismatch(ctx, tmp_path):
+def test_worker_snapshot_skips_content_on_size_mismatch(context, tmp_path):
     path = tmp_path / "file"
     path.write_bytes(b"data\n")
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         response = worker.request(Request("snapshot", {"path": str(path), "content_size": 5}))
@@ -169,7 +169,7 @@ def test_worker_snapshot_skips_content_on_size_mismatch(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_compare_action(ctx, tmp_path):
+def test_worker_compare_action(context, tmp_path):
     source = tmp_path / "source"
     source.write_text("data\n")
     same = tmp_path / "same"
@@ -180,7 +180,7 @@ def test_worker_compare_action(ctx, tmp_path):
     link.symlink_to(source)
     directory = tmp_path / "directory"
     directory.mkdir()
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         result = worker.request(Request("compare", {"source": str(source), "path": str(same)})).result
@@ -202,12 +202,12 @@ def test_worker_compare_action(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_compare_rejects_non_regular_sources(ctx, tmp_path):
+def test_worker_compare_rejects_non_regular_sources(context, tmp_path):
     directory = tmp_path / "directory"
     directory.mkdir()
     link = tmp_path / "link"
     link.symlink_to(directory)
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         with pytest.raises(TaskFailed, match="regular file"):
@@ -218,12 +218,12 @@ def test_worker_compare_rejects_non_regular_sources(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_copy_action(ctx, tmp_path):
+def test_worker_copy_action(context, tmp_path):
     source = tmp_path / "source"
     source.write_text("data\n")
     source.chmod(0o640)
     destination = tmp_path / "destination"
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         assert worker.request(Request("copy", {"source": str(source), "path": str(destination)})).result == {}
@@ -236,7 +236,7 @@ def test_worker_copy_action(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_copy_replaces_symlink_and_rejects_directories(ctx, tmp_path):
+def test_worker_copy_replaces_symlink_and_rejects_directories(context, tmp_path):
     source = tmp_path / "source"
     source.write_text("new\n")
     target = tmp_path / "target"
@@ -245,7 +245,7 @@ def test_worker_copy_replaces_symlink_and_rejects_directories(ctx, tmp_path):
     link.symlink_to(target)
     directory = tmp_path / "directory"
     directory.mkdir()
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         worker.request(Request("copy", {"source": str(source), "path": str(link)}))
@@ -261,11 +261,11 @@ def test_worker_copy_replaces_symlink_and_rejects_directories(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_move_action(ctx, tmp_path):
+def test_worker_move_action(context, tmp_path):
     source = tmp_path / "source"
     source.write_text("data\n")
     destination = tmp_path / "destination"
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         assert worker.request(Request("move", {"source": str(source), "path": str(destination)})).result == {}
@@ -275,10 +275,10 @@ def test_worker_move_action(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_directory_metadata_and_symlink(ctx, tmp_path):
+def test_worker_directory_metadata_and_symlink(context, tmp_path):
     directory = tmp_path / "dir"
     link = tmp_path / "link"
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         assert worker.request(Request("mkdir", {"path": str(directory), "mode": 0o700})).result == {}
@@ -293,9 +293,9 @@ def test_worker_directory_metadata_and_symlink(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_rejects_unknown_action_and_stays_alive(ctx, tmp_path):
+def test_worker_rejects_unknown_action_and_stays_alive(context, tmp_path):
     path = tmp_path / "file"
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         with pytest.raises(TaskFailed, match="unknown privileged action"):
@@ -307,8 +307,8 @@ def test_worker_rejects_unknown_action_and_stays_alive(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_reports_malformed_request_lines(ctx):
-    worker = PrivilegedWorker(ctx)
+def test_worker_reports_malformed_request_lines(context):
+    worker = PrivilegedWorker(context)
     worker.start()
     process = worker._process
     assert process is not None and process.stdin is not None
@@ -324,8 +324,8 @@ def test_worker_reports_malformed_request_lines(ctx):
         worker.close()
 
 
-def test_worker_reports_empty_request_lines(ctx):
-    worker = PrivilegedWorker(ctx)
+def test_worker_reports_empty_request_lines(context):
+    worker = PrivilegedWorker(context)
     worker.start()
     process = worker._process
     assert process is not None and process.stdin is not None
@@ -340,13 +340,13 @@ def test_worker_reports_empty_request_lines(ctx):
         worker.close()
 
 
-def test_worker_start_failure_includes_stderr_and_exit_code(ctx, monkeypatch):
+def test_worker_start_failure_includes_stderr_and_exit_code(context, monkeypatch):
     monkeypatch.setattr(
         client_module,
         "_embedded_script",
         lambda: "import sys\nprint('startup boom', file=sys.stderr, flush=True)\nsys.exit(7)\n",
     )
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         with pytest.raises(TaskFailed) as excinfo:
@@ -358,8 +358,8 @@ def test_worker_start_failure_includes_stderr_and_exit_code(ctx, monkeypatch):
         worker.close()
 
 
-def test_worker_rejects_relative_path(ctx):
-    worker = PrivilegedWorker(ctx)
+def test_worker_rejects_relative_path(context):
+    worker = PrivilegedWorker(context)
 
     try:
         with pytest.raises(TaskFailed, match="absolute"):
@@ -391,14 +391,14 @@ def test_privileged_files_normalize_relative_paths(tmp_path, monkeypatch):
     context.privileged_worker = capture  # type: ignore[assignment]
     monkeypatch.chdir(tmp_path)
 
-    files.file(context, "relative.txt", content="data\n", sudo=True)
+    files.file("relative.txt", content="data\n", sudo=True)
 
     assert capture.requests
     assert all(request.params["path"].startswith("/") for request in capture.requests)
     assert capture.requests[-1].params["path"] == str(tmp_path / "relative.txt")
 
 
-def test_privileged_path_preserves_symlink_and_dotdot(ctx, tmp_path):
+def test_privileged_path_preserves_symlink_and_dotdot(context, tmp_path):
     a = tmp_path / "a"
     b = tmp_path / "b"
     a.mkdir()
@@ -406,19 +406,19 @@ def test_privileged_path_preserves_symlink_and_dotdot(ctx, tmp_path):
     (a / "link").symlink_to(b / "data", target_is_directory=True)
     path = a / "link" / ".." / "x"
 
-    files.file(ctx, path, content="data\n", sudo=True)
+    files.file(path, content="data\n", sudo=True)
 
     assert (b / "x").read_text() == "data\n"
     assert not (a / "x").exists()
 
 
-def test_worker_invalid_response_closes(ctx, tmp_path, monkeypatch):
+def test_worker_invalid_response_closes(context, tmp_path, monkeypatch):
     monkeypatch.setattr(
         client_module,
         "_embedded_script",
         lambda: "import sys\nprint('ready', flush=True)\nsys.stdin.readline()\nprint('not json', flush=True)\n",
     )
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         with pytest.raises(TaskFailed, match="invalid privileged worker response"):
@@ -428,9 +428,9 @@ def test_worker_invalid_response_closes(ctx, tmp_path, monkeypatch):
         worker.close()
 
 
-def test_worker_rejects_invalid_mode_and_ids(ctx, tmp_path):
+def test_worker_rejects_invalid_mode_and_ids(context, tmp_path):
     path = tmp_path / "file"
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         for params in (
@@ -447,10 +447,10 @@ def test_worker_rejects_invalid_mode_and_ids(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_rejects_invalid_content_size(ctx, tmp_path):
+def test_worker_rejects_invalid_content_size(context, tmp_path):
     path = tmp_path / "file"
     path.write_text("data\n")
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
 
     try:
         for value in (-1, True, "1", 1.5):
@@ -460,8 +460,8 @@ def test_worker_rejects_invalid_content_size(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_reuses_one_process(ctx, tmp_path):
-    worker = PrivilegedWorker(ctx)
+def test_worker_reuses_one_process(context, tmp_path):
+    worker = PrivilegedWorker(context)
 
     try:
         worker.request(Request("stat", {"path": str(tmp_path)}))
@@ -476,11 +476,11 @@ def test_worker_reuses_one_process(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_serializes_concurrent_requests(ctx, tmp_path):
+def test_worker_serializes_concurrent_requests(context, tmp_path):
     existing = tmp_path / "existing"
     existing.write_text("x")
     missing = tmp_path / "missing"
-    worker = PrivilegedWorker(ctx)
+    worker = PrivilegedWorker(context)
     errors = []
 
     def check(path, expected):
@@ -507,8 +507,8 @@ def test_worker_serializes_concurrent_requests(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_restarts_after_crash(ctx, tmp_path):
-    worker = PrivilegedWorker(ctx)
+def test_worker_restarts_after_crash(context, tmp_path):
+    worker = PrivilegedWorker(context)
 
     try:
         worker.request(Request("stat", {"path": str(tmp_path)}))
@@ -530,8 +530,8 @@ def test_worker_restarts_after_crash(ctx, tmp_path):
         worker.close()
 
 
-def test_worker_close_is_permanent(ctx, tmp_path):
-    worker = PrivilegedWorker(ctx)
+def test_worker_close_is_permanent(context, tmp_path):
+    worker = PrivilegedWorker(context)
 
     worker.request(Request("stat", {"path": str(tmp_path)}))
     worker.close()
@@ -540,13 +540,13 @@ def test_worker_close_is_permanent(ctx, tmp_path):
         worker.request(Request("stat", {"path": str(tmp_path)}))
 
 
-def test_worker_timeout_closes_process(ctx, tmp_path, monkeypatch):
+def test_worker_timeout_closes_process(context, tmp_path, monkeypatch):
     monkeypatch.setattr(
         client_module,
         "_embedded_script",
         lambda: "import sys\nprint('ready', flush=True)\nfor _ in sys.stdin:\n    pass\n",
     )
-    worker = PrivilegedWorker(ctx, timeout=0.2, startup_timeout=5)
+    worker = PrivilegedWorker(context, timeout=0.2, startup_timeout=5)
 
     try:
         with pytest.raises(TaskFailed, match="timed out"):
@@ -559,7 +559,7 @@ def test_worker_timeout_closes_process(ctx, tmp_path, monkeypatch):
 def test_unprivileged_operations_do_not_start_worker(tmp_path):
     context = make_context(tmp_path, sudo=FakeSudo())
 
-    files.file(context, tmp_path / "file", content="data\n")
+    files.file(tmp_path / "file", content="data\n")
 
     assert context.privileged_worker._process is None
     context.close()

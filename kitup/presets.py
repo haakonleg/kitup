@@ -39,11 +39,7 @@ def read_preset_tokens(path: Path) -> list[str]:
 
 
 def parse_with_presets(
-    parser: Parser,
-    argv: Sequence[str],
-    *,
-    root: Path | None = None,
-    on_warning: Callable[[str], None] | None = None,
+    parser: Parser, argv: Sequence[str], *, root: Path | None = None, on_warning: Callable[[str], None] | None = None
 ) -> tuple[Args, tuple[Path, ...]]:
     """Parse ``argv`` and overlay any ``--preset`` files before the real CLI.
 
@@ -78,11 +74,7 @@ def parse_with_presets(
 
 
 def _parse_preset_tokens(
-    parser: Parser,
-    command: str,
-    tokens: Sequence[str],
-    path: Path,
-    on_warning: Callable[[str], None],
+    parser: Parser, command: str, tokens: Sequence[str], path: Path, on_warning: Callable[[str], None]
 ) -> Args:
     filtered = _filter_preset_tokens(tokens)
     try:

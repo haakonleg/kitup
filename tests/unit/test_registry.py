@@ -94,7 +94,7 @@ def test_bundle_factory_supports_assignment(tmp_path):
         tmp_path,
         {
             "__init__.py": "from kitup import bundle\n\ncreated = bundle('Base')\n",
-            "tasks.py": "from kitup import task\n\n@task\ndef install(ctx):\n    pass\n",
+            "tasks.py": "from kitup import task\n\n@task\ndef install():\n    pass\n",
         },
     )
 
@@ -108,8 +108,8 @@ def test_modules_none_auto_discovers_sibling_task_modules(tmp_path):
         tmp_path,
         {
             "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
-            "02_second.py": "from kitup import task\n\n@task\ndef second(ctx):\n    pass\n",
-            "01_first.py": "from kitup import task\n\n@task\ndef first(ctx):\n    pass\n",
+            "02_second.py": "from kitup import task\n\n@task\ndef second():\n    pass\n",
+            "01_first.py": "from kitup import task\n\n@task\ndef first():\n    pass\n",
             "_helper.py": "VALUE = 1\n",
         },
     )
@@ -125,8 +125,8 @@ def test_explicit_modules_define_order(tmp_path):
             "__init__.py": (
                 "from kitup import bundle\nfrom . import first, second\nbundle('Base', modules=[second, first])\n"
             ),
-            "first.py": "from kitup import task\n\n@task\ndef first(ctx):\n    pass\n",
-            "second.py": "from kitup import task\n\n@task\ndef second(ctx):\n    pass\n",
+            "first.py": "from kitup import task\n\n@task\ndef first():\n    pass\n",
+            "second.py": "from kitup import task\n\n@task\ndef second():\n    pass\n",
         },
     )
 
@@ -139,7 +139,7 @@ def test_empty_modules_disables_auto_discovery(tmp_path):
         tmp_path,
         {
             "__init__.py": "from kitup import bundle\n\nbundle('Base', modules=[])\n",
-            "tasks.py": "from kitup import task\n\n@task\ndef first(ctx):\n    pass\n",
+            "tasks.py": "from kitup import task\n\n@task\ndef first():\n    pass\n",
         },
     )
 
@@ -167,7 +167,7 @@ def test_modules_accept_relative_and_absolute_paths(tmp_path):
         from kitup import task
 
         @task
-        def install(ctx):
+        def install():
             pass
         """,
     )
@@ -189,14 +189,14 @@ def test_path_module_supports_sibling_relative_imports(tmp_path):
         from ._helper import VALUE
 
         @task
-        def show(ctx):
+        def show():
             return VALUE
         """,
     )
 
     bundle = Bundle("Base", path=bundle_dir, modules=["tasks.py"])
 
-    assert bundle.tasks[0].func(None) == 42
+    assert bundle.tasks[0].func() == 42
 
 
 def test_path_modules_must_exist_be_files_and_use_the_py_suffix(tmp_path):
@@ -219,7 +219,7 @@ def test_path_modules_must_exist_be_files_and_use_the_py_suffix(tmp_path):
 def test_duplicate_task_module_paths_are_rejected(tmp_path):
     write(
         tmp_path / "tasks.py",
-        "from kitup import task\n\n@task\ndef install(ctx):\n    pass\n",
+        "from kitup import task\n\n@task\ndef install():\n    pass\n",
     )
 
     with pytest.raises(BundleError, match="duplicate task module path"):
@@ -236,7 +236,7 @@ def test_path_module_without_tasks_is_an_error(tmp_path):
 def test_same_path_module_is_shared_between_bundles(tmp_path):
     write(
         tmp_path / "tasks.py",
-        "from kitup import task\n\n@task\ndef shared(ctx):\n    pass\n",
+        "from kitup import task\n\n@task\ndef shared():\n    pass\n",
     )
 
     first = Bundle("One", modules=[tmp_path / "tasks.py"])
@@ -261,7 +261,7 @@ def test_task_module_can_be_shared_between_bundles(tmp_path):
         tmp_path,
         {
             "__init__.py": "from . import tasks, one, two\n",
-            "tasks.py": "from kitup import task\n\n@task\ndef shared(ctx):\n    pass\n",
+            "tasks.py": "from kitup import task\n\n@task\ndef shared():\n    pass\n",
             "one/__init__.py": "from kitup import bundle\nfrom .. import tasks\n\nbundle('One', modules=[tasks])\n",
             "two/__init__.py": "from kitup import bundle\nfrom .. import tasks\n\nbundle('Two', modules=[tasks])\n",
         },
@@ -283,8 +283,8 @@ def test_reexported_task_is_not_claimed_by_the_importing_module(tmp_path):
             "__init__.py": (
                 "from kitup import bundle\nfrom . import first, second\nbundle('Base', modules=[first, second])\n"
             ),
-            "first.py": "from kitup import task\n\n@task\ndef shared(ctx):\n    pass\n",
-            "second.py": ("from kitup import task\nfrom .first import shared\n\n@task\ndef other(ctx):\n    pass\n"),
+            "first.py": "from kitup import task\n\n@task\ndef shared():\n    pass\n",
+            "second.py": ("from kitup import task\nfrom .first import shared\n\n@task\ndef other():\n    pass\n"),
         },
     )
 
@@ -331,16 +331,16 @@ def test_module_task_decorator_forms(tmp_path):
                 "from kitup import task\n"
                 "\n"
                 "@task\n"
-                "def install_base_packages(ctx):\n"
+                "def install_base_packages():\n"
                 "    '''Install base packages.'''\n"
                 "    pass\n"
                 "\n"
                 "@task('Second', tags={'packages'}, description='details')\n"
-                "def second(ctx):\n"
+                "def second():\n"
                 "    pass\n"
                 "\n"
                 "@task(tags={'other'})\n"
-                "def third(ctx):\n"
+                "def third():\n"
                 "    pass\n"
             ),
         },
@@ -363,15 +363,15 @@ def test_bundle_task_decorator_forms(tmp_path):
     bundle = Bundle("Base", path=tmp_path)
 
     @bundle.task
-    def install_base_packages(ctx):
+    def install_base_packages():
         """Install base packages."""
 
     @bundle.task("Custom")
-    def custom(ctx):
+    def custom():
         pass
 
     @bundle.task(tags={"other"})
-    def tagged(ctx):
+    def tagged():
         pass
 
     assert [registered.name for registered in bundle.tasks] == [
@@ -386,13 +386,13 @@ def test_bundle_task_decorator_forms(tmp_path):
 def test_humanized_names_collapse_underscores(tmp_path):
     bundle = Bundle("Base", path=tmp_path)
 
-    def _private_task(ctx):
+    def _private_task():
         pass
 
-    def install__packages(ctx):
+    def install__packages():
         pass
 
-    def trailing_(ctx):
+    def trailing_():
         pass
 
     bundle.task(_private_task)
@@ -423,10 +423,10 @@ def test_names_and_descriptions_are_normalized():
     bundle = Bundle("Base")
 
     @bundle.task("  Custom  ")
-    def custom(ctx):
+    def custom():
         pass
 
-    effect = side_effect("  Refresh  ")(lambda ctx: None)
+    effect = side_effect("  Refresh  ")(lambda: None)
 
     assert bundle.tasks[0].name == "Custom"
     assert effect.name == "Refresh"
@@ -438,11 +438,11 @@ def test_descriptions_must_be_strings():
 
     bundle = Bundle("Base")
     with pytest.raises(BundleError, match="description must be a string"):
-        bundle.task(description=1)(lambda ctx: None)  # type: ignore[arg-type]
+        bundle.task(description=1)(lambda: None)  # type: ignore[arg-type]
     with pytest.raises(BundleError, match="description must be a string"):
-        task(description=1)(lambda ctx: None)  # type: ignore[arg-type]
+        task(description=1)(lambda: None)  # type: ignore[arg-type]
     with pytest.raises(BundleError, match="description must be a string"):
-        side_effect(description=1)(lambda ctx: None)  # type: ignore[arg-type]
+        side_effect(description=1)(lambda: None)  # type: ignore[arg-type]
 
 
 def test_dependency_ids_are_stripped():
@@ -454,10 +454,10 @@ def test_dependency_ids_are_stripped():
 def test_bundle_tasks_are_cached_and_invalidated_on_add():
     bundle = Bundle("Base")
 
-    def first(ctx):
+    def first():
         pass
 
-    def second(ctx):
+    def second():
         pass
 
     bundle.task(first)
@@ -474,7 +474,7 @@ def test_bundle_tasks_are_cached_and_invalidated_on_add():
 def test_duplicate_task_ids_are_rejected():
     bundle = Bundle("Base")
 
-    def install(ctx):
+    def install():
         pass
 
     bundle.task(install)
@@ -489,8 +489,8 @@ def test_duplicate_task_ids_across_modules_are_rejected(tmp_path):
             tmp_path,
             {
                 "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
-                "first.py": "from kitup import task\n\n@task\ndef install(ctx):\n    pass\n",
-                "second.py": "from kitup import task\n\n@task\ndef install(ctx):\n    pass\n",
+                "first.py": "from kitup import task\n\n@task\ndef install():\n    pass\n",
+                "second.py": "from kitup import task\n\n@task\ndef install():\n    pass\n",
             },
         )
 
@@ -512,7 +512,7 @@ def test_task_tags_are_validated_and_normalized():
     bundle = Bundle("Base")
 
     @bundle.task(tags={" packages ", "config,docs"})
-    def tagged(ctx):
+    def tagged():
         pass
 
     assert bundle.tasks[0].tags == frozenset({"packages", "config", "docs"})
@@ -534,19 +534,19 @@ def test_task_functions_may_return_values(tmp_path):
     bundle = Bundle("Local", path=tmp_path)
 
     @bundle.task("Return value")
-    def return_value(ctx):
+    def return_value():
         return "value"
 
-    assert return_value(None) == "value"
+    assert return_value() == "value"
     assert bundle.tasks[0].func is return_value
 
 
 def test_side_effect_decorator_forms():
     @side_effect
-    def reload_nginx(ctx):
+    def reload_nginx():
         """Reload nginx."""
 
-    explicit = side_effect("Refresh", one_shot=False, description="details")(lambda ctx: None)
+    explicit = side_effect("Refresh", one_shot=False, description="details")(lambda: None)
 
     assert isinstance(reload_nginx, SideEffect)
     assert reload_nginx.name == "Reload nginx"
@@ -571,7 +571,7 @@ def test_bundle_of_requires_a_bundle(tmp_path):
         tmp_path,
         {
             "__init__.py": "",
-            "tasks.py": "from kitup import task\n\n@task\ndef deferred(ctx):\n    pass\n",
+            "tasks.py": "from kitup import task\n\n@task\ndef deferred():\n    pass\n",
         },
     )
 

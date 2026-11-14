@@ -25,21 +25,21 @@ def test_hostname_matching_noops(tmp_path):
     command.responses = [response(0, "workstation\n")]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.hostname(ctx, "workstation")
+    host.hostname("workstation")
     assert argvs(command) == [["hostnamectl", "hostname", "--static"]]
     assert command.calls[0][1]["sudo"] is False
     assert ctx.changes == []
 
     command.responses = [response(0, "Workstation\n")]
     ctx = make_host_context(tmp_path, command=command)
-    host.hostname(ctx, pretty="Workstation")
+    host.hostname(pretty="Workstation")
     assert command.calls[-1][0] == ["hostnamectl", "hostname", "--pretty"]
     assert ctx.changes == []
 
     # Input is trimmed before comparison.
     command.responses = [response(0, "Workstation\n")]
     ctx = make_host_context(tmp_path, command=command)
-    host.hostname(ctx, pretty="  Workstation  ")
+    host.hostname(pretty="  Workstation  ")
     assert command.calls[-1][0] == ["hostnamectl", "hostname", "--pretty"]
     assert ctx.changes == []
 
@@ -53,7 +53,7 @@ def test_static_hostname_differs_is_set_and_verified(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.hostname(ctx, "workstation")
+    host.hostname("workstation")
 
     assert argvs(command) == [
         ["hostnamectl", "hostname", "--static"],
@@ -75,7 +75,7 @@ def test_pretty_hostname_differs_is_set_and_verified(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.hostname(ctx, pretty="Workstation")
+    host.hostname(pretty="Workstation")
 
     assert argvs(command) == [
         ["hostnamectl", "hostname", "--pretty"],
@@ -97,7 +97,7 @@ def test_empty_pretty_hostname_is_cleared(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.hostname(ctx, pretty="")
+    host.hostname(pretty="")
 
     assert argvs(command) == [
         ["hostnamectl", "hostname", "--pretty"],
@@ -120,7 +120,7 @@ def test_static_and_pretty_hostnames_are_both_managed(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.hostname(ctx, "workstation", pretty="Workstation")
+    host.hostname("workstation", pretty="Workstation")
 
     assert argvs(command) == [
         ["hostnamectl", "hostname", "--static"],
@@ -141,80 +141,80 @@ def test_dry_run_scenarios(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "fedora\n")]
     ctx = make_host_context(tmp_path, dry_run=True, command=command)
-    host.hostname(ctx, "workstation")
+    host.hostname("workstation")
     assert argvs(command) == [["hostnamectl", "hostname", "--static"]]
     assert len(ctx.changes) == 1
     assert ctx.changes[0].summary == "set static hostname workstation"
 
     command.responses = [response(0, "Timezone=UTC\n")]
     ctx = make_host_context(tmp_path, dry_run=True, command=command)
-    host.timezone(ctx, "Europe/Oslo")
+    host.timezone("Europe/Oslo")
     assert command.calls[-1][0] == ["timedatectl", "show", "--property=Timezone"]
     assert len(ctx.changes) == 1
 
     command.responses = [response(0, "CanNTP=yes\nNTP=no\n")]
     ctx = make_host_context(tmp_path, dry_run=True, command=command)
-    host.ntp(ctx, enabled=True)
+    host.ntp(enabled=True)
     assert command.calls[-1][0] == ["timedatectl", "show", "--property=CanNTP", "--property=NTP"]
     assert len(ctx.changes) == 1
 
     command.responses = [response(0, "LocalRTC=no\n")]
     ctx = make_host_context(tmp_path, dry_run=True, command=command)
-    host.rtc_local(ctx, enabled=True)
+    host.rtc_local(enabled=True)
     assert command.calls[-1][0] == ["timedatectl", "show", "--property=LocalRTC"]
     assert len(ctx.changes) == 1
 
     command.responses = [status("   System Locale: LANG=en_US.UTF-8")]
     ctx = make_host_context(tmp_path, dry_run=True, command=command)
-    host.locale(ctx, {"LANG": "en_GB.UTF-8"})
+    host.locale({"LANG": "en_GB.UTF-8"})
     assert command.calls[-1][0] == ["localectl", "status"]
     assert len(ctx.changes) == 1
 
 
 def test_invalid_arguments_are_rejected(tmp_path):
-    ctx = make_host_context(tmp_path)
+    make_host_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="requires name or pretty"):
-        host.hostname(ctx)
+        host.hostname()
     with pytest.raises(TaskFailed, match="static hostname must not be empty"):
-        host.hostname(ctx, "  ")
+        host.hostname("  ")
     with pytest.raises(TaskFailed, match="static hostname must not contain whitespace"):
-        host.hostname(ctx, "work station")
+        host.hostname("work station")
     with pytest.raises(TaskFailed, match="must not contain '\\?'"):
-        host.hostname(ctx, "workstation?")
+        host.hostname("workstation?")
     with pytest.raises(TaskFailed, match="pretty hostname must not contain control characters"):
-        host.hostname(ctx, pretty="Work\nstation")
+        host.hostname(pretty="Work\nstation")
     with pytest.raises(TaskFailed, match="time zone must not contain whitespace"):
-        host.timezone(ctx, "Europe/ Oslo")
+        host.timezone("Europe/ Oslo")
     with pytest.raises(TaskFailed, match="enabled must be a boolean"):
-        host.ntp(ctx, 1)
+        host.ntp(1)
     with pytest.raises(TaskFailed, match="enabled must be a boolean"):
-        host.rtc_local(ctx, 1)
+        host.rtc_local(1)
     with pytest.raises(TaskFailed, match="invalid locale variable: 'LC_ALL'"):
-        host.locale(ctx, {"LC_ALL": "en_US.UTF-8"})
+        host.locale({"LC_ALL": "en_US.UTF-8"})
     with pytest.raises(TaskFailed, match="LANGUAGE must be a single locale name"):
-        host.locale(ctx, {"LANGUAGE": "en_US.UTF-8:de_DE.UTF-8"})
+        host.locale({"LANGUAGE": "en_US.UTF-8:de_DE.UTF-8"})
     with pytest.raises(TaskFailed, match="locale values must not be empty"):
-        host.locale(ctx, {})
+        host.locale({})
     with pytest.raises(TaskFailed, match="locale values must be a mapping"):
-        host.locale(ctx, [("LANG", "en_US.UTF-8")])
+        host.locale([("LANG", "en_US.UTF-8")])
     with pytest.raises(TaskFailed, match="locale variable LANG must not contain whitespace"):
-        host.locale(ctx, {"LANG": "en US"})
+        host.locale({"LANG": "en US"})
     with pytest.raises(TaskFailed, match="locale variable LANG must not contain control characters"):
-        host.locale(ctx, {"LANG": "en_US\x00"})
+        host.locale({"LANG": "en_US\x00"})
 
 
 def test_hostname_failures(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1, "", "hostnamectl: unavailable")]
-    ctx = make_host_context(tmp_path, command=command)
+    make_host_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="hostnamectl hostname --static failed"):
-        host.hostname(ctx, "workstation")
+        host.hostname("workstation")
 
     command.responses = [response(0, "fedora\n"), response(0), response(0, "fedora\n")]
-    ctx = make_host_context(tmp_path, command=command)
+    make_host_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="static hostname did not change to 'workstation'"):
-        host.hostname(ctx, "workstation")
+        host.hostname("workstation")
 
 
 def test_timezone_matching_is_a_noop(tmp_path):
@@ -222,7 +222,7 @@ def test_timezone_matching_is_a_noop(tmp_path):
     command.responses = [response(0, "Timezone=Europe/Oslo\n")]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.timezone(ctx, "Europe/Oslo")
+    host.timezone("Europe/Oslo")
 
     assert argvs(command) == [
         ["timedatectl", "show", "--property=Timezone"],
@@ -240,7 +240,7 @@ def test_timezone_differs_is_set_and_verified(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.timezone(ctx, "Europe/Oslo")
+    host.timezone("Europe/Oslo")
 
     assert argvs(command) == [
         ["timedatectl", "show", "--property=Timezone"],
@@ -259,7 +259,7 @@ def test_timezone_invalid_zone_fails_before_probing(tmp_path):
     ctx = make_host_context(tmp_path, command=command)
 
     with pytest.raises(TaskFailed, match="invalid time zone"):
-        host.timezone(ctx, "Not/AZone")
+        host.timezone("Not/AZone")
 
     assert command.calls == []
     assert ctx.changes == []
@@ -268,23 +268,23 @@ def test_timezone_invalid_zone_fails_before_probing(tmp_path):
 def test_timezone_failures(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1, "", "timedatectl: unavailable")]
-    ctx = make_host_context(tmp_path, command=command)
+    make_host_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="timedatectl show failed"):
-        host.timezone(ctx, "Europe/Oslo")
+        host.timezone("Europe/Oslo")
 
     command.responses = [response(0, "Timezone=\n")]
-    ctx = make_host_context(tmp_path, command=command)
+    make_host_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="timedatectl did not report Timezone"):
-        host.timezone(ctx, "Europe/Oslo")
+        host.timezone("Europe/Oslo")
 
     command.responses = [
         response(0, "Timezone=UTC\n"),
         response(0),
         response(0, "Timezone=UTC\n"),
     ]
-    ctx = make_host_context(tmp_path, command=command)
+    make_host_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="time zone did not change to 'Europe/Oslo'"):
-        host.timezone(ctx, "Europe/Oslo")
+        host.timezone("Europe/Oslo")
 
 
 def test_ntp_matching_is_a_noop(tmp_path):
@@ -292,7 +292,7 @@ def test_ntp_matching_is_a_noop(tmp_path):
     command.responses = [response(0, "CanNTP=yes\nNTP=yes\n")]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.ntp(ctx, enabled=True)
+    host.ntp(enabled=True)
     assert argvs(command) == [
         ["timedatectl", "show", "--property=CanNTP", "--property=NTP"],
     ]
@@ -300,7 +300,7 @@ def test_ntp_matching_is_a_noop(tmp_path):
 
     command.responses = [response(0, "CanNTP=yes\nNTP=no\n")]
     ctx = make_host_context(tmp_path, command=command)
-    host.ntp(ctx, enabled=False)
+    host.ntp(enabled=False)
     assert command.calls[-1][0] == ["timedatectl", "show", "--property=CanNTP", "--property=NTP"]
     assert ctx.changes == []
 
@@ -311,7 +311,7 @@ def test_ntp_needed_change_without_capability_fails(tmp_path):
     ctx = make_host_context(tmp_path, command=command)
 
     with pytest.raises(TaskFailed, match="not available"):
-        host.ntp(ctx, enabled=True)
+        host.ntp(enabled=True)
 
     assert len(command.calls) == 1
     assert ctx.changes == []
@@ -322,7 +322,7 @@ def test_ntp_synchronization_scenarios(tmp_path):
     command.responses = [response(0, "CanNTP=yes\nNTP=no\n"), response(0)]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.ntp(ctx, enabled=True)
+    host.ntp(enabled=True)
     assert argvs(command) == [
         ["timedatectl", "show", "--property=CanNTP", "--property=NTP"],
         ["timedatectl", "set-ntp", "true"],
@@ -334,7 +334,7 @@ def test_ntp_synchronization_scenarios(tmp_path):
 
     command.responses = [response(0, "CanNTP=yes\nNTP=yes\n"), response(0)]
     ctx = make_host_context(tmp_path, command=command)
-    host.ntp(ctx, enabled=False)
+    host.ntp(enabled=False)
     assert command.calls[-1][0] == ["timedatectl", "set-ntp", "false"]
     assert call_data(ctx.changes[0]) == {"ntp": False}
     assert ctx.changes[0].summary == "disable network time synchronization"
@@ -345,7 +345,7 @@ def test_rtc_local_matching_is_a_noop(tmp_path):
     command.responses = [response(0, "LocalRTC=no\n")]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.rtc_local(ctx, enabled=False)
+    host.rtc_local(enabled=False)
     assert argvs(command) == [
         ["timedatectl", "show", "--property=LocalRTC"],
     ]
@@ -353,7 +353,7 @@ def test_rtc_local_matching_is_a_noop(tmp_path):
 
     command.responses = [response(0, "LocalRTC=yes\n")]
     ctx = make_host_context(tmp_path, command=command)
-    host.rtc_local(ctx, enabled=True)
+    host.rtc_local(enabled=True)
     assert command.calls[-1][0] == ["timedatectl", "show", "--property=LocalRTC"]
     assert ctx.changes == []
 
@@ -367,7 +367,7 @@ def test_rtc_local_switch_scenarios(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.rtc_local(ctx, enabled=True)
+    host.rtc_local(enabled=True)
     assert argvs(command) == [
         ["timedatectl", "show", "--property=LocalRTC"],
         ["timedatectl", "set-local-rtc", "1", "--adjust-system-clock"],
@@ -384,7 +384,7 @@ def test_rtc_local_switch_scenarios(tmp_path):
         response(0, "LocalRTC=no\n"),
     ]
     ctx = make_host_context(tmp_path, command=command)
-    host.rtc_local(ctx, enabled=False)
+    host.rtc_local(enabled=False)
     assert command.calls[-2][0] == [
         "timedatectl",
         "set-local-rtc",
@@ -402,10 +402,10 @@ def test_rtc_local_verification_failure_raises(tmp_path):
         response(0),
         response(0, "LocalRTC=no\n"),
     ]
-    ctx = make_host_context(tmp_path, command=command)
+    make_host_context(tmp_path, command=command)
 
     with pytest.raises(TaskFailed, match="RTC mode did not change to local time"):
-        host.rtc_local(ctx, enabled=True)
+        host.rtc_local(enabled=True)
 
 
 def test_locale_matching_values_is_a_noop(tmp_path):
@@ -418,7 +418,7 @@ def test_locale_matching_values_is_a_noop(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.locale(ctx, {"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"})
+    host.locale({"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"})
 
     assert argvs(command) == [["localectl", "status"]]
     assert command.calls[0][1]["sudo"] is False
@@ -436,7 +436,7 @@ def test_locale_ignores_kernel_command_line_settings(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.locale(ctx, {"LANG": "en_US.UTF-8"})
+    host.locale({"LANG": "en_US.UTF-8"})
 
     assert len(command.calls) == 1
     assert ctx.changes == []
@@ -457,7 +457,7 @@ def test_locale_differs_sets_all_requested_values(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.locale(ctx, {"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"})
+    host.locale({"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"})
 
     assert argvs(command) == [
         ["localectl", "status"],
@@ -487,7 +487,7 @@ def test_locale_supports_language(tmp_path):
     ]
     ctx = make_host_context(tmp_path, command=command)
 
-    host.locale(ctx, {"LANG": "en_US.UTF-8", "LANGUAGE": "en_GB.UTF-8"})
+    host.locale({"LANG": "en_US.UTF-8", "LANGUAGE": "en_GB.UTF-8"})
 
     assert command.calls[1][0] == [
         "localectl",
@@ -504,7 +504,6 @@ def test_locale_redundant_values(tmp_path):
     ctx = make_host_context(tmp_path, command=command)
 
     host.locale(
-        ctx,
         {
             "LANG": "en_US.UTF-8",
             "LANGUAGE": "en_US.UTF-8",
@@ -520,7 +519,7 @@ def test_locale_redundant_values(tmp_path):
         status("   System Locale: LANG=de_DE.UTF-8"),
     ]
     ctx = make_host_context(tmp_path, command=command)
-    host.locale(ctx, {"LANG": "de_DE.UTF-8", "LC_CTYPE": "de_DE.UTF-8"})
+    host.locale({"LANG": "de_DE.UTF-8", "LC_CTYPE": "de_DE.UTF-8"})
     assert command.calls[-2][0] == [
         "localectl",
         "set-locale",
@@ -533,15 +532,15 @@ def test_locale_redundant_values(tmp_path):
 def test_locale_failures(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1, "", "localectl: unavailable")]
-    ctx = make_host_context(tmp_path, command=command)
+    make_host_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="localectl status failed"):
-        host.locale(ctx, {"LANG": "en_US.UTF-8"})
+        host.locale({"LANG": "en_US.UTF-8"})
 
     command.responses = [
         status("   System Locale: LANG=en_US.UTF-8"),
         response(0),
         status("   System Locale: LANG=en_US.UTF-8"),
     ]
-    ctx = make_host_context(tmp_path, command=command)
+    make_host_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="locale variable LANG did not change"):
-        host.locale(ctx, {"LANG": "en_GB.UTF-8"})
+        host.locale({"LANG": "en_GB.UTF-8"})

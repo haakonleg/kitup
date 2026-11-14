@@ -4,15 +4,15 @@ Read metadata for releases in public GitHub repositories through the GitHub REST
 API.
 
 ```python
+from kitup import ctx
 from kitup.modules import github_release
-from kitup import task
 ```
 
 The module only reads release metadata and selects assets by regular expression.
 Use `by_asset()` to fetch a release and select an asset in one call. It does not
 download files; use [`download`](download.md) with an asset's URL and digest.
 
-## `latest(ctx, project, *, timeout=30)`
+## `latest(project, *, timeout=30)`
 
 Return the latest published full release for a public repository.
 
@@ -27,13 +27,11 @@ non-prerelease release. Use `by_tag()` to fetch a prerelease.
 Returns a [`Release`](#release) object. This method records no call.
 
 ```python
-@task("Show latest uv release")
-def show_latest_uv(ctx):
-    release = github_release.latest(ctx, "astral-sh/uv")
-    ctx.note(f"uv {release.tag}")
+release = github_release.latest("astral-sh/uv")
+ctx.note(f"uv {release.tag}")
 ```
 
-## `by_tag(ctx, project, tag, *, timeout=30)`
+## `by_tag(project, tag, *, timeout=30)`
 
 Return the published release for `tag`. Tags are URL-encoded, so tags containing
 `/` work.
@@ -47,10 +45,10 @@ Return the published release for `tag`. Tags are URL-encoded, so tags containing
 Returns a [`Release`](#release) object. This method records no call.
 
 ```python
-release = github_release.by_tag(ctx, "owner/project", "v1.2.3-rc.1")
+release = github_release.by_tag("owner/project", "v1.2.3-rc.1")
 ```
 
-## `by_asset(ctx, project, pattern, *, tag=None, timeout=30)`
+## `by_asset(project, pattern, *, tag=None, timeout=30)`
 
 Return the single asset whose name matches the regular expression `pattern`.
 Matching uses `re.search`, so `^` and `$` can anchor the pattern when needed.
@@ -67,13 +65,11 @@ specific release:
 
 ```python
 asset = github_release.by_asset(
-    ctx,
     "kovidgoyal/kitty",
     r"^kitty-.*-x86_64\.txz$",
 )
 
 asset = github_release.by_asset(
-    ctx,
     "kovidgoyal/kitty",
     r"^kitty-.*-x86_64\.txz$",
     tag="0.44.0",
@@ -152,22 +148,17 @@ the checksum when GitHub provides one:
 from pathlib import Path
 
 from kitup.modules import decompress, download, github_release
-from kitup import task
 
+release = github_release.latest("astral-sh/uv")
+asset = release.asset(r"^uv-x86_64-unknown-linux-gnu\.tar\.gz$")
+archive = Path("/tmp") / asset.name
 
-@task("Install uv", tags={"packages"})
-def install_uv(ctx):
-    release = github_release.latest(ctx, "astral-sh/uv")
-    asset = release.asset(r"^uv-x86_64-unknown-linux-gnu\.tar\.gz$")
-    archive = Path("/tmp") / asset.name
-
-    download.to_file(ctx, asset.url, archive, checksum=asset.digest)
-    decompress.archive(
-        ctx,
-        archive,
-        Path.home() / ".local/share/uv",
-        strip_components=1,
-    )
+download.to_file(asset.url, archive, checksum=asset.digest)
+decompress.archive(
+    archive,
+    Path.home() / ".local/share/uv",
+    strip_components=1,
+)
 ```
 
 Older releases may not provide a digest. Either omit `checksum` or supply a

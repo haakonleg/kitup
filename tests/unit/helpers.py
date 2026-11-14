@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from kitup.commands import CommandRunner, raise_for_status
-from kitup.context import TaskContext
+from kitup.context import TaskContext, set_current_context
 from kitup.output import Output
 from kitup.project import Project
 from kitup.registry import Bundle
 from kitup.results import CallResult
-from kitup.vars import Vars
+from kitup.variables import Vars
 
 
 def call_data(result: CallResult) -> dict[str, Any]:
@@ -48,19 +48,14 @@ class FakeCommandRunner:
 
 
 def completed(
-    argv: list[str],
-    returncode: int = 0,
-    stdout: str = "",
-    stderr: str = "",
+    argv: list[str], returncode: int = 0, stdout: str = "", stderr: str = ""
 ) -> subprocess.CompletedProcess[str]:
     """Build a scripted command result for FakeCommandRunner."""
     return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
 
 
 def response(
-    returncode: int = 0,
-    stdout: str = "",
-    stderr: str = "",
+    returncode: int = 0, stdout: str = "", stderr: str = ""
 ) -> Callable[[list[str]], subprocess.CompletedProcess[str]]:
     """Build a scripted response for ``FakeCommandRunner.responses``."""
     return lambda argv: completed(argv, returncode, stdout, stderr)
@@ -165,7 +160,7 @@ def make_context(
     output=None,
 ) -> TaskContext:
     root = tmp_path if root is None else root
-    return TaskContext(
+    context = TaskContext(
         dry_run=dry_run,
         diff=diff,
         verbose=verbose,
@@ -178,6 +173,8 @@ def make_context(
         bundle_vars=bundle_vars,
         output=output,
     )
+    set_current_context(context)
+    return context
 
 
 def privileged_context(tmp_path) -> TaskContext:
@@ -192,12 +189,8 @@ def local_sudo_context(tmp_path, **kwargs) -> TaskContext:
 
 
 def add_task(
-    bundle: Bundle,
-    func: Callable[[TaskContext], Any],
-    *,
-    name: str | None = None,
-    tags: Sequence[str] = (),
-) -> Callable[[TaskContext], Any]:
+    bundle: Bundle, func: Callable[[], Any], *, name: str | None = None, tags: Sequence[str] = ()
+) -> Callable[[], Any]:
     if name is None:
         return bundle.task(tags=tags)(func)
     return bundle.task(name, tags=tags)(func)

@@ -41,7 +41,7 @@ def test_resolve_source_expands_home(tmp_path, home):
     bundle_dir = tmp_path / "bundles" / "base"
     bundle_dir.mkdir(parents=True)
     bundle = Bundle("base", path=bundle_dir)
-    bundle.task("Task")(lambda ctx: None)
+    bundle.task("Task")(lambda: None)
     ctx = context(tmp_path)
     ctx.begin_task(bundle.tasks[0])
 
@@ -70,7 +70,7 @@ def test_resolve_source_prefers_project_overlays_then_bundle(tmp_path):
     write(bundle_dir / "nested" / "bundle.conf", "bundle\n")
 
     bundle = Bundle("base", path=bundle_dir)
-    bundle.task("Task")(lambda ctx: None)
+    bundle.task("Task")(lambda: None)
     ctx = context(tmp_path)
     ctx.begin_task(bundle.tasks[0])
 
@@ -96,7 +96,7 @@ def test_resolve_source_uses_files_path_literally_for_overlays(tmp_path):
     write(bundle_files / "nested" / "bundle.conf", "bundle\n")
 
     bundle = Bundle("base", path=bundle_dir)
-    bundle.task("Task")(lambda ctx: None)
+    bundle.task("Task")(lambda: None)
     ctx = context(tmp_path)
     ctx.begin_task(bundle.tasks[0])
 
@@ -116,8 +116,8 @@ def test_resolve_source_overlays_are_bundle_scoped(tmp_path):
 
     base = Bundle("base", path=base_dir)
     other = Bundle("other", path=other_dir)
-    base.task("Base")(lambda ctx: None)
-    other.task("Other")(lambda ctx: None)
+    base.task("Base")(lambda: None)
+    other.task("Other")(lambda: None)
     ctx = context(tmp_path)
 
     ctx.begin_task(base.tasks[0])
@@ -151,20 +151,20 @@ def test_command_runner_expands_cwd(tmp_path, home, monkeypatch):
 
 
 def test_files_paths_expand_home(tmp_path, home):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.file(ctx, "~/file", content="value\n")
-    files.directory(ctx, "~/dir")
-    files.line(ctx, "~/line", "value=1")
-    files.block(ctx, "~/block", "mark", "value=1")
-    files.ini(ctx, "~/file.ini", section="s", option="k", value="v")
-    files.toml(ctx, "~/file.toml", key="k", value="v")
+    files.file("~/file", content="value\n")
+    files.directory("~/dir")
+    files.line("~/line", "value=1")
+    files.block("~/block", "mark", "value=1")
+    files.ini("~/file.ini", section="s", option="k", value="v")
+    files.toml("~/file.toml", key="k", value="v")
 
     source = home / "source"
     source.write_text("source\n", encoding="utf-8")
-    files.copy(ctx, source, "~/copy")
-    files.move(ctx, "~/copy", "~/moved")
-    files.symlink(ctx, "~/target", "~/link")
+    files.copy(source, "~/copy")
+    files.move("~/copy", "~/moved")
+    files.symlink("~/target", "~/link")
 
     assert (home / "file").read_text(encoding="utf-8") == "value\n"
     assert (home / "dir").is_dir()
@@ -179,9 +179,9 @@ def test_files_paths_expand_home(tmp_path, home):
 def test_template_destination_expands_home(tmp_path, home):
     source = tmp_path / "source.j2"
     source.write_text("rendered\n", encoding="utf-8")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    template.file(ctx, source, "~/rendered")
+    template.file(source, "~/rendered")
 
     assert (home / "rendered").read_text(encoding="utf-8") == "rendered\n"
 
@@ -193,13 +193,13 @@ def test_decompress_destinations_and_creates_expand_home(tmp_path, home):
     archive_path = home / "data.zip"
     with zipfile.ZipFile(archive_path, "w") as archive_file:
         archive_file.writestr("inside.txt", "value\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    decompress.file(ctx, source, "~/data.txt")
-    decompress.archive(ctx, archive_path, "~/archive")
+    decompress.file(source, "~/data.txt")
+    decompress.archive(archive_path, "~/archive")
     marker = home / "marker"
     marker.write_text("", encoding="utf-8")
-    skipped = decompress.archive(ctx, archive_path, "~/archive2", creates="~/marker")
+    skipped = decompress.archive(archive_path, "~/archive2", creates="~/marker")
 
     assert (home / "data.txt").read_text(encoding="utf-8") == "value\n"
     assert (home / "archive" / "inside.txt").read_text(encoding="utf-8") == "value\n"
@@ -207,9 +207,9 @@ def test_decompress_destinations_and_creates_expand_home(tmp_path, home):
 
 
 def test_dnf_config_path_expands_home(tmp_path, home):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    dnf.config(ctx, "keepcache", value=True, path="~/dnf.conf", sudo=False)
+    dnf.config("keepcache", value=True, path="~/dnf.conf", sudo=False)
 
     assert "keepcache = True" in (home / "dnf.conf").read_text(encoding="utf-8")
 
@@ -219,9 +219,9 @@ def test_dnf_source_paths_expand_home(tmp_path, home):
     reposdir.mkdir()
     command_runner = FakeCommandRunner()
     command_runner.responses = [response(0, f"reposdir = {reposdir}\n"), response(0)]
-    repo_ctx = context(tmp_path, command_runner=command_runner)
+    context(tmp_path, command_runner=command_runner)
 
-    dnf.repository(repo_ctx, "~/tool.repo")
+    dnf.repository("~/tool.repo")
 
     assert f"--from-repofile={home / 'tool.repo'}" in command_runner.calls[1][0]
 
@@ -230,9 +230,9 @@ def test_dnf_source_paths_expand_home(tmp_path, home):
         response(0, "tool-release\n"),
         response(1, "package tool-release is not installed\n"),
     ]
-    rpm_ctx = context(tmp_path, command_runner=rpm_command)
+    context(tmp_path, command_runner=rpm_command)
 
-    dnf.rpm(rpm_ctx, "~/tool-release.rpm")
+    dnf.rpm("~/tool-release.rpm")
 
     assert rpm_command.calls[2][0][-1] == str(home / "tool-release.rpm")
 
@@ -249,10 +249,10 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 def test_download_destination_expands_home(tmp_path, home, monkeypatch):
     monkeypatch.setenv("NO_PROXY", "127.0.0.1")
     monkeypatch.setenv("no_proxy", "127.0.0.1")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with serve_http(DownloadHandler) as url:
-        download.to_file(ctx, url, "~/downloaded")
+        download.to_file(url, "~/downloaded")
 
     assert (home / "downloaded").read_text(encoding="utf-8") == "downloaded\n"
 
@@ -261,22 +261,22 @@ def test_git_destination_expands_home(tmp_path, home, monkeypatch):
     monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: "git" if name == "git" else None)
     command_runner = FakeCommandRunner()
     command_runner.responses = [response(128)]
-    ctx = context(tmp_path, command_runner=command_runner)
+    context(tmp_path, command_runner=command_runner)
 
-    git.repo(ctx, "https://example.test/repo.git", "~/repo")
+    git.repo("https://example.test/repo.git", "~/repo")
 
     assert argvs(command_runner)[-1] == ["git", "clone", "https://example.test/repo.git", str(home / "repo")]
 
 
 def test_command_creates_cwd_and_shell_expand_home(tmp_path, home):
     command_runner = FakeCommandRunner()
-    ctx = context(tmp_path, command_runner=command_runner)
+    context(tmp_path, command_runner=command_runner)
     (home / "work").mkdir()
     (home / "work" / "marker").write_text("", encoding="utf-8")
 
-    skipped = command.run(ctx, ["true"], creates="marker", cwd="~/work")
-    command.run(ctx, ["true"], cwd="~/work")
-    command.shell(ctx, "echo hi", shell="~/bin/sh", cwd="~/work")
+    skipped = command.run(["true"], creates="marker", cwd="~/work")
+    command.run(["true"], cwd="~/work")
+    command.shell("echo hi", shell="~/bin/sh", cwd="~/work")
 
     assert skipped.changed is False
     assert skipped.summary == "skip true"
@@ -295,22 +295,22 @@ def test_pip_paths_expand_home(tmp_path, home, monkeypatch):
         response(0, json.dumps({"version": "1", "install": []})),
     ]
 
+    context(tmp_path, command_runner=command_runner, dry_run=True)
     venv_result = pip.packages(
-        context(tmp_path, command_runner=command_runner, dry_run=True),
         ["requests"],
         venv="~/venv",
     )
     assert venv_result["venv"] == str(home / "venv")
 
-    config_ctx = context(tmp_path)
-    pip.config(config_ctx, "index-url", "https://example.test/simple", path="~/pip.conf", sudo=False)
+    context(tmp_path)
+    pip.config("index-url", "https://example.test/simple", path="~/pip.conf", sudo=False)
     assert "index-url = https://example.test/simple" in (home / "pip.conf").read_text(encoding="utf-8")
 
     python = home / "bin" / "python3"
     python.parent.mkdir()
     python.write_text("", encoding="utf-8")
-    installed_ctx = context(tmp_path, command_runner=command_runner)
-    pip.packages(installed_ctx, ["requests"], python="~/bin/python3")
+    context(tmp_path, command_runner=command_runner)
+    pip.packages(["requests"], python="~/bin/python3")
     assert command_runner.calls[0][0][0] == str(python)
 
 
@@ -319,18 +319,18 @@ def test_uv_paths_expand_home(tmp_path, home, monkeypatch):
         "kitup._utils.executables.shutil.which",
         lambda name: "/usr/bin/uv" if name == "uv" else None,
     )
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    absent = uv.dependencies(ctx, ["requests"], project="~/project", state="absent")
+    absent = uv.dependencies(["requests"], project="~/project", state="absent")
     assert absent["project"] == str(home / "project")
 
-    uv.config(ctx, "index-url", "https://example.test/simple", scope="project", project="~/project")
+    uv.config("index-url", "https://example.test/simple", scope="project", project="~/project")
     assert 'index-url = "https://example.test/simple"' in (home / "project" / "pyproject.toml").read_text(
         encoding="utf-8"
     )
 
     configured = home / "uv.toml"
-    uv.config(ctx, "cache-dir", "~/cache", path="~/uv.toml")
+    uv.config("cache-dir", "~/cache", path="~/uv.toml")
     assert 'cache-dir = "~/cache"' in configured.read_text(encoding="utf-8")
 
 
@@ -350,7 +350,8 @@ def test_uv_project_environment_expands_home(tmp_path, home, monkeypatch):
     command_runner = FakeCommandRunner()
     command_runner.responses = [response(0), response(0)]
 
-    result = uv.dependencies(context(tmp_path, command_runner=command_runner), ["requests"], project="~/project")
+    context(tmp_path, command_runner=command_runner)
+    result = uv.dependencies(["requests"], project="~/project")
 
     assert result.changed is False
     assert len(command_runner.calls) == 2
@@ -364,9 +365,9 @@ def test_users_home_and_shell_expand_before_the_absolute_check(home):
 def test_sysctl_file_expands_home(tmp_path, home):
     command_runner = FakeCommandRunner()
     command_runner.responses = [response(0, "10\n")]
-    ctx = context(tmp_path, command_runner=command_runner, sudo=FakeSudo(is_root=True))
+    context(tmp_path, command_runner=command_runner, sudo=FakeSudo(is_root=True))
 
-    sysctl.key(ctx, "vm.swappiness", 10, file="~/sysctl.conf")
+    sysctl.key("vm.swappiness", 10, file="~/sysctl.conf")
 
     assert "vm.swappiness = 10" in (home / "sysctl.conf").read_text(encoding="utf-8")
 
@@ -377,25 +378,25 @@ def test_podman_paths_expand_home(tmp_path, home, monkeypatch):
         lambda name: "/usr/bin/podman" if name == "podman" else None,
     )
     command_runner = FakeCommandRunner()
-    ctx = context(tmp_path, command_runner=command_runner)
+    context(tmp_path, command_runner=command_runner)
     (home / "quadlet").mkdir()
     (home / "units").mkdir()
     (home / "registries").mkdir()
 
-    podman.quadlet(ctx, "example", image="image", dest="~/quadlet", scope="user")
+    podman.quadlet("example", image="image", dest="~/quadlet", scope="user")
     assert (home / "quadlet" / "example.container").is_file()
 
     command_runner.responses = [response(0, "[Service]\nExecStart=/bin/true\n")]
-    podman.generate_systemd(ctx, "example", dest="~/units", scope="user")
+    podman.generate_systemd("example", dest="~/units", scope="user")
     assert (home / "units" / "container-example.service").is_file()
 
-    podman.registry(ctx, "example", location="example.test", path="~/registries/example", scope="user")
+    podman.registry("example", location="example.test", path="~/registries/example", scope="user")
     assert (home / "registries" / "example.conf").is_file()
 
     command_runner.responses = [response(1)]
-    podman.login(ctx, "example.test", username="user", password="secret", authfile="~/auth.json")
+    podman.login("example.test", username="user", password="secret", authfile="~/auth.json")
     assert f"--authfile={home / 'auth.json'}" in argvs(command_runner)[-1]
 
     command_runner.responses = [response(0, "user\n")]
-    podman.logout(ctx, "example.test", authfile="~/auth.json")
+    podman.logout("example.test", authfile="~/auth.json")
     assert f"--authfile={home / 'auth.json'}" in argvs(command_runner)[-1]

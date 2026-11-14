@@ -9,7 +9,7 @@ from ..._utils.validation import (
     require_text,
     require_timeout,
 )
-from ...context import TaskContext
+from ...context import TaskContext, current_context
 from ...errors import TaskFailed
 from ...results import CallResult
 from ._common import (
@@ -26,7 +26,6 @@ from ._common import (
 
 
 def container(
-    ctx: TaskContext,
     name: str,
     *,
     state: ContainerState = "started",
@@ -45,6 +44,7 @@ def container(
     container is running immediately after start; it is not suitable for
     one-shot containers.
     """
+    ctx = current_context()
     require_object_name(name, "container name")
     require_state(state, "container", CONTAINER_STATES)
     require_bool(recreate, "container recreate")
@@ -170,13 +170,7 @@ def _start_container(ctx: TaskContext, podman_command: str, name: str, *, timeou
 
 
 def _stop_container(
-    ctx: TaskContext,
-    podman_command: str,
-    name: str,
-    *,
-    stop_timeout: int | None,
-    timeout: float,
-    sudo: bool,
+    ctx: TaskContext, podman_command: str, name: str, *, stop_timeout: int | None, timeout: float, sudo: bool
 ) -> None:
     arguments = [podman_command, "stop"]
     if stop_timeout is not None:

@@ -12,7 +12,7 @@ Recursive copies are left to task code using `directory()`, `copy()`, and
 
 For remote file download over HTTP(S), use the [download](download.md) module.
 
-## `file(ctx, path, *, state="present", content=None, mode=None, owner=None, group=None, sudo=False)`
+## `file(path, *, state="present", content=None, mode=None, owner=None, group=None, sudo=False)`
 
 Ensure a text file exists with optional content, or is absent.
 
@@ -32,11 +32,11 @@ Ensure a text file exists with optional content, or is absent.
 - `path` — managed file path.
 
 ```python
-files.file(ctx, "/etc/example.conf", content="enabled=true\n", mode=0o644, sudo=True)
-files.file(ctx, "/etc/example.conf", state="absent", sudo=True)
+files.file("/etc/example.conf", content="enabled=true\n", mode=0o644, sudo=True)
+files.file("/etc/example.conf", state="absent", sudo=True)
 ```
 
-## `copy(ctx, src, dest, *, mode=None, owner=None, group=None, sudo=False)`
+## `copy(src, dest, *, mode=None, owner=None, group=None, sudo=False)`
 
 Copy one regular file. `mode=None` preserves the source mode. Source symlinks are
 refused.
@@ -58,12 +58,12 @@ refused.
 - `src` — resolved source path.
 
 ```python
-files.copy(ctx, "example.conf", "/etc/example.conf", sudo=True)
-files.copy(ctx, "dotfiles/.zshrc", Path.home() / ".zshrc")
-files.copy(ctx, "example.conf", "/etc/example.d/", sudo=True)
+files.copy("example.conf", "/etc/example.conf", sudo=True)
+files.copy("dotfiles/.zshrc", "~/.zshrc")
+files.copy("example.conf", "/etc/example.d/", sudo=True)
 ```
 
-## `move(ctx, src, dest, *, mode=None, owner=None, group=None, sudo=False)`
+## `move(src, dest, *, mode=None, owner=None, group=None, sudo=False)`
 
 Move one regular file, preserving its mode and ownership when renamed.
 
@@ -91,7 +91,6 @@ destinations are rejected.
 
 ```python
 files.move(
-    ctx,
     "/tmp/example.key",
     "/etc/pki/rpm-gpg/RPM-GPG-KEY-example",
     mode=0o644,
@@ -99,10 +98,10 @@ files.move(
     group="root",
     sudo=True,
 )
-files.move(ctx, "/tmp/example.conf", "/etc/example.d/", sudo=True)
+files.move("/tmp/example.conf", "/etc/example.d/", sudo=True)
 ```
 
-## `line(ctx, path, line, *, match=None, state="present", sudo=False)`
+## `line(path, line, *, match=None, state="present", sudo=False)`
 
 Add, replace, or remove a line.
 
@@ -119,7 +118,7 @@ Add, replace, or remove a line.
 
 - `path` — edited file path.
 
-## `block(ctx, path, marker, content, *, state="present", sudo=False)`
+## `block(path, marker, content, *, state="present", sudo=False)`
 
 Manage a marked region:
 
@@ -144,7 +143,7 @@ Malformed or duplicate markers raise a task failure.
 
 - `path` — edited file path.
 
-## `ini(ctx, path, *, section=None, option=None, value=None, match=None, state="present", create=True, sudo=False)`
+## `ini(path, *, section=None, option=None, value=None, match=None, state="present", create=True, sudo=False)`
 
 Set or remove one option in an INI-style file.
 
@@ -183,12 +182,12 @@ add a new same-named section, set the option you match on, for example
 - `section`, `option`, `value` — the arguments as given; `None` when not given.
 
 ```python
-files.ini(ctx, "/etc/example.conf", section="drinks", option="fav", value="lemonade", sudo=True)
-files.ini(ctx, "/etc/example.conf", section="server", match={"id": "db"}, option="host", value="db.internal", sudo=True)
-files.ini(ctx, "/etc/example.conf", section="drinks", option="fav", state="absent", sudo=True)
+files.ini("/etc/example.conf", section="drinks", option="fav", value="lemonade", sudo=True)
+files.ini("/etc/example.conf", section="server", match={"id": "db"}, option="host", value="db.internal", sudo=True)
+files.ini("/etc/example.conf", section="drinks", option="fav", state="absent", sudo=True)
 ```
 
-## `toml(ctx, path, *, table=None, key=None, value=None, state="present", create=True, sudo=False)`
+## `toml(path, *, table=None, key=None, value=None, state="present", create=True, sudo=False)`
 
 Set or remove one key in a TOML file, table by table.
 
@@ -222,13 +221,13 @@ Array-of-tables (`[[...]]`) cannot be edited and are rejected.
 - `table`, `key`, `value` — the arguments as given; `None` when not given.
 
 ```python
-files.toml(ctx, "/etc/app/config.toml", table="server", key="host", value="db.internal", sudo=True)
-files.toml(ctx, "/etc/app/config.toml", table="tool.uv", key="native-tls", value=True, sudo=True)
-files.toml(ctx, "/etc/app/config.toml", table="server", key="port", state="absent", sudo=True)
-files.toml(ctx, "/etc/app/config.toml", table="legacy", state="absent", sudo=True)
+files.toml("/etc/app/config.toml", table="server", key="host", value="db.internal", sudo=True)
+files.toml("/etc/app/config.toml", table="tool.uv", key="native-tls", value=True, sudo=True)
+files.toml("/etc/app/config.toml", table="server", key="port", state="absent", sudo=True)
+files.toml("/etc/app/config.toml", table="legacy", state="absent", sudo=True)
 ```
 
-## `directory(ctx, path, *, state="present", force=False, mode=None, owner=None, group=None, sudo=False)`
+## `directory(path, *, state="present", force=False, mode=None, owner=None, group=None, sudo=False)`
 
 Ensure a directory exists or is absent.
 
@@ -247,7 +246,7 @@ Existing non-directory paths and symlinks are rejected.
 
 - `path` — managed directory path.
 
-## `symlink(ctx, target, path, *, sudo=False)`
+## `symlink(target, path, *, sudo=False)`
 
 Create or verify a symlink, replacing an existing file or symlink. Directories
 are never replaced.

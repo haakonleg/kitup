@@ -53,9 +53,8 @@ def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
         from kitup.modules import files
 
         @task("write privileged file")
-        def write_file(ctx):
+        def write_file():
             files.file(
-                ctx,
                 {str(MANAGED_PATH)!r},
                 content="managed\\n",
                 mode=0o640,
@@ -78,8 +77,8 @@ def test_privileged_file_converges_and_removes(tmp_path: Path) -> None:
         from kitup.modules import files
 
         @task("remove privileged file")
-        def remove_file(ctx):
-            files.file(ctx, {str(MANAGED_PATH)!r}, state="absent", sudo=True)
+        def remove_file():
+            files.file({str(MANAGED_PATH)!r}, state="absent", sudo=True)
         """,
     )
     assert run_kitup("apply", remove_root) == 0
@@ -97,9 +96,8 @@ def test_privileged_move_is_idempotent(tmp_path: Path) -> None:
         from kitup.modules import files
 
         @task("move privileged file")
-        def move_file(ctx):
+        def move_file():
             files.move(
-                ctx,
                 {str(source)!r},
                 {str(MOVE_PATH)!r},
                 mode=0o640,
@@ -131,9 +129,8 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
         from kitup.modules import files
 
         @task("exercise privileged file actions")
-        def exercise(ctx):
+        def exercise():
             files.directory(
-                ctx,
                 {str(WORKER_ROOT)!r},
                 mode=0o750,
                 owner="root",
@@ -141,7 +138,6 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
                 sudo=True,
             )
             files.file(
-                ctx,
                 {str(WORKER_FILE)!r},
                 content="alpha\\n",
                 mode=0o600,
@@ -149,11 +145,10 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
                 group="root",
                 sudo=True,
             )
-            files.line(ctx, {str(WORKER_FILE)!r}, "beta", sudo=True)
-            files.block(ctx, {str(WORKER_FILE)!r}, "managed", "inside\\n", sudo=True)
-            files.file(ctx, {str(WORKER_FILE)!r}, mode=0o640, sudo=True)
+            files.line({str(WORKER_FILE)!r}, "beta", sudo=True)
+            files.block({str(WORKER_FILE)!r}, "managed", "inside\\n", sudo=True)
+            files.file({str(WORKER_FILE)!r}, mode=0o640, sudo=True)
             files.copy(
-                ctx,
                 "source.conf",
                 {str(WORKER_COPY)!r},
                 mode=0o600,
@@ -162,13 +157,11 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
                 sudo=True,
             )
             files.symlink(
-                ctx,
                 {str(WORKER_FILE)!r},
                 {str(WORKER_LINK)!r},
                 sudo=True,
             )
             files.directory(
-                ctx,
                 {str(WORKER_DIR)!r},
                 mode=0o700,
                 owner="root",
@@ -176,7 +169,6 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
                 sudo=True,
             )
             files.file(
-                ctx,
                 {str(WORKER_NESTED)!r},
                 content="nested\\n",
                 mode=0o600,
@@ -206,15 +198,15 @@ def test_privileged_file_lifecycle_covers_worker_actions(tmp_path: Path) -> None
         from kitup.modules import files
 
         @task("remove privileged file actions")
-        def cleanup(ctx):
-            files.file(ctx, {str(WORKER_FILE)!r}, state="absent", sudo=True)
-            files.file(ctx, {str(WORKER_COPY)!r}, state="absent", sudo=True)
-            files.file(ctx, {str(WORKER_LINK)!r}, state="absent", sudo=True)
+        def cleanup():
+            files.file({str(WORKER_FILE)!r}, state="absent", sudo=True)
+            files.file({str(WORKER_COPY)!r}, state="absent", sudo=True)
+            files.file({str(WORKER_LINK)!r}, state="absent", sudo=True)
             files.directory(
-                ctx, {str(WORKER_DIR)!r}, state="absent", force=True, sudo=True
+                {str(WORKER_DIR)!r}, state="absent", force=True, sudo=True
             )
             files.directory(
-                ctx, {str(WORKER_ROOT)!r}, state="absent", force=True, sudo=True
+                {str(WORKER_ROOT)!r}, state="absent", force=True, sudo=True
             )
         """,
     )
@@ -230,16 +222,14 @@ def test_privileged_dry_run_does_not_mutate(tmp_path: Path) -> None:
         from kitup.modules import files
 
         @task("dry privileged file actions")
-        def dry(ctx):
+        def dry():
             files.file(
-                ctx,
                 {str(DRY_FILE)!r},
                 content="dry\\n",
                 mode=0o600,
                 sudo=True,
             )
             files.symlink(
-                ctx,
                 {str(DRY_FILE)!r},
                 {str(DRY_LINK)!r},
                 sudo=True,
@@ -264,19 +254,18 @@ def test_privileged_directory_requires_force_for_non_empty(tmp_path: Path) -> No
         from kitup.modules import files
 
         @task("create non-empty directory")
-        def create(ctx):
-            files.directory(ctx, {str(WORKER_ROOT)!r}, mode=0o750, sudo=True)
-            files.directory(ctx, {str(NONEMPTY_DIR)!r}, sudo=True)
+        def create():
+            files.directory({str(WORKER_ROOT)!r}, mode=0o750, sudo=True)
+            files.directory({str(NONEMPTY_DIR)!r}, sudo=True)
             files.file(
-                ctx,
                 {str(NONEMPTY_FILE)!r},
                 content="keep\\n",
                 sudo=True,
             )
 
         @task("remove non-empty directory without force")
-        def remove(ctx):
-            files.directory(ctx, {str(NONEMPTY_DIR)!r}, state="absent", sudo=True)
+        def remove():
+            files.directory({str(NONEMPTY_DIR)!r}, state="absent", sudo=True)
         """,
     )
 
@@ -293,8 +282,8 @@ def test_privileged_large_file_copy_is_idempotent(tmp_path: Path) -> None:
         from kitup.modules import files
 
         @task("copy a large privileged file")
-        def large(ctx):
-            files.copy(ctx, "large.conf", {str(LARGE_PATH)!r}, mode=0o600, sudo=True)
+        def large():
+            files.copy("large.conf", {str(LARGE_PATH)!r}, mode=0o600, sudo=True)
         """,
     )
     source = root / "bundles" / "files_large_copy" / "files" / "large.conf"
@@ -323,8 +312,8 @@ def test_privileged_large_file_line_edit_is_idempotent(tmp_path: Path) -> None:
         from kitup.modules import files
 
         @task("edit a large privileged file")
-        def large(ctx):
-            files.line(ctx, {str(LARGE_PATH)!r}, "added", sudo=True)
+        def large():
+            files.line({str(LARGE_PATH)!r}, "added", sudo=True)
         """,
     )
 

@@ -4,10 +4,9 @@ Manage systemd units.
 
 ```python
 from kitup.modules import systemd
-from kitup import task
 ```
 
-## `unit(ctx, unit, *, enabled=None, state=None, scope="system")`
+## `unit(unit, *, enabled=None, state=None, scope="system")`
 
 Manage a unit's enabled and active state. At least one of `enabled` or `state`
 must be provided.
@@ -27,12 +26,10 @@ must be provided.
   performed; empty when nothing changed.
 
 ```python
-@task("Enable example service")
-def enable_example_service(ctx):
-    systemd.unit(ctx, "example.service", enabled=True, state="started")
+systemd.unit("example.service", enabled=True, state="started")
 ```
 
-## `daemon_reload(ctx, *, scope="system")`
+## `daemon_reload(*, scope="system")`
 
 Reload systemd manager configuration.
 

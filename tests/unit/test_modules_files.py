@@ -40,14 +40,14 @@ def test_file_creates_file_and_is_idempotent(tmp_path):
     path = tmp_path / "example.conf"
     ctx = context(tmp_path)
 
-    files.file(ctx, path, content="value = 1\n", mode=0o600)
+    files.file(path, content="value = 1\n", mode=0o600)
 
     assert path.read_text() == "value = 1\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert len(ctx.changes) == 1
     assert ctx.changes[0].action == "files.file"
 
-    files.file(ctx, path, content="value = 1\n", mode=0o600)
+    files.file(path, content="value = 1\n", mode=0o600)
     assert len(ctx.changes) == 1
     assert len(ctx.calls) == 2
     assert ctx.calls[1].changed is False
@@ -56,10 +56,10 @@ def test_file_creates_file_and_is_idempotent(tmp_path):
 def test_file_skips_reading_a_target_with_a_different_size(tmp_path, monkeypatch):
     path = tmp_path / "file"
     path.write_text("old\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
     reads = record_reads(monkeypatch)
 
-    files.file(ctx, path, content="new content\n")
+    files.file(path, content="new content\n")
 
     assert reads == []
     assert path.read_text() == "new content\n"
@@ -68,10 +68,10 @@ def test_file_skips_reading_a_target_with_a_different_size(tmp_path, monkeypatch
 def test_file_reads_a_same_size_target_to_compare_content(tmp_path, monkeypatch):
     path = tmp_path / "file"
     path.write_text("old\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
     reads = record_reads(monkeypatch)
 
-    files.file(ctx, path, content="new\n")
+    files.file(path, content="new\n")
 
     assert reads == [path]
     assert path.read_text() == "new\n"
@@ -83,7 +83,7 @@ def test_file_updates_metadata_without_rewriting(tmp_path):
     path.chmod(0o644)
     ctx = context(tmp_path)
 
-    files.file(ctx, path, content="value = 1\n", mode=0o600)
+    files.file(path, content="value = 1\n", mode=0o600)
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert len(ctx.changes) == 1
@@ -97,9 +97,9 @@ def test_file_preserves_ownership_and_extended_attributes(tmp_path):
     except OSError:
         pytest.skip("user xattrs are not supported")
     uid = path.stat().st_uid
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.file(ctx, path, content="new\n")
+    files.file(path, content="new\n")
 
     assert path.stat().st_uid == uid
     assert os.getxattr(path, "user.kitup-test") == b"value"
@@ -109,7 +109,7 @@ def test_file_dry_run_reports_without_writing(tmp_path):
     path = tmp_path / "example.conf"
     ctx = context(tmp_path, dry_run=True)
 
-    files.file(ctx, path, content="value = 1\n")
+    files.file(path, content="value = 1\n")
 
     assert not path.exists()
     assert len(ctx.changes) == 1
@@ -134,24 +134,21 @@ def test_dry_run_validates_metadata_identities(tmp_path, owner, group, message):
 
     calls = [
         lambda: files.file(
-            ctx,
             tmp_path / "new-file",
             content="data\n",
             owner=owner,
             group=group,
         ),
         lambda: files.file(
-            ctx,
             existing_file,
             content="data\n",
             mode=0o600,
             owner=owner,
             group=group,
         ),
-        lambda: files.copy(ctx, source, tmp_path / "new-copy", owner=owner, group=group),
-        lambda: files.directory(ctx, tmp_path / "new-dir", owner=owner, group=group),
+        lambda: files.copy(source, tmp_path / "new-copy", owner=owner, group=group),
+        lambda: files.directory(tmp_path / "new-dir", owner=owner, group=group),
         lambda: files.directory(
-            ctx,
             existing_dir,
             mode=0o700,
             owner=owner,
@@ -174,9 +171,9 @@ def test_file_replaces_symlink_without_following_it(tmp_path):
     target.write_text("target content\n")
     link = tmp_path / "link"
     link.symlink_to(target)
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.file(ctx, link, content="managed content\n")
+    files.file(link, content="managed content\n")
 
     assert not link.is_symlink()
     assert link.read_text() == "managed content\n"
@@ -184,40 +181,40 @@ def test_file_replaces_symlink_without_following_it(tmp_path):
 
 
 def test_file_requires_parent_directory(tmp_path):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="parent directory"):
-        files.file(ctx, tmp_path / "missing" / "file", content="content")
+        files.file(tmp_path / "missing" / "file", content="content")
 
 
 def test_file_requires_parent_directory_also_in_dry_run(tmp_path):
-    ctx = context(tmp_path, dry_run=True)
+    context(tmp_path, dry_run=True)
 
     with pytest.raises(TaskFailed, match="parent directory"):
-        files.file(ctx, tmp_path / "missing" / "file", content="content")
+        files.file(tmp_path / "missing" / "file", content="content")
     assert not (tmp_path / "missing").exists()
 
 
 def test_copy_requires_parent_directory_also_in_dry_run(tmp_path):
     source = tmp_path / "source"
     source.write_text("data\n")
-    ctx = context(tmp_path, dry_run=True)
+    context(tmp_path, dry_run=True)
 
     with pytest.raises(TaskFailed, match="parent directory"):
-        files.copy(ctx, source, tmp_path / "missing" / "dest")
+        files.copy(source, tmp_path / "missing" / "dest")
     with pytest.raises(TaskFailed, match="parent directory"):
-        files.copy(ctx, source, str(tmp_path / "missing-dir") + "/")
+        files.copy(source, str(tmp_path / "missing-dir") + "/")
     assert not (tmp_path / "missing").exists()
     assert not (tmp_path / "missing-dir").exists()
 
 
 def test_file_refuses_directory_in_both_states(tmp_path):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="directory"):
-        files.file(ctx, tmp_path, content="content")
+        files.file(tmp_path, content="content")
     with pytest.raises(TaskFailed, match="directory"):
-        files.file(ctx, tmp_path, state="absent")
+        files.file(tmp_path, state="absent")
 
 
 def test_file_without_content_preserves_existing_content_and_mode(tmp_path):
@@ -226,7 +223,7 @@ def test_file_without_content_preserves_existing_content_and_mode(tmp_path):
     path.chmod(0o600)
     ctx = context(tmp_path)
 
-    files.file(ctx, path)
+    files.file(path)
 
     assert path.read_text() == "keep me\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -238,9 +235,9 @@ def test_file_without_content_preserves_existing_content_and_mode(tmp_path):
 
 def test_file_new_file_uses_default_mode(tmp_path):
     path = tmp_path / "new"
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.file(ctx, path, content="x\n")
+    files.file(path, content="x\n")
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
 
@@ -250,10 +247,10 @@ def test_file_without_content_refuses_symlink(tmp_path):
     target.write_text("data\n")
     link = tmp_path / "link"
     link.symlink_to(target)
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="symlink"):
-        files.file(ctx, link)
+        files.file(link)
 
     assert link.is_symlink()
     assert target.read_text() == "data\n"
@@ -265,11 +262,11 @@ def test_privileged_file_operations_use_worker(tmp_path):
     ctx = privileged_context(tmp_path)
 
     try:
-        files.file(ctx, path, content="one\n", mode=0o600, sudo=True)
-        files.line(ctx, path, "two", sudo=True)
-        files.directory(ctx, directory, mode=0o700, sudo=True)
-        files.directory(ctx, directory, state="absent", sudo=True)
-        files.file(ctx, path, state="absent", sudo=True)
+        files.file(path, content="one\n", mode=0o600, sudo=True)
+        files.line(path, "two", sudo=True)
+        files.directory(directory, mode=0o700, sudo=True)
+        files.directory(directory, state="absent", sudo=True)
+        files.file(path, state="absent", sudo=True)
 
         assert ctx.sudo.refresh_count > 0
         assert not path.exists()
@@ -286,9 +283,9 @@ def test_privileged_symlink_copy_and_metadata_use_worker(tmp_path):
     link = tmp_path / "link"
 
     try:
-        files.copy(ctx, source, dest, sudo=True)
-        files.symlink(ctx, dest, link, sudo=True)
-        files.file(ctx, dest, mode=0o600, sudo=True)
+        files.copy(source, dest, sudo=True)
+        files.symlink(dest, link, sudo=True)
+        files.file(dest, mode=0o600, sudo=True)
 
         assert dest.read_text() == "data\n"
         assert link.is_symlink()
@@ -307,7 +304,7 @@ def test_privileged_copy_uses_compare_and_copy_without_content(tmp_path):
     ctx.privileged_worker = worker  # type: ignore[assignment]
 
     try:
-        files.copy(ctx, source, dest, sudo=True)
+        files.copy(source, dest, sudo=True)
         assert dest.read_text() == "data\n"
         actions = [action for action, _ in worker.actions]
         assert "compare" in actions
@@ -316,7 +313,7 @@ def test_privileged_copy_uses_compare_and_copy_without_content(tmp_path):
         assert "write" not in actions
 
         worker.actions.clear()
-        files.copy(ctx, source, dest, sudo=True)
+        files.copy(source, dest, sudo=True)
         actions = [action for action, _ in worker.actions]
         assert "compare" in actions
         assert "copy" not in actions
@@ -332,7 +329,7 @@ def test_file_without_content_reconciles_metadata_without_reading(tmp_path):
     ctx.privileged_worker = worker  # type: ignore[assignment]
 
     try:
-        files.file(ctx, path, mode=0o600, sudo=True)
+        files.file(path, mode=0o600, sudo=True)
     finally:
         ctx.close()
 
@@ -346,7 +343,7 @@ def test_file_without_content_creates_an_empty_file(tmp_path):
     ctx = privileged_context(tmp_path)
 
     try:
-        files.file(ctx, path, sudo=True)
+        files.file(path, sudo=True)
     finally:
         ctx.close()
 
@@ -372,7 +369,7 @@ def test_privileged_read_failure_does_not_rewrite_file(tmp_path):
     ctx.privileged_worker = ReadFailureWorker()  # type: ignore[assignment]
 
     with pytest.raises(TaskFailed, match="read failed"):
-        files.line(ctx, path, "new line", sudo=True)
+        files.line(path, "new line", sudo=True)
 
     assert path.read_text() == "keep me\n"
 
@@ -396,7 +393,7 @@ def test_privileged_remove_reports_a_friendly_error(tmp_path):
     ctx.privileged_worker = RemoveFailureWorker()  # type: ignore[assignment]
 
     with pytest.raises(TaskFailed, match="directory is not empty"):
-        files.directory(ctx, path, state="absent", sudo=True)
+        files.directory(path, state="absent", sudo=True)
 
     assert (path / "file").read_text() == "keep\n"
 
@@ -405,7 +402,8 @@ def test_unknown_owner_is_a_task_failure(tmp_path):
     path = tmp_path / "example"
 
     with pytest.raises(TaskFailed, match="unknown user"):
-        files.file(context(tmp_path), path, content="value\n", owner="kitup-missing-user")
+        context(tmp_path)
+        files.file(path, content="value\n", owner="kitup-missing-user")
 
     assert not path.exists()
 
@@ -413,9 +411,9 @@ def test_unknown_owner_is_a_task_failure(tmp_path):
 def test_unprivileged_file_operations_do_not_request_credentials(tmp_path):
     path = tmp_path / "user-owned.conf"
     sudo = FakeSudo()
-    ctx = make_context(tmp_path, sudo=sudo)
+    make_context(tmp_path, sudo=sudo)
 
-    files.file(ctx, path, content="value\n")
+    files.file(path, content="value\n")
 
     assert path.read_text() == "value\n"
     assert sudo.refresh_count == 0
@@ -426,7 +424,7 @@ def test_file_absent_removes_file(tmp_path):
     path.write_text("old\n")
     ctx = context(tmp_path)
 
-    result = files.file(ctx, path, state="absent")
+    result = files.file(path, state="absent")
 
     assert not path.exists()
     assert len(ctx.changes) == 1
@@ -440,10 +438,10 @@ def test_file_absent_removes_valid_and_broken_symlinks(tmp_path):
     link.symlink_to(target)
     broken = tmp_path / "broken"
     broken.symlink_to(tmp_path / "missing")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.file(ctx, link, state="absent")
-    files.file(ctx, broken, state="absent")
+    files.file(link, state="absent")
+    files.file(broken, state="absent")
 
     assert not link.is_symlink()
     assert not broken.is_symlink()
@@ -451,50 +449,50 @@ def test_file_absent_removes_valid_and_broken_symlinks(tmp_path):
 
 
 def test_file_invalid_state_is_an_error(tmp_path):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid file state"):
-        files.file(ctx, tmp_path / "file", state="unknown")
+        files.file(tmp_path / "file", state="unknown")
 
 
 def test_invalid_arguments_are_rejected(tmp_path):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="file path must not be empty"):
-        files.file(ctx, "")
+        files.file("")
     with pytest.raises(TaskFailed, match="owner must not be empty"):
-        files.file(ctx, tmp_path / "file", content="x", owner="")
+        files.file(tmp_path / "file", content="x", owner="")
     with pytest.raises(TaskFailed, match="group must not be empty"):
-        files.directory(ctx, tmp_path / "dir", group="  ")
+        files.directory(tmp_path / "dir", group="  ")
     with pytest.raises(TaskFailed, match="copy source must not be empty"):
-        files.copy(ctx, "", tmp_path / "dest")
+        files.copy("", tmp_path / "dest")
     with pytest.raises(TaskFailed, match="copy destination must not be empty"):
-        files.copy(ctx, tmp_path / "source", "")
+        files.copy(tmp_path / "source", "")
     with pytest.raises(TaskFailed, match="directory path must not be empty"):
-        files.directory(ctx, "")
+        files.directory("")
     with pytest.raises(TaskFailed, match="symlink target must not be empty"):
-        files.symlink(ctx, "", tmp_path / "link")
+        files.symlink("", tmp_path / "link")
     with pytest.raises(TaskFailed, match="line must not contain line breaks"):
-        files.line(ctx, tmp_path / "file", "one\ntwo")
+        files.line(tmp_path / "file", "one\ntwo")
     with pytest.raises(TaskFailed, match="block marker must not contain line breaks"):
-        files.block(ctx, tmp_path / "file", "bad\nmarker", "content")
+        files.block(tmp_path / "file", "bad\nmarker", "content")
 
     for keyword, value in (
         ("sudo", 1),
         ("force", "yes"),
     ):
         with pytest.raises(TaskFailed, match="must be a boolean"):
-            files.directory(ctx, tmp_path / "dir", **{keyword: value})
+            files.directory(tmp_path / "dir", **{keyword: value})
 
     for mode in (True, -1, 0o10000):
         with pytest.raises(TaskFailed, match="mode"):
-            files.file(ctx, tmp_path / "file", content="x", mode=mode)
+            files.file(tmp_path / "file", content="x", mode=mode)
     for owner in (True, -1):
         with pytest.raises(TaskFailed, match="owner"):
-            files.file(ctx, tmp_path / "file", content="x", owner=owner)
+            files.file(tmp_path / "file", content="x", owner=owner)
     for group in (True, -1):
         with pytest.raises(TaskFailed, match="group"):
-            files.file(ctx, tmp_path / "file", content="x", group=group)
+            files.file(tmp_path / "file", content="x", group=group)
 
     assert ctx.changes == []
     assert not (tmp_path / "file").exists()
@@ -505,17 +503,17 @@ def test_line_add_replace_and_remove(tmp_path):
     path.write_text("one\ntwo\nthree\n")
     ctx = context(tmp_path)
 
-    files.line(ctx, path, "four")
+    files.line(path, "four")
     assert path.read_text().endswith("four\n")
 
-    files.line(ctx, path, "TWO", match=r"^two$")
+    files.line(path, "TWO", match=r"^two$")
     assert "TWO\n" in path.read_text()
 
-    files.line(ctx, path, "four", state="absent")
+    files.line(path, "four", state="absent")
     assert "four" not in path.read_text()
 
     count = len(ctx.changes)
-    files.line(ctx, path, "TWO", match=r"^TWO$")
+    files.line(path, "TWO", match=r"^TWO$")
     assert len(ctx.changes) == count
     assert ctx.calls[-1].summary == f"ensure line in {path}"
 
@@ -526,7 +524,7 @@ def test_line_rejects_invalid_match_regex(tmp_path):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid line match"):
-        files.line(ctx, path, "one", match="[")
+        files.line(path, "one", match="[")
 
     assert path.read_text() == "one\n"
     assert ctx.changes == []
@@ -537,12 +535,12 @@ def test_line_appends_after_missing_final_newline(tmp_path):
     path.write_text("one\ntwo\nthree")
     ctx = context(tmp_path)
 
-    files.line(ctx, path, "four")
+    files.line(path, "four")
 
     assert path.read_text() == "one\ntwo\nthree\nfour\n"
 
     count = len(ctx.changes)
-    files.line(ctx, path, "four")
+    files.line(path, "four")
     assert len(ctx.changes) == count
     assert ctx.calls[-1].summary == f"ensure line in {path}"
 
@@ -552,7 +550,8 @@ def test_file_refuses_fifo(tmp_path):
     os.mkfifo(path)
 
     with pytest.raises(TaskFailed, match="not a regular file"):
-        files.file(context(tmp_path), path)
+        context(tmp_path)
+        files.file(path)
 
 
 def test_block_add_update_and_remove(tmp_path):
@@ -560,20 +559,20 @@ def test_block_add_update_and_remove(tmp_path):
     path.write_text("before\n")
     ctx = context(tmp_path)
 
-    files.block(ctx, path, "managed", "one\n")
+    files.block(path, "managed", "one\n")
     assert "# BEGIN managed\none\n# END managed\n" in path.read_text()
 
-    files.block(ctx, path, "managed", "two\n")
+    files.block(path, "managed", "two\n")
     assert "one" not in path.read_text()
     assert "two\n" in path.read_text()
 
-    files.block(ctx, path, "managed", "two\n")
+    files.block(path, "managed", "two\n")
     assert ctx.calls[-1].summary == f"ensure managed block in {path}"
 
-    files.block(ctx, path, "managed", "", state="absent")
+    files.block(path, "managed", "", state="absent")
     assert "managed" not in path.read_text()
 
-    files.block(ctx, path, "managed", "", state="absent")
+    files.block(path, "managed", "", state="absent")
     assert ctx.calls[-1].summary == f"ensure managed block is absent from {path}"
 
 
@@ -582,19 +581,20 @@ def test_block_missing_end_marker_is_an_error(tmp_path):
     path.write_text("# BEGIN managed\n")
 
     with pytest.raises(TaskFailed, match="malformed"):
-        files.block(context(tmp_path), path, "managed", "content")
+        context(tmp_path)
+        files.block(path, "managed", "content")
 
 
 def test_directory_creates_and_is_idempotent(tmp_path):
     path = tmp_path / "newdir"
     ctx = context(tmp_path)
 
-    files.directory(ctx, path, mode=0o700)
+    files.directory(path, mode=0o700)
     assert path.is_dir()
     assert stat.S_IMODE(path.stat().st_mode) == 0o700
     assert len(ctx.changes) == 1
 
-    files.directory(ctx, path, mode=0o700)
+    files.directory(path, mode=0o700)
     assert len(ctx.changes) == 1
     assert ctx.calls[-1].summary == f"ensure directory {path}"
 
@@ -602,12 +602,12 @@ def test_directory_creates_and_is_idempotent(tmp_path):
 def test_directory_refuses_file_in_both_states(tmp_path):
     path = tmp_path / "file"
     path.write_text("x")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="not a directory"):
-        files.directory(ctx, path)
+        files.directory(path)
     with pytest.raises(TaskFailed, match="not a directory"):
-        files.directory(ctx, path, state="absent")
+        files.directory(path, state="absent")
 
 
 def test_directory_preserves_existing_mode_by_default(tmp_path):
@@ -616,7 +616,7 @@ def test_directory_preserves_existing_mode_by_default(tmp_path):
     path.chmod(0o700)
     ctx = context(tmp_path)
 
-    files.directory(ctx, path)
+    files.directory(path)
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o700
     assert ctx.changes == []
@@ -624,9 +624,9 @@ def test_directory_preserves_existing_mode_by_default(tmp_path):
 
 def test_directory_new_directory_uses_default_mode(tmp_path):
     path = tmp_path / "newdir"
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.directory(ctx, path)
+    files.directory(path)
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o755
 
@@ -636,7 +636,7 @@ def test_directory_absent_removes_empty_directory(tmp_path):
     path.mkdir()
     ctx = context(tmp_path)
 
-    result = files.directory(ctx, path, state="absent")
+    result = files.directory(path, state="absent")
 
     assert not path.exists()
     assert len(ctx.changes) == 1
@@ -649,7 +649,8 @@ def test_directory_absent_refuses_non_empty_directory(tmp_path):
     (path / "file").write_text("keep\n")
 
     with pytest.raises(TaskFailed, match="not empty"):
-        files.directory(context(tmp_path), path, state="absent")
+        context(tmp_path)
+        files.directory(path, state="absent")
 
     assert (path / "file").exists()
 
@@ -660,7 +661,7 @@ def test_directory_absent_force_removes_non_empty_directory(tmp_path):
     (path / "nested" / "file").write_text("remove\n")
     ctx = context(tmp_path)
 
-    files.directory(ctx, path, state="absent", force=True)
+    files.directory(path, state="absent", force=True)
 
     assert not path.exists()
     assert len(ctx.changes) == 1
@@ -668,7 +669,8 @@ def test_directory_absent_force_removes_non_empty_directory(tmp_path):
 
 def test_directory_invalid_state_is_an_error(tmp_path):
     with pytest.raises(TaskFailed, match="invalid directory state"):
-        files.directory(context(tmp_path), tmp_path / "dir", state="unknown")
+        context(tmp_path)
+        files.directory(tmp_path / "dir", state="unknown")
 
 
 def test_symlink_replaces_wrong_target_file_and_is_idempotent(tmp_path):
@@ -678,14 +680,14 @@ def test_symlink_replaces_wrong_target_file_and_is_idempotent(tmp_path):
     file_link.write_text("old\n")
     ctx = context(tmp_path)
 
-    files.symlink(ctx, "new", wrong)
-    files.symlink(ctx, "new", file_link)
+    files.symlink("new", wrong)
+    files.symlink("new", file_link)
     assert wrong.readlink().as_posix() == "new"
     assert file_link.is_symlink()
     assert file_link.readlink().as_posix() == "new"
 
     count = len(ctx.changes)
-    files.symlink(ctx, "new", wrong)
+    files.symlink("new", wrong)
     assert len(ctx.changes) == count
 
 
@@ -694,7 +696,8 @@ def test_symlink_refuses_directory(tmp_path):
     link.mkdir()
 
     with pytest.raises(TaskFailed, match="directory"):
-        files.symlink(context(tmp_path), "new", link)
+        context(tmp_path)
+        files.symlink("new", link)
 
 
 def test_copy_preserves_mode_and_is_idempotent(tmp_path):
@@ -704,14 +707,14 @@ def test_copy_preserves_mode_and_is_idempotent(tmp_path):
     dest = tmp_path / "dest.sh"
     ctx = context(tmp_path)
 
-    files.copy(ctx, source, dest)
+    files.copy(source, dest)
 
     assert dest.read_text() == source.read_text()
     assert stat.S_IMODE(dest.stat().st_mode) == 0o755
     assert call_data(ctx.calls[-1]) == {"path": str(dest), "src": str(source)}
 
     count = len(ctx.changes)
-    files.copy(ctx, source, dest)
+    files.copy(source, dest)
     assert len(ctx.changes) == count
     assert ctx.calls[-1].summary == f"ensure {dest} from {source}"
 
@@ -723,15 +726,15 @@ def test_copy_reconciles_metadata_when_content_is_equal(tmp_path):
     dest = tmp_path / "dest"
     dest.write_text("data\n")
     dest.chmod(0o600)
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    result = files.copy(ctx, source, dest)
+    result = files.copy(source, dest)
 
     assert result.changed is True
     assert result.summary == f"copy {source} -> {dest}"
     assert stat.S_IMODE(dest.stat().st_mode) == 0o644
 
-    result = files.copy(ctx, source, dest)
+    result = files.copy(source, dest)
     assert result.changed is False
     assert result.summary == f"ensure {dest} from {source}"
 
@@ -743,9 +746,9 @@ def test_copy_replaces_destination_symlink(tmp_path):
     target.write_text("old\n")
     dest = tmp_path / "dest"
     dest.symlink_to(target)
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.copy(ctx, source, dest)
+    files.copy(source, dest)
 
     assert not dest.is_symlink()
     assert dest.read_text() == "new\n"
@@ -757,10 +760,10 @@ def test_copy_does_not_read_content_to_compare(tmp_path, monkeypatch):
     source.write_text("new content\n")
     target = tmp_path / "target"
     target.write_text("old\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
     reads = record_reads(monkeypatch)
 
-    files.copy(ctx, source, target)
+    files.copy(source, target)
 
     assert reads == []
     assert target.read_text() == "new content\n"
@@ -771,7 +774,7 @@ def test_copy_compares_same_size_targets(tmp_path, monkeypatch):
     source.write_text("new\n")
     target = tmp_path / "target"
     target.write_text("old\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
     comparisons = []
     compare_paths = file_actions.compare_paths
 
@@ -781,7 +784,7 @@ def test_copy_compares_same_size_targets(tmp_path, monkeypatch):
 
     monkeypatch.setattr(file_actions, "compare_paths", compare)
 
-    files.copy(ctx, source, target)
+    files.copy(source, target)
 
     assert comparisons == [(source, target)]
     assert target.read_text() == "new\n"
@@ -791,7 +794,7 @@ def test_copy_reports_source_permission_errors(tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.write_text("data\n")
     dest = tmp_path / "dest"
-    ctx = context(tmp_path)
+    context(tmp_path)
     real_open = os.open
 
     def deny(path, flags, *args, **kwargs):
@@ -802,7 +805,7 @@ def test_copy_reports_source_permission_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "open", deny)
 
     with pytest.raises(TaskFailed, match="could not copy"):
-        files.copy(ctx, source, dest)
+        files.copy(source, dest)
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
@@ -811,10 +814,10 @@ def test_copy_rejects_non_regular_destinations(tmp_path, dry_run):
     source.write_text("data\n")
     fifo = tmp_path / "fifo"
     os.mkfifo(fifo)
-    ctx = context(tmp_path, dry_run=dry_run)
+    context(tmp_path, dry_run=dry_run)
 
     with pytest.raises(TaskFailed, match="destination is not a regular file"):
-        files.copy(ctx, source, fifo)
+        files.copy(source, fifo)
 
 
 def test_copy_into_directory_with_trailing_slash(tmp_path):
@@ -822,9 +825,9 @@ def test_copy_into_directory_with_trailing_slash(tmp_path):
     source.write_text("value\n")
     dest_dir = tmp_path / "dest"
     dest_dir.mkdir()
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.copy(ctx, source, f"{dest_dir}/")
+    files.copy(source, f"{dest_dir}/")
 
     assert (dest_dir / source.name).read_text() == "value\n"
 
@@ -837,13 +840,13 @@ def test_copy_resolves_sources_relative_to_the_bundle(tmp_path):
     (bundle_dir / "nested" / "relative.conf").write_text("relative\n")
 
     bundle = Bundle("base", path=bundle_dir)
-    bundle.task("Task")(lambda ctx: None)
+    bundle.task("Task")(lambda: None)
     ctx = context(tmp_path)
     ctx.begin_task(bundle.tasks[0])
 
-    files.copy(ctx, "bare.conf", tmp_path / "bare.out")
-    files.copy(ctx, "nested/relative.conf", tmp_path / "relative.out")
-    files.copy(ctx, bundle_dir / "nested" / "relative.conf", tmp_path / "absolute.out")
+    files.copy("bare.conf", tmp_path / "bare.out")
+    files.copy("nested/relative.conf", tmp_path / "relative.out")
+    files.copy(bundle_dir / "nested" / "relative.conf", tmp_path / "absolute.out")
 
     assert (tmp_path / "bare.out").read_text() == "bare\n"
     assert (tmp_path / "relative.out").read_text() == "relative\n"
@@ -857,7 +860,7 @@ def test_move_moves_file_and_is_idempotent(tmp_path):
     dest = tmp_path / "dest.conf"
     ctx = context(tmp_path)
 
-    files.move(ctx, source, dest)
+    files.move(source, dest)
 
     assert not source.exists()
     assert dest.read_text() == "value\n"
@@ -866,7 +869,7 @@ def test_move_moves_file_and_is_idempotent(tmp_path):
     assert ctx.changes[0].action == "files.move"
     assert call_data(ctx.changes[0]) == {"dest": str(dest), "src": str(source)}
 
-    files.move(ctx, source, dest)
+    files.move(source, dest)
 
     assert len(ctx.changes) == 1
     assert ctx.calls[-1].summary == f"ensure {dest} is moved from {source}"
@@ -879,7 +882,7 @@ def test_move_replaces_destination_file(tmp_path):
     dest.write_text("old\n")
     ctx = context(tmp_path)
 
-    files.move(ctx, source, dest)
+    files.move(source, dest)
 
     assert not source.exists()
     assert dest.read_text() == "new\n"
@@ -891,9 +894,9 @@ def test_move_into_directory_with_trailing_slash(tmp_path):
     source.write_text("value\n")
     dest_dir = tmp_path / "dest"
     dest_dir.mkdir()
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.move(ctx, source, f"{dest_dir}/")
+    files.move(source, f"{dest_dir}/")
 
     assert not source.exists()
     assert (dest_dir / source.name).read_text() == "value\n"
@@ -904,9 +907,9 @@ def test_move_sets_requested_mode(tmp_path):
     source.write_text("value\n")
     source.chmod(0o600)
     dest = tmp_path / "dest.conf"
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.move(ctx, source, dest, mode=0o640)
+    files.move(source, dest, mode=0o640)
 
     assert not source.exists()
     assert stat.S_IMODE(dest.stat().st_mode) == 0o640
@@ -916,11 +919,12 @@ def test_move_reconciles_metadata_when_source_is_gone(tmp_path):
     source = tmp_path / "source.conf"
     source.write_text("value\n")
     dest = tmp_path / "dest.conf"
-    files.move(context(tmp_path), source, dest)
+    context(tmp_path)
+    files.move(source, dest)
     dest.chmod(0o600)
 
     ctx = context(tmp_path)
-    files.move(ctx, source, dest, mode=0o640)
+    files.move(source, dest, mode=0o640)
 
     assert stat.S_IMODE(dest.stat().st_mode) == 0o640
     assert len(ctx.changes) == 1
@@ -928,7 +932,7 @@ def test_move_reconciles_metadata_when_source_is_gone(tmp_path):
     assert call_data(ctx.changes[0]) == {"dest": str(dest), "src": str(source)}
 
     unchanged = context(tmp_path)
-    files.move(unchanged, source, dest, mode=0o640)
+    files.move(source, dest, mode=0o640)
     assert unchanged.changes == []
 
 
@@ -938,7 +942,7 @@ def test_move_dry_run_reports_without_moving(tmp_path):
     dest = tmp_path / "dest.conf"
     ctx = context(tmp_path, dry_run=True)
 
-    files.move(ctx, source, dest)
+    files.move(source, dest)
 
     assert source.read_text() == "value\n"
     assert not dest.exists()
@@ -946,10 +950,10 @@ def test_move_dry_run_reports_without_moving(tmp_path):
 
 
 def test_move_missing_source_without_destination_fails(tmp_path):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="does not exist"):
-        files.move(ctx, tmp_path / "missing.conf", tmp_path / "dest.conf")
+        files.move(tmp_path / "missing.conf", tmp_path / "dest.conf")
 
 
 def test_move_rejects_directories_and_symlinks(tmp_path):
@@ -963,16 +967,16 @@ def test_move_rejects_directories_and_symlinks(tmp_path):
     dest_dir.mkdir()
     dest_link = tmp_path / "dest-link"
     dest_link.symlink_to(tmp_path / "target")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="directory"):
-        files.move(ctx, source_dir, tmp_path / "dest.conf")
+        files.move(source_dir, tmp_path / "dest.conf")
     with pytest.raises(TaskFailed, match="symlink"):
-        files.move(ctx, source_link, tmp_path / "dest.conf")
+        files.move(source_link, tmp_path / "dest.conf")
     with pytest.raises(TaskFailed, match="destination is a directory"):
-        files.move(ctx, source, dest_dir)
+        files.move(source, dest_dir)
     with pytest.raises(TaskFailed, match="symlink"):
-        files.move(ctx, source, dest_link)
+        files.move(source, dest_link)
     assert source.read_text() == "value\n"
 
 
@@ -983,7 +987,7 @@ def test_move_uses_privileged_worker(tmp_path):
     ctx = privileged_context(tmp_path)
 
     try:
-        files.move(ctx, source, dest, sudo=True)
+        files.move(source, dest, sudo=True)
     finally:
         ctx.close()
 
@@ -996,7 +1000,7 @@ def test_ini_sets_option_and_is_idempotent(tmp_path):
     path.write_text("[drinks]\nfav = tea\n")
     ctx = context(tmp_path)
 
-    result = files.ini(ctx, path, section="drinks", option="fav", value="lemonade")
+    result = files.ini(path, section="drinks", option="fav", value="lemonade")
 
     assert path.read_text() == "[drinks]\nfav = lemonade\n"
     assert result.action == "files.ini"
@@ -1010,7 +1014,7 @@ def test_ini_sets_option_and_is_idempotent(tmp_path):
         "ini_action": "replaced",
     }
 
-    result = files.ini(ctx, path, section="drinks", option="fav", value="lemonade")
+    result = files.ini(path, section="drinks", option="fav", value="lemonade")
     assert result.changed is False
     assert result.summary == f"ensure fav is lemonade in [drinks] of {path}"
     assert call_data(result)["ini_action"] == "unchanged"
@@ -1020,9 +1024,9 @@ def test_ini_sets_option_and_is_idempotent(tmp_path):
 def test_ini_result_fields_report_ini_action_and_arguments(tmp_path):
     path = tmp_path / "app.conf"
     path.write_text("[s]\na = 1\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    result = files.ini(ctx, path, section="s", option="b", value="2")
+    result = files.ini(path, section="s", option="b", value="2")
     assert call_data(result) == {
         "path": str(path),
         "section": "s",
@@ -1031,10 +1035,10 @@ def test_ini_result_fields_report_ini_action_and_arguments(tmp_path):
         "ini_action": "added",
     }
 
-    result = files.ini(ctx, path, section="s", option="a", value="9")
+    result = files.ini(path, section="s", option="a", value="9")
     assert call_data(result)["ini_action"] == "replaced"
 
-    result = files.ini(ctx, path, section="s", option="a", state="absent")
+    result = files.ini(path, section="s", option="a", state="absent")
     assert call_data(result) == {
         "path": str(path),
         "section": "s",
@@ -1043,10 +1047,10 @@ def test_ini_result_fields_report_ini_action_and_arguments(tmp_path):
         "ini_action": "removed",
     }
 
-    result = files.ini(ctx, path, section="s", state="absent")
+    result = files.ini(path, section="s", state="absent")
     assert call_data(result)["ini_action"] == "removed"
 
-    result = files.ini(ctx, path, section="s", state="absent")
+    result = files.ini(path, section="s", state="absent")
     assert call_data(result) == {
         "path": str(path),
         "section": "s",
@@ -1055,7 +1059,7 @@ def test_ini_result_fields_report_ini_action_and_arguments(tmp_path):
         "ini_action": "unchanged",
     }
 
-    result = files.ini(ctx, path, option="pre", value="1")
+    result = files.ini(path, option="pre", value="1")
     assert call_data(result) == {
         "path": str(path),
         "section": None,
@@ -1069,71 +1073,71 @@ def test_ini_edit_scenarios(tmp_path):
     # Spacing variants that already match are no-ops.
     path = tmp_path / "spacing.conf"
     path.write_text("[drinks]\nfav=lemonade\n")
-    ctx = context(tmp_path)
-    result = files.ini(ctx, path, section="drinks", option="fav", value="lemonade")
+    context(tmp_path)
+    result = files.ini(path, section="drinks", option="fav", value="lemonade")
     assert path.read_text() == "[drinks]\nfav=lemonade\n"
     assert result.changed is False
 
     # Insertion at the end of a section body preserves the rest of the file.
     path = tmp_path / "insert.conf"
     path.write_text("# top\n[s]\na = 1\n\n# trailing\n[t]\nb = 2\n")
-    files.ini(ctx, path, section="s", option="c", value="3")
+    files.ini(path, section="s", option="c", value="3")
     assert path.read_text() == "# top\n[s]\na = 1\nc = 3\n\n# trailing\n[t]\nb = 2\n"
 
     # Missing sections are appended; missing files are created with the default mode.
     path = tmp_path / "append.conf"
     path.write_text("[s]\na = 1\n")
-    files.ini(ctx, path, section="t", option="b", value="2")
+    files.ini(path, section="t", option="b", value="2")
     assert path.read_text() == "[s]\na = 1\n[t]\nb = 2\n"
 
     fresh = tmp_path / "new.conf"
-    files.ini(ctx, fresh, section="s", option="a", value="1")
+    files.ini(fresh, section="s", option="a", value="1")
     assert fresh.read_text() == "[s]\na = 1\n"
     assert stat.S_IMODE(fresh.stat().st_mode) == 0o644
 
     # The preamble is edited when section is None.
     path = tmp_path / "preamble.conf"
     path.write_text("a = 1\n[s]\nb = 2\n")
-    files.ini(ctx, path, option="c", value="3")
+    files.ini(path, option="c", value="3")
     assert path.read_text() == "a = 1\nc = 3\n[s]\nb = 2\n"
-    result = files.ini(ctx, path, option="c", value="3")
+    result = files.ini(path, option="c", value="3")
     assert result.changed is False
     assert result.summary == f"ensure c is 3 in {path}"
 
     # Duplicate option lines are collapsed.
     path = tmp_path / "duplicates.conf"
     path.write_text("[s]\na = 1\nb = 2\na = 9\n")
-    files.ini(ctx, path, section="s", option="a", value="3")
+    files.ini(path, section="s", option="a", value="3")
     assert path.read_text() == "[s]\na = 3\nb = 2\n"
 
     # Only the first of duplicate sections is edited.
     path = tmp_path / "sections.conf"
     path.write_text("[Peer]\nPublicKey = aaa\n[Peer]\nPublicKey = bbb\n")
-    files.ini(ctx, path, section="Peer", option="Endpoint", value="1.2.3.4:51820")
+    files.ini(path, section="Peer", option="Endpoint", value="1.2.3.4:51820")
     assert path.read_text() == "[Peer]\nPublicKey = aaa\nEndpoint = 1.2.3.4:51820\n[Peer]\nPublicKey = bbb\n"
-    files.ini(ctx, path, section="Peer", state="absent")
+    files.ini(path, section="Peer", state="absent")
     assert path.read_text() == "[Peer]\nPublicKey = bbb\n"
 
     # Values may contain equals signs.
     path = tmp_path / "equals.conf"
-    files.ini(ctx, path, section="s", option="filter", value="a=b=c")
+    files.ini(path, section="s", option="filter", value="a=b=c")
     assert path.read_text() == "[s]\nfilter = a=b=c\n"
-    result = files.ini(ctx, path, section="s", option="filter", value="a=b=c")
+    result = files.ini(path, section="s", option="filter", value="a=b=c")
     assert result.changed is False
 
     # A no-op does not repair a missing final newline.
     path = tmp_path / "newline.conf"
     path.write_text("[s]\na = 1")
-    result = files.ini(ctx, path, section="s", option="a", value="1")
+    result = files.ini(path, section="s", option="a", value="1")
     assert path.read_text() == "[s]\na = 1"
     assert result.changed is False
 
 
 def test_ini_create_false_rejects_a_missing_file(tmp_path):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="does not exist"):
-        files.ini(ctx, tmp_path / "missing.conf", section="s", option="a", value="1", create=False)
+        files.ini(tmp_path / "missing.conf", section="s", option="a", value="1", create=False)
 
     assert not (tmp_path / "missing.conf").exists()
 
@@ -1141,35 +1145,35 @@ def test_ini_create_false_rejects_a_missing_file(tmp_path):
 def test_ini_absent_scenarios(tmp_path):
     path = tmp_path / "absent.conf"
     path.write_text("a = 0\n[s]\na = 1\nb = 2\n[t]\na = 3\n")
-    ctx = context(tmp_path)
-    result = files.ini(ctx, path, section="s", option="a", state="absent")
+    context(tmp_path)
+    result = files.ini(path, section="s", option="a", state="absent")
     assert path.read_text() == "a = 0\n[s]\nb = 2\n[t]\na = 3\n"
     assert result.changed is True
     assert result.summary == f"remove a from [s] of {path}"
 
-    result = files.ini(ctx, path, section="s", option="a", state="absent")
+    result = files.ini(path, section="s", option="a", state="absent")
     assert result.changed is False
     assert result.summary == f"ensure a is absent from [s] of {path}"
 
     path = tmp_path / "section.conf"
     path.write_text("pre\n[s]\na = 1\n\n[t]\nb = 2\n")
-    ctx = context(tmp_path)
-    result = files.ini(ctx, path, section="s", state="absent")
+    context(tmp_path)
+    result = files.ini(path, section="s", state="absent")
     assert path.read_text() == "pre\n[t]\nb = 2\n"
     assert result.summary == f"remove section [s] from {path}"
 
-    result = files.ini(ctx, path, section="s", state="absent")
+    result = files.ini(path, section="s", state="absent")
     assert result.changed is False
     assert result.summary == f"ensure section [s] is absent from {path}"
 
     # No matching section is a no-op.
     path = tmp_path / "nomatch.conf"
     path.write_text("[Peer]\nPublicKey = aaa\n")
-    ctx = context(tmp_path)
-    result = files.ini(ctx, path, section="Peer", match={"PublicKey": "zzz"}, option="Endpoint", state="absent")
+    context(tmp_path)
+    result = files.ini(path, section="Peer", match={"PublicKey": "zzz"}, option="Endpoint", state="absent")
     assert result.changed is False
     assert path.read_text() == "[Peer]\nPublicKey = aaa\n"
-    result = files.ini(ctx, path, section="Peer", match={"PublicKey": "zzz"}, state="absent")
+    result = files.ini(path, section="Peer", match={"PublicKey": "zzz"}, state="absent")
     assert result.changed is False
     assert path.read_text() == "[Peer]\nPublicKey = aaa\n"
 
@@ -1181,7 +1185,6 @@ def test_ini_match_scenarios(tmp_path):
     )
     ctx = context(tmp_path)
     result = files.ini(
-        ctx,
         path,
         section="Peer",
         match={"AllowedIPs": r"10\.128\.0\.12/32"},
@@ -1196,7 +1199,6 @@ def test_ini_match_scenarios(tmp_path):
 
     # second run is a no-op
     result = files.ini(
-        ctx,
         path,
         section="Peer",
         match={r"Allowed.*": r"10\.128\.0\.12/32"},
@@ -1209,20 +1211,20 @@ def test_ini_match_scenarios(tmp_path):
     # regex key selects the right peer
     path = tmp_path / "regex.conf"
     path.write_text("[Peer]\nPublicKey = aaa\n[Peer]\nPublicKey = bbb\n")
-    files.ini(ctx, path, section="Peer", match={r"Public.*": "bbb"}, option="Endpoint", value="1.2.3.4:51820")
+    files.ini(path, section="Peer", match={r"Public.*": "bbb"}, option="Endpoint", value="1.2.3.4:51820")
     assert path.read_text() == "[Peer]\nPublicKey = aaa\n[Peer]\nPublicKey = bbb\nEndpoint = 1.2.3.4:51820\n"
 
     # first matching section wins
     path = tmp_path / "first.conf"
     path.write_text("[Peer]\nPublicKey = aaa\n[Peer]\nPublicKey = aaa\n")
-    files.ini(ctx, path, section="Peer", match={"PublicKey": "aaa"}, option="Endpoint", value="1.2.3.4:51820")
+    files.ini(path, section="Peer", match={"PublicKey": "aaa"}, option="Endpoint", value="1.2.3.4:51820")
     assert path.read_text() == "[Peer]\nPublicKey = aaa\nEndpoint = 1.2.3.4:51820\n[Peer]\nPublicKey = aaa\n"
 
     # creating via the matched option is idempotent
     path = tmp_path / "create.conf"
     path.write_text("[Interface]\nPrivateKey = xxxx\n")
     for _ in range(2):
-        files.ini(ctx, path, section="Peer", match={"PublicKey": "bbbb"}, option="PublicKey", value="bbbb")
+        files.ini(path, section="Peer", match={"PublicKey": "bbbb"}, option="PublicKey", value="bbbb")
     assert path.read_text() == "[Interface]\nPrivateKey = xxxx\n[Peer]\nPublicKey = bbbb\n"
 
 
@@ -1234,19 +1236,18 @@ def test_ini_match_failure_scenarios(tmp_path):
     # the appended section would hold only PublicKey = bbbb, which cannot satisfy
     # a match on AllowedIPs, so the call fails instead of duplicating every run
     with pytest.raises(TaskFailed, match="would not satisfy the match"):
-        files.ini(ctx, path, section="Peer", match={"AllowedIPs": "10\\."}, option="PublicKey", value="bbbb")
+        files.ini(path, section="Peer", match={"AllowedIPs": "10\\."}, option="PublicKey", value="bbbb")
     assert path.read_text() == "[Peer]\nPublicKey = aaa\n"
     assert ctx.changes == []
 
     path = tmp_path / "escape.conf"
     ctx = context(tmp_path)
     with pytest.raises(TaskFailed, match="would not satisfy the match"):
-        files.ini(ctx, path, section="Peer", match={"PublicKey": "abc+def"}, option="PublicKey", value="abc+def")
+        files.ini(path, section="Peer", match={"PublicKey": "abc+def"}, option="PublicKey", value="abc+def")
     assert not path.exists()
 
     for _ in range(2):
         files.ini(
-            ctx,
             path,
             section="Peer",
             match={"PublicKey": re.escape("abc+def")},
@@ -1259,10 +1260,10 @@ def test_ini_match_failure_scenarios(tmp_path):
     path = tmp_path / "rotate.conf"
     path.write_text("[Peer]\nPublicKey = old\n")
     ctx = context(tmp_path)
-    files.ini(ctx, path, section="Peer", match={"PublicKey": "old"}, option="PublicKey", value="new")
+    files.ini(path, section="Peer", match={"PublicKey": "old"}, option="PublicKey", value="new")
     assert path.read_text() == "[Peer]\nPublicKey = new\n"
     with pytest.raises(TaskFailed, match="would not satisfy the match"):
-        files.ini(ctx, path, section="Peer", match={"PublicKey": "old"}, option="PublicKey", value="new")
+        files.ini(path, section="Peer", match={"PublicKey": "old"}, option="PublicKey", value="new")
     assert path.read_text() == "[Peer]\nPublicKey = new\n"
     assert len(ctx.changes) == 1
 
@@ -1273,57 +1274,57 @@ def test_ini_invalid_arguments_are_rejected(tmp_path):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid ini state"):
-        files.ini(ctx, path, section="s", option="a", value="1", state="unknown")
+        files.ini(path, section="s", option="a", value="1", state="unknown")
     with pytest.raises(TaskFailed, match="ini path must not be empty"):
-        files.ini(ctx, "", section="s", option="a", value="1")
+        files.ini("", section="s", option="a", value="1")
     with pytest.raises(TaskFailed, match="ini section must not contain"):
-        files.ini(ctx, path, section="[s]", option="a", value="1")
+        files.ini(path, section="[s]", option="a", value="1")
     with pytest.raises(TaskFailed, match="ini option must not contain"):
-        files.ini(ctx, path, section="s", option="a=b", value="1")
+        files.ini(path, section="s", option="a=b", value="1")
     with pytest.raises(TaskFailed, match="ini value must not contain"):
-        files.ini(ctx, path, section="s", option="a", value="1\n2")
+        files.ini(path, section="s", option="a", value="1\n2")
     with pytest.raises(TaskFailed, match="requires an option"):
-        files.ini(ctx, path, section="s", value="1")
+        files.ini(path, section="s", value="1")
     with pytest.raises(TaskFailed, match="requires a value"):
-        files.ini(ctx, path, section="s", option="a")
+        files.ini(path, section="s", option="a")
     with pytest.raises(TaskFailed, match="requires a section or an option"):
-        files.ini(ctx, path, state="absent")
+        files.ini(path, state="absent")
     with pytest.raises(TaskFailed, match="state 'absent' does not take a value"):
-        files.ini(ctx, path, section="s", option="a", value="2", state="absent")
+        files.ini(path, section="s", option="a", value="2", state="absent")
     with pytest.raises(TaskFailed, match="state 'absent' does not take a value"):
-        files.ini(ctx, path, section="s", value="2", state="absent")
+        files.ini(path, section="s", value="2", state="absent")
     with pytest.raises(TaskFailed, match="ini match requires a section"):
-        files.ini(ctx, path, option="a", value="1", match={"b": "2"})
+        files.ini(path, option="a", value="1", match={"b": "2"})
     with pytest.raises(TaskFailed, match="ini match must not be empty"):
-        files.ini(ctx, path, section="s", option="a", value="1", match={})
+        files.ini(path, section="s", option="a", value="1", match={})
     with pytest.raises(TaskFailed, match="invalid ini match value"):
-        files.ini(ctx, path, section="s", option="a", value="1", match={"a": "["})
+        files.ini(path, section="s", option="a", value="1", match={"a": "["})
     with pytest.raises(TaskFailed, match="invalid ini match key"):
-        files.ini(ctx, path, section="s", option="a", value="1", match={"[": "1"})
+        files.ini(path, section="s", option="a", value="1", match={"[": "1"})
     with pytest.raises(TaskFailed, match="must be a boolean"):
-        files.ini(ctx, path, section="s", option="a", value="1", create="yes")
+        files.ini(path, section="s", option="a", value="1", create="yes")
 
     assert ctx.changes == []
     assert path.read_text() == "[s]\na = 1\n"
 
 
 def test_ini_rejects_directories_symlinks_and_non_utf8_files(tmp_path):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="directory"):
-        files.ini(ctx, tmp_path, section="s", option="a", value="1")
+        files.ini(tmp_path, section="s", option="a", value="1")
 
     target = tmp_path / "target"
     target.write_text("[s]\na = 1\n")
     link = tmp_path / "link"
     link.symlink_to(target)
     with pytest.raises(TaskFailed, match="symlink"):
-        files.ini(ctx, link, section="s", option="a", value="2")
+        files.ini(link, section="s", option="a", value="2")
 
     binary = tmp_path / "binary"
     binary.write_bytes(b"[s]\n\xff\xfe\n")
     with pytest.raises(TaskFailed, match="UTF-8"):
-        files.ini(ctx, binary, section="s", option="a", value="2")
+        files.ini(binary, section="s", option="a", value="2")
 
     assert target.read_text() == "[s]\na = 1\n"
 
@@ -1333,23 +1334,23 @@ def test_ini_dry_run_reports_without_writing_and_repairs_final_newline(tmp_path)
     path.write_text("[s]\na = 1")
     ctx = context(tmp_path, dry_run=True)
 
-    result = files.ini(ctx, path, section="s", option="b", value="2")
+    result = files.ini(path, section="s", option="b", value="2")
 
     assert path.read_text() == "[s]\na = 1"
     assert result.changed is True
     assert len(ctx.changes) == 1
 
     ctx = context(tmp_path)
-    files.ini(ctx, path, section="s", option="b", value="2")
+    files.ini(path, section="s", option="b", value="2")
     assert path.read_text() == "[s]\na = 1\nb = 2\n"
 
 
 def test_ini_noop_does_not_repair_a_missing_final_newline(tmp_path):
     path = tmp_path / "app.conf"
     path.write_text("[s]\na = 1")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    result = files.ini(ctx, path, section="s", option="a", value="1")
+    result = files.ini(path, section="s", option="a", value="1")
 
     assert path.read_text() == "[s]\na = 1"
     assert result.changed is False
@@ -1359,9 +1360,9 @@ def test_ini_preserves_existing_file_mode(tmp_path):
     path = tmp_path / "app.conf"
     path.write_text("[s]\na = 1\n")
     path.chmod(0o600)
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.ini(ctx, path, section="s", option="a", value="2")
+    files.ini(path, section="s", option="a", value="2")
 
     assert path.read_text() == "[s]\na = 2\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -1369,12 +1370,12 @@ def test_ini_preserves_existing_file_mode(tmp_path):
 
 def test_ini_value_may_contain_equals_signs(tmp_path):
     path = tmp_path / "app.conf"
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.ini(ctx, path, section="s", option="filter", value="a=b=c")
+    files.ini(path, section="s", option="filter", value="a=b=c")
 
     assert path.read_text() == "[s]\nfilter = a=b=c\n"
-    result = files.ini(ctx, path, section="s", option="filter", value="a=b=c")
+    result = files.ini(path, section="s", option="filter", value="a=b=c")
     assert result.changed is False
 
 
@@ -1383,11 +1384,11 @@ def test_ini_uses_privileged_worker(tmp_path):
     ctx = privileged_context(tmp_path)
 
     try:
-        result = files.ini(ctx, path, section="s", option="a", value="1", sudo=True)
+        result = files.ini(path, section="s", option="a", value="1", sudo=True)
         assert result.changed is True
         assert path.read_text() == "[s]\na = 1\n"
 
-        result = files.ini(ctx, path, section="s", option="a", value="1", sudo=True)
+        result = files.ini(path, section="s", option="a", value="1", sudo=True)
         assert result.changed is False
         assert ctx.sudo.refresh_count > 0
     finally:
@@ -1402,7 +1403,7 @@ def test_ini_stats_and_reads_the_target_once(tmp_path):
     ctx.privileged_worker = worker  # type: ignore[assignment]
 
     try:
-        files.ini(ctx, path, section="s", option="a", value="2", sudo=True)
+        files.ini(path, section="s", option="a", value="2", sudo=True)
     finally:
         ctx.close()
 
@@ -1417,12 +1418,12 @@ def test_ini_validates_arguments_before_touching_the_file(tmp_path):
 
     # argument errors win over filesystem errors (the path is a directory)
     with pytest.raises(TaskFailed, match="requires an option"):
-        files.ini(ctx, tmp_path, state="present", value="1")
+        files.ini(tmp_path, state="present", value="1")
     with pytest.raises(TaskFailed, match="requires a section or an option"):
-        files.ini(ctx, tmp_path, state="absent")
+        files.ini(tmp_path, state="absent")
     # argument errors win over the create=False missing-file check
     with pytest.raises(TaskFailed, match="requires a value"):
-        files.ini(ctx, tmp_path / "missing.conf", option="a", create=False)
+        files.ini(tmp_path / "missing.conf", option="a", create=False)
 
     assert ctx.changes == []
 
@@ -1434,11 +1435,11 @@ def test_ini_rejects_line_breaks_and_null_bytes_in_arguments(tmp_path, char):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="must not contain"):
-        files.ini(ctx, path, section=f"s{char}t", option="a", value="1")
+        files.ini(path, section=f"s{char}t", option="a", value="1")
     with pytest.raises(TaskFailed, match="must not contain"):
-        files.ini(ctx, path, section="s", option=f"a{char}b", value="1")
+        files.ini(path, section="s", option=f"a{char}b", value="1")
     with pytest.raises(TaskFailed, match="must not contain"):
-        files.ini(ctx, path, section="s", option="a", value=f"1{char}2")
+        files.ini(path, section="s", option="a", value=f"1{char}2")
 
     assert path.read_text() == "[s]\na = 1\n"
     assert ctx.changes == []
@@ -1450,9 +1451,9 @@ def test_ini_rejects_non_utf8_encodable_arguments(tmp_path):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="UTF-8 encodable"):
-        files.ini(ctx, path, section="s", option="a", value="\ud800")
+        files.ini(path, section="s", option="a", value="\ud800")
     with pytest.raises(TaskFailed, match="UTF-8 encodable"):
-        files.ini(ctx, path, section="\ud800", option="a", value="1")
+        files.ini(path, section="\ud800", option="a", value="1")
 
     assert path.read_text() == "[s]\na = 1\n"
     assert ctx.changes == []
@@ -1461,10 +1462,10 @@ def test_ini_rejects_non_utf8_encodable_arguments(tmp_path):
 def test_line_rejects_non_utf8_encodable_text(tmp_path):
     path = tmp_path / "lines"
     path.write_text("one\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="UTF-8 encodable"):
-        files.line(ctx, path, "bad\ud800")
+        files.line(path, "bad\ud800")
 
     assert path.read_text() == "one\n"
 
@@ -1475,9 +1476,9 @@ def test_ini_rejects_comment_prefixed_option_names(tmp_path):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="comment character"):
-        files.ini(ctx, path, section="s", option="#foo", value="2")
+        files.ini(path, section="s", option="#foo", value="2")
     with pytest.raises(TaskFailed, match="comment character"):
-        files.ini(ctx, path, section="s", option=";foo", state="absent")
+        files.ini(path, section="s", option=";foo", state="absent")
 
     assert path.read_text() == "[s]\n#foo = 1\n"
     assert ctx.changes == []
@@ -1487,9 +1488,9 @@ def test_ini_absent_on_a_missing_file_is_a_noop_and_creates_nothing(tmp_path):
     missing = tmp_path / "missing.conf"
     ctx = context(tmp_path)
 
-    result = files.ini(ctx, missing, section="s", option="a", state="absent")
+    result = files.ini(missing, section="s", option="a", state="absent")
     assert result.changed is False
-    result = files.ini(ctx, missing, section="s", state="absent")
+    result = files.ini(missing, section="s", state="absent")
     assert result.changed is False
 
     assert not missing.exists()
@@ -1499,39 +1500,39 @@ def test_ini_absent_on_a_missing_file_is_a_noop_and_creates_nothing(tmp_path):
 def test_ini_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
     path = tmp_path / "bom.conf"
     path.write_bytes(b"\xef\xbb\xbf[s]\na = 1\nb = 2\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     # a no-op run only reads, so the BOM is kept
-    result = files.ini(ctx, path, section="s", option="a", value="1")
+    result = files.ini(path, section="s", option="a", value="1")
     assert result.changed is False
     assert path.read_bytes() == b"\xef\xbb\xbf[s]\na = 1\nb = 2\n"
 
     # the first real write parses the bom-prefixed header normally and drops the BOM
-    result = files.ini(ctx, path, section="s", option="a", value="9")
+    result = files.ini(path, section="s", option="a", value="9")
     assert result.changed is True
     assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
 
     # idempotent afterwards
-    result = files.ini(ctx, path, section="s", option="a", value="9")
+    result = files.ini(path, section="s", option="a", value="9")
     assert result.changed is False
     assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
 
     # a missing section is appended after the existing one
-    files.ini(ctx, path, section="t", option="c", value="3")
+    files.ini(path, section="t", option="c", value="3")
     assert path.read_bytes() == b"[s]\na = 9\nb = 2\n[t]\nc = 3\n"
 
 
 def test_ini_absent_removes_a_bom_prefixed_section_and_strips_the_bom(tmp_path):
     path = tmp_path / "bom.conf"
     path.write_bytes(b"\xef\xbb\xbf[s]\na = 1\n[t]\nb = 2\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    result = files.ini(ctx, path, section="s", state="absent")
+    result = files.ini(path, section="s", state="absent")
 
     assert result.changed is True
     assert path.read_bytes() == b"[t]\nb = 2\n"
 
-    result = files.ini(ctx, path, section="s", state="absent")
+    result = files.ini(path, section="s", state="absent")
     assert result.changed is False
 
 
@@ -1540,7 +1541,7 @@ def test_toml_sets_key_and_is_idempotent(tmp_path):
     path.write_text('[server]\nhost = "old"\nport = 8080\n')
     ctx = context(tmp_path)
 
-    result = files.toml(ctx, path, table="server", key="host", value="example.com")
+    result = files.toml(path, table="server", key="host", value="example.com")
 
     assert path.read_text() == '[server]\nhost = "example.com"\nport = 8080\n'
     assert result.action == "files.toml"
@@ -1554,7 +1555,7 @@ def test_toml_sets_key_and_is_idempotent(tmp_path):
         "toml_action": "replaced",
     }
 
-    result = files.toml(ctx, path, table="server", key="host", value="example.com")
+    result = files.toml(path, table="server", key="host", value="example.com")
     assert result.changed is False
     assert result.summary == f'ensure host is "example.com" in [server] of {path}'
     assert call_data(result)["toml_action"] == "unchanged"
@@ -1564,9 +1565,9 @@ def test_toml_sets_key_and_is_idempotent(tmp_path):
 def test_toml_result_fields_report_toml_action_and_arguments(tmp_path):
     path = tmp_path / "app.toml"
     path.write_text("[s]\na = 1\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    result = files.toml(ctx, path, table="s", key="b", value=2)
+    result = files.toml(path, table="s", key="b", value=2)
     assert call_data(result) == {
         "path": str(path),
         "table": "s",
@@ -1575,10 +1576,10 @@ def test_toml_result_fields_report_toml_action_and_arguments(tmp_path):
         "toml_action": "added",
     }
 
-    result = files.toml(ctx, path, table="s", key="a", value=9)
+    result = files.toml(path, table="s", key="a", value=9)
     assert call_data(result)["toml_action"] == "replaced"
 
-    result = files.toml(ctx, path, table="s", key="a", state="absent")
+    result = files.toml(path, table="s", key="a", state="absent")
     assert call_data(result) == {
         "path": str(path),
         "table": "s",
@@ -1587,10 +1588,10 @@ def test_toml_result_fields_report_toml_action_and_arguments(tmp_path):
         "toml_action": "removed",
     }
 
-    result = files.toml(ctx, path, table="s", state="absent")
+    result = files.toml(path, table="s", state="absent")
     assert call_data(result)["toml_action"] == "removed"
 
-    result = files.toml(ctx, path, table="s", state="absent")
+    result = files.toml(path, table="s", state="absent")
     assert call_data(result) == {
         "path": str(path),
         "table": "s",
@@ -1599,7 +1600,7 @@ def test_toml_result_fields_report_toml_action_and_arguments(tmp_path):
         "toml_action": "unchanged",
     }
 
-    result = files.toml(ctx, path, key="pre", value=True)
+    result = files.toml(path, key="pre", value=True)
     assert call_data(result) == {
         "path": str(path),
         "table": None,
@@ -1610,112 +1611,112 @@ def test_toml_result_fields_report_toml_action_and_arguments(tmp_path):
 
 
 def test_toml_edit_scenarios(tmp_path):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     # Spacing and quote variants that already match are no-ops.
     path = tmp_path / "spacing.toml"
     path.write_text('[server]\nhost  =  "example.com"  # main\n')
-    result = files.toml(ctx, path, table="server", key="host", value="example.com")
+    result = files.toml(path, table="server", key="host", value="example.com")
     assert path.read_text() == '[server]\nhost  =  "example.com"  # main\n'
     assert result.changed is False
 
     # Insertion goes to the end of the table body and preserves the rest.
     path = tmp_path / "insert.toml"
     path.write_text("# top\n[s]\na = 1\n\n# trailing\n[t]\nb = 2\n")
-    files.toml(ctx, path, table="s", key="c", value=3)
+    files.toml(path, table="s", key="c", value=3)
     assert path.read_text() == "# top\n[s]\na = 1\nc = 3\n\n# trailing\n[t]\nb = 2\n"
 
     # Missing tables are appended; missing files are created with mode 0o644.
     path = tmp_path / "append.toml"
     path.write_text("[s]\na = 1\n")
-    files.toml(ctx, path, table="t", key="b", value=2)
+    files.toml(path, table="t", key="b", value=2)
     assert path.read_text() == "[s]\na = 1\n[t]\nb = 2\n"
 
     fresh = tmp_path / "new.toml"
-    files.toml(ctx, fresh, table="s", key="a", value=1)
+    files.toml(fresh, table="s", key="a", value=1)
     assert fresh.read_text() == "[s]\na = 1\n"
     assert stat.S_IMODE(fresh.stat().st_mode) == 0o644
 
     # The top-level preamble is edited when table is None.
     path = tmp_path / "preamble.toml"
     path.write_text("a = 1\n[s]\nb = 2\n")
-    files.toml(ctx, path, key="c", value=3)
+    files.toml(path, key="c", value=3)
     assert path.read_text() == "a = 1\nc = 3\n[s]\nb = 2\n"
-    result = files.toml(ctx, path, key="c", value=3)
+    result = files.toml(path, key="c", value=3)
     assert result.changed is False
     assert result.summary == f"ensure c is 3 in {path}"
 
     # A dotted key resolves into an existing sub-table header.
     path = tmp_path / "dotted.toml"
     path.write_text("[tool.uv]\nnative-tls = true\n\n[tool.uv.pip]\nno-cache = false\n")
-    files.toml(ctx, path, table="tool.uv", key="pip.no-cache", value=True)
+    files.toml(path, table="tool.uv", key="pip.no-cache", value=True)
     assert path.read_text() == "[tool.uv]\nnative-tls = true\n\n[tool.uv.pip]\nno-cache = true\n"
 
     # A multi-line array keeps its layout when changed.
     path = tmp_path / "array.toml"
     path.write_text('[project]\ndependencies = [\n    "a",\n]\n')
-    files.toml(ctx, path, table="project", key="dependencies", value=["b", "c"])
+    files.toml(path, table="project", key="dependencies", value=["b", "c"])
     assert path.read_text() == '[project]\ndependencies = [\n    "b",\n    "c",\n]\n'
 
     # A no-op does not repair a missing final newline.
     path = tmp_path / "newline.toml"
     path.write_text("[s]\na = 1")
-    result = files.toml(ctx, path, table="s", key="a", value=1)
+    result = files.toml(path, table="s", key="a", value=1)
     assert path.read_text() == "[s]\na = 1"
     assert result.changed is False
 
 
 def test_toml_value_types(tmp_path):
     path = tmp_path / "typed.toml"
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.toml(ctx, path, key="flag", value=True)
-    files.toml(ctx, path, key="count", value=4)
-    files.toml(ctx, path, key="ratio", value=1.5)
-    files.toml(ctx, path, key="name", value="demo")
-    files.toml(ctx, path, key="groups", value=["dev", "lint"])
-    files.toml(ctx, path, key="empty", value=[])
+    files.toml(path, key="flag", value=True)
+    files.toml(path, key="count", value=4)
+    files.toml(path, key="ratio", value=1.5)
+    files.toml(path, key="name", value="demo")
+    files.toml(path, key="groups", value=["dev", "lint"])
+    files.toml(path, key="empty", value=[])
 
     assert path.read_text() == (
         'flag = true\ncount = 4\nratio = 1.5\nname = "demo"\ngroups = ["dev", "lint"]\nempty = []\n'
     )
 
     # values compare by parsed type: true is not 1, and 1 is not 1.0
-    assert files.toml(ctx, path, key="flag", value=True).changed is False
-    assert files.toml(ctx, path, key="flag", value=1).changed is True
+    assert files.toml(path, key="flag", value=True).changed is False
+    assert files.toml(path, key="flag", value=1).changed is True
     assert path.read_text().splitlines()[0] == "flag = 1"
-    assert files.toml(ctx, path, key="count", value=4.0).changed is True
+    assert files.toml(path, key="count", value=4.0).changed is True
 
 
 def test_toml_absent_scenarios(tmp_path):
     path = tmp_path / "absent.toml"
     path.write_text("a = 0\n[s]\na = 1\nb = 2\n[t]\na = 3\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    result = files.toml(ctx, path, table="s", key="a", state="absent")
+    result = files.toml(path, table="s", key="a", state="absent")
     assert path.read_text() == "a = 0\n[s]\nb = 2\n[t]\na = 3\n"
     assert result.changed is True
     assert result.summary == f"remove a from [s] of {path}"
 
-    result = files.toml(ctx, path, table="s", key="a", state="absent")
+    result = files.toml(path, table="s", key="a", state="absent")
     assert result.changed is False
     assert result.summary == f"ensure a is absent from [s] of {path}"
 
     # removing a table takes its span, comments included, and keeps the rest
     path = tmp_path / "table.toml"
     path.write_text("pre = 1\n[s]\na = 1\n# note\n\n[t]\nb = 2\n")
-    result = files.toml(ctx, path, table="s", state="absent")
+    result = files.toml(path, table="s", state="absent")
     assert path.read_text() == "pre = 1\n[t]\nb = 2\n"
     assert result.summary == f"remove table [s] from {path}"
 
-    result = files.toml(ctx, path, table="s", state="absent")
+    result = files.toml(path, table="s", state="absent")
     assert result.changed is False
     assert result.summary == f"ensure table [s] is absent from {path}"
 
     # removing the only table leaves an empty file
     path = tmp_path / "only.toml"
     path.write_text("[s]\na = 1\n")
-    result = files.toml(ctx, path, table="s", state="absent")
+    result = files.toml(path, table="s", state="absent")
     assert path.read_text() == ""
     assert result.changed is True
 
@@ -1723,9 +1724,9 @@ def test_toml_absent_scenarios(tmp_path):
 def test_toml_absent_removes_a_dotted_key_declared_table(tmp_path):
     path = tmp_path / "dotted-table.toml"
     path.write_text('tool.uv.native-tls = true\n[project]\nname = "demo"\n')
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    result = files.toml(ctx, path, table="tool.uv", state="absent")
+    result = files.toml(path, table="tool.uv", state="absent")
 
     assert path.read_text() == '[project]\nname = "demo"\n'
     assert result.changed is True
@@ -1733,22 +1734,22 @@ def test_toml_absent_removes_a_dotted_key_declared_table(tmp_path):
 
 
 def test_toml_create_false_rejects_a_missing_file(tmp_path):
-    ctx = context(tmp_path)
+    context(tmp_path)
     missing = tmp_path / "missing.toml"
 
     with pytest.raises(TaskFailed, match="does not exist"):
-        files.toml(ctx, missing, table="s", key="a", value=1, create=False)
+        files.toml(missing, table="s", key="a", value=1, create=False)
     with pytest.raises(TaskFailed, match="does not exist"):
-        files.toml(ctx, missing, table="s", key="a", state="absent", create=False)
+        files.toml(missing, table="s", key="a", state="absent", create=False)
 
     assert not missing.exists()
 
 
 def test_toml_creates_a_missing_file_with_parents(tmp_path):
     path = tmp_path / "deep" / "nested" / "app.toml"
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    result = files.toml(ctx, path, table="s", key="a", value=1)
+    result = files.toml(path, table="s", key="a", value=1)
 
     assert path.read_text() == "[s]\na = 1\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
@@ -1760,9 +1761,9 @@ def test_toml_absent_on_a_missing_file_is_a_noop_and_creates_nothing(tmp_path):
     missing = tmp_path / "missing.toml"
     ctx = context(tmp_path)
 
-    result = files.toml(ctx, missing, table="s", key="a", state="absent")
+    result = files.toml(missing, table="s", key="a", state="absent")
     assert result.changed is False
-    result = files.toml(ctx, missing, table="s", state="absent")
+    result = files.toml(missing, table="s", state="absent")
     assert result.changed is False
 
     assert not missing.exists()
@@ -1774,14 +1775,14 @@ def test_toml_dry_run_reports_without_writing_or_creating(tmp_path):
     path.write_text("[s]\na = 1\n")
     ctx = context(tmp_path, dry_run=True)
 
-    result = files.toml(ctx, path, table="s", key="b", value=2)
+    result = files.toml(path, table="s", key="b", value=2)
 
     assert path.read_text() == "[s]\na = 1\n"
     assert result.changed is True
     assert len(ctx.changes) == 1
 
     missing = tmp_path / "deep" / "new.toml"
-    result = files.toml(ctx, missing, table="s", key="a", value=1)
+    result = files.toml(missing, table="s", key="a", value=1)
     assert result.changed is True
     assert not missing.exists()
     assert not (tmp_path / "deep").exists()
@@ -1793,27 +1794,27 @@ def test_toml_invalid_arguments_are_rejected(tmp_path):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="invalid toml state"):
-        files.toml(ctx, path, table="s", key="a", value=1, state="unknown")
+        files.toml(path, table="s", key="a", value=1, state="unknown")
     with pytest.raises(TaskFailed, match="toml path must not be empty"):
-        files.toml(ctx, "", table="s", key="a", value=1)
+        files.toml("", table="s", key="a", value=1)
     with pytest.raises(TaskFailed, match="toml table must use bare key parts"):
-        files.toml(ctx, path, table="a b", key="a", value=1)
+        files.toml(path, table="a b", key="a", value=1)
     with pytest.raises(TaskFailed, match="toml key must use bare key parts"):
-        files.toml(ctx, path, table="s", key='"quoted"', value=1)
+        files.toml(path, table="s", key='"quoted"', value=1)
     with pytest.raises(TaskFailed, match="requires a key"):
-        files.toml(ctx, path, table="s", value=1)
+        files.toml(path, table="s", value=1)
     with pytest.raises(TaskFailed, match="requires a value"):
-        files.toml(ctx, path, table="s", key="a")
+        files.toml(path, table="s", key="a")
     with pytest.raises(TaskFailed, match="requires a key or a table"):
-        files.toml(ctx, path, state="absent")
+        files.toml(path, state="absent")
     with pytest.raises(TaskFailed, match="does not take a value"):
-        files.toml(ctx, path, table="s", key="a", value=1, state="absent")
+        files.toml(path, table="s", key="a", value=1, state="absent")
     with pytest.raises(TaskFailed, match="must be a boolean"):
-        files.toml(ctx, path, table="s", key="a", value=1, create="yes")
+        files.toml(path, table="s", key="a", value=1, create="yes")
     with pytest.raises(TaskFailed, match="unsupported toml value type"):
-        files.toml(ctx, path, table="s", key="a", value={"a": 1})
+        files.toml(path, table="s", key="a", value={"a": 1})
     with pytest.raises(TaskFailed, match="toml array items must be strings"):
-        files.toml(ctx, path, table="s", key="a", value=["a", 1])
+        files.toml(path, table="s", key="a", value=["a", 1])
 
     assert ctx.changes == []
     assert path.read_text() == "[s]\na = 1\n"
@@ -1825,33 +1826,33 @@ def test_toml_rejects_array_of_tables_targets(tmp_path):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="array-of-tables"):
-        files.toml(ctx, path, table="tool.uv.index", key="url", value="https://y")
+        files.toml(path, table="tool.uv.index", key="url", value="https://y")
     with pytest.raises(TaskFailed, match="array-of-tables"):
-        files.toml(ctx, path, table="tool.uv.index", key="url", state="absent")
+        files.toml(path, table="tool.uv.index", key="url", state="absent")
     with pytest.raises(TaskFailed, match="array-of-tables"):
-        files.toml(ctx, path, table="tool.uv.index", state="absent")
+        files.toml(path, table="tool.uv.index", state="absent")
 
     assert path.read_text() == '[[tool.uv.index]]\nurl = "https://x"\n'
     assert ctx.changes == []
 
 
 def test_toml_rejects_directories_symlinks_and_non_utf8_files(tmp_path):
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     with pytest.raises(TaskFailed, match="directory"):
-        files.toml(ctx, tmp_path, table="s", key="a", value=1)
+        files.toml(tmp_path, table="s", key="a", value=1)
 
     target = tmp_path / "target.toml"
     target.write_text("[s]\na = 1\n")
     link = tmp_path / "link.toml"
     link.symlink_to(target)
     with pytest.raises(TaskFailed, match="symlink"):
-        files.toml(ctx, link, table="s", key="a", value=2)
+        files.toml(link, table="s", key="a", value=2)
 
     binary = tmp_path / "binary.toml"
     binary.write_bytes(b"[s]\n\xff\xfe\n")
     with pytest.raises(TaskFailed, match="UTF-8"):
-        files.toml(ctx, binary, table="s", key="a", value=2)
+        files.toml(binary, table="s", key="a", value=2)
 
     assert target.read_text() == "[s]\na = 1\n"
 
@@ -1860,9 +1861,9 @@ def test_toml_preserves_existing_file_mode(tmp_path):
     path = tmp_path / "app.toml"
     path.write_text("[s]\na = 1\n")
     path.chmod(0o600)
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    files.toml(ctx, path, table="s", key="a", value=2)
+    files.toml(path, table="s", key="a", value=2)
 
     assert path.read_text() == "[s]\na = 2\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -1873,11 +1874,11 @@ def test_toml_uses_privileged_worker(tmp_path):
     ctx = privileged_context(tmp_path)
 
     try:
-        result = files.toml(ctx, path, table="s", key="a", value=1, sudo=True)
+        result = files.toml(path, table="s", key="a", value=1, sudo=True)
         assert result.changed is True
         assert path.read_text() == "[s]\na = 1\n"
 
-        result = files.toml(ctx, path, table="s", key="a", value=1, sudo=True)
+        result = files.toml(path, table="s", key="a", value=1, sudo=True)
         assert result.changed is False
         assert ctx.sudo.refresh_count > 0
     finally:
@@ -1892,7 +1893,7 @@ def test_toml_stats_and_reads_the_target_once(tmp_path):
     ctx.privileged_worker = worker  # type: ignore[assignment]
 
     try:
-        files.toml(ctx, path, key="a", value=2, sudo=True)
+        files.toml(path, key="a", value=2, sudo=True)
     finally:
         ctx.close()
 
@@ -1907,12 +1908,12 @@ def test_toml_validates_arguments_before_touching_the_file(tmp_path):
 
     # argument errors win over filesystem errors (the path is a directory)
     with pytest.raises(TaskFailed, match="requires a value"):
-        files.toml(ctx, tmp_path, table="s", key="a")
+        files.toml(tmp_path, table="s", key="a")
     with pytest.raises(TaskFailed, match="requires a key or a table"):
-        files.toml(ctx, tmp_path, state="absent")
+        files.toml(tmp_path, state="absent")
     # argument errors win over the create=False missing-file check
     with pytest.raises(TaskFailed, match="requires a value"):
-        files.toml(ctx, tmp_path / "missing.toml", key="a", create=False)
+        files.toml(tmp_path / "missing.toml", key="a", create=False)
 
     assert ctx.changes == []
 
@@ -1924,9 +1925,9 @@ def test_toml_rejects_line_breaks_and_null_bytes_in_arguments(tmp_path, char):
     ctx = context(tmp_path)
 
     with pytest.raises(TaskFailed, match="must not contain"):
-        files.toml(ctx, path, table=f"s{char}t", key="a", value=1)
+        files.toml(path, table=f"s{char}t", key="a", value=1)
     with pytest.raises(TaskFailed, match="must not contain"):
-        files.toml(ctx, path, table="s", key=f"a{char}b", value=1)
+        files.toml(path, table="s", key=f"a{char}b", value=1)
 
     assert path.read_text() == "[s]\na = 1\n"
     assert ctx.changes == []
@@ -1935,19 +1936,19 @@ def test_toml_rejects_line_breaks_and_null_bytes_in_arguments(tmp_path, char):
 def test_toml_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
     path = tmp_path / "bom.toml"
     path.write_bytes(b"\xef\xbb\xbf[s]\na = 1\nb = 2\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
     # a no-op run only reads, so the BOM is kept
-    result = files.toml(ctx, path, table="s", key="a", value=1)
+    result = files.toml(path, table="s", key="a", value=1)
     assert result.changed is False
     assert path.read_bytes() == b"\xef\xbb\xbf[s]\na = 1\nb = 2\n"
 
     # the first real write drops the BOM
-    result = files.toml(ctx, path, table="s", key="a", value=9)
+    result = files.toml(path, table="s", key="a", value=9)
     assert result.changed is True
     assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
 
-    result = files.toml(ctx, path, table="s", key="a", value=9)
+    result = files.toml(path, table="s", key="a", value=9)
     assert result.changed is False
     assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
 
@@ -1955,11 +1956,11 @@ def test_toml_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
 def test_line_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
     path = tmp_path / "lines"
     path.write_bytes(b"\xef\xbb\xbfone\ntwo\n")
-    ctx = context(tmp_path)
+    context(tmp_path)
 
-    result = files.line(ctx, path, "one")
+    result = files.line(path, "one")
     assert result.changed is False
     assert path.read_bytes() == b"\xef\xbb\xbfone\ntwo\n"
 
-    files.line(ctx, path, "ONE", match=r"^one$")
+    files.line(path, "ONE", match=r"^one$")
     assert path.read_bytes() == b"ONE\ntwo\n"

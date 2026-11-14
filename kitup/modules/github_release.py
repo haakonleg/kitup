@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from .._utils.http import open_url, read_bytes
 from .._utils.validation import has_control_characters, require_text, require_timeout
-from ..context import TaskContext
+from ..context import current_context
 from ..errors import TaskFailed
 from ..registry import module
 
@@ -77,12 +77,13 @@ class Release:
         return _single_asset(self, _compile_asset_pattern(pattern))
 
 
-def latest(ctx: TaskContext, project: str, *, timeout: float = _DEFAULT_TIMEOUT) -> Release:
+def latest(project: str, *, timeout: float = _DEFAULT_TIMEOUT) -> Release:
     """Return the latest published full release for a public repository.
 
     GitHub defines the latest release as the most recent non-draft,
     non-prerelease release. Use :func:`by_tag` to fetch a prerelease.
     """
+    ctx = current_context()
     project = _validate_project(project)
     require_timeout(timeout)
 
@@ -95,8 +96,9 @@ def latest(ctx: TaskContext, project: str, *, timeout: float = _DEFAULT_TIMEOUT)
     )
 
 
-def by_tag(ctx: TaskContext, project: str, tag: str, *, timeout: float = _DEFAULT_TIMEOUT) -> Release:
+def by_tag(project: str, tag: str, *, timeout: float = _DEFAULT_TIMEOUT) -> Release:
     """Return the published release for ``tag`` in a public repository."""
+    ctx = current_context()
     project = _validate_project(project)
     tag = _validate_tag(tag)
     require_timeout(timeout)
@@ -111,21 +113,14 @@ def by_tag(ctx: TaskContext, project: str, tag: str, *, timeout: float = _DEFAUL
     )
 
 
-def by_asset(
-    ctx: TaskContext,
-    project: str,
-    pattern: str,
-    *,
-    tag: str | None = None,
-    timeout: float = _DEFAULT_TIMEOUT,
-) -> Asset:
+def by_asset(project: str, pattern: str, *, tag: str | None = None, timeout: float = _DEFAULT_TIMEOUT) -> Asset:
     """Return the single asset whose name matches a regular expression.
 
     By default the release metadata comes from the latest release. Pass ``tag``
     to select a specific release instead.
     """
     regex = _compile_asset_pattern(pattern)
-    release = latest(ctx, project, timeout=timeout) if tag is None else by_tag(ctx, project, tag, timeout=timeout)
+    release = latest(project, timeout=timeout) if tag is None else by_tag(project, tag, timeout=timeout)
     return _single_asset(release, regex)
 
 

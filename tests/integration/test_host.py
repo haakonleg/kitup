@@ -120,8 +120,8 @@ def test_timezone_set_and_idempotent(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("set time zone")
-        def set_timezone(ctx):
-            host.timezone(ctx, "Europe/Oslo")
+        def set_timezone():
+            host.timezone("Europe/Oslo")
         """,
     )
 
@@ -142,8 +142,8 @@ def test_invalid_timezone_fails_without_changing(tmp_path: Path, capsys) -> None
         from kitup.modules import host
 
         @task("set invalid time zone")
-        def set_timezone(ctx):
-            host.timezone(ctx, "Not/AZone")
+        def set_timezone():
+            host.timezone("Not/AZone")
         """,
     )
 
@@ -161,8 +161,8 @@ def test_timezone_dry_run_does_not_change(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("set time zone")
-        def set_timezone(ctx):
-            host.timezone(ctx, "Europe/Oslo")
+        def set_timezone():
+            host.timezone("Europe/Oslo")
         """,
     )
 
@@ -180,8 +180,8 @@ def test_locale_set_and_idempotent(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("set locale")
-        def set_locale(ctx):
-            host.locale(ctx, {"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"})
+        def set_locale():
+            host.locale({"LANG": "en_US.UTF-8", "LC_TIME": "en_GB.UTF-8"})
         """,
     )
 
@@ -213,8 +213,8 @@ def test_locale_language_persists(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("set language")
-        def set_language(ctx):
-            host.locale(ctx, {"LANG": "en_US.UTF-8", "LANGUAGE": "en_GB.UTF-8"})
+        def set_language():
+            host.locale({"LANG": "en_US.UTF-8", "LANGUAGE": "en_GB.UTF-8"})
         """,
     )
 
@@ -245,9 +245,8 @@ def test_locale_redundant_values_are_idempotent(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("set redundant locale values")
-        def set_locale(ctx):
+        def set_locale():
             host.locale(
-                ctx,
                 {
                     "LANG": "en_US.UTF-8",
                     "LANGUAGE": "en_US.UTF-8",
@@ -269,8 +268,8 @@ def test_locale_rejects_colon_separated_language(tmp_path: Path, capsys) -> None
         from kitup.modules import host
 
         @task("set language list")
-        def set_language(ctx):
-            host.locale(ctx, {"LANGUAGE": "en_US.UTF-8:de_DE.UTF-8"})
+        def set_language():
+            host.locale({"LANGUAGE": "en_US.UTF-8:de_DE.UTF-8"})
         """,
     )
 
@@ -287,8 +286,8 @@ def test_locale_uninstalled_fails_without_changing(tmp_path: Path, capsys) -> No
         from kitup.modules import host
 
         @task("set uninstalled locale")
-        def set_locale(ctx):
-            host.locale(ctx, {"LANG": "xx_YY.UTF-8"})
+        def set_locale():
+            host.locale({"LANG": "xx_YY.UTF-8"})
         """,
     )
 
@@ -306,8 +305,8 @@ def test_locale_dry_run_does_not_change(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("set locale")
-        def set_locale(ctx):
-            host.locale(ctx, {"LANG": "en_GB.UTF-8"})
+        def set_locale():
+            host.locale({"LANG": "en_GB.UTF-8"})
         """,
     )
 
@@ -328,8 +327,8 @@ def test_rtc_local_utc_is_idempotent(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("keep RTC in UTC")
-        def keep_rtc_utc(ctx):
-            host.rtc_local(ctx, enabled=False)
+        def keep_rtc_utc():
+            host.rtc_local(enabled=False)
         """,
     )
 
@@ -349,8 +348,8 @@ def test_rtc_local_switches_modes(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("set RTC to local time")
-        def set_rtc_local(ctx):
-            host.rtc_local(ctx, enabled=True)
+        def set_rtc_local():
+            host.rtc_local(enabled=True)
         """,
     )
     assert run_kitup("apply", local_root) == 0
@@ -364,8 +363,8 @@ def test_rtc_local_switches_modes(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("set RTC to UTC")
-        def set_rtc_utc(ctx):
-            host.rtc_local(ctx, enabled=False)
+        def set_rtc_utc():
+            host.rtc_local(enabled=False)
         """,
     )
     assert run_kitup("apply", utc_root) == 0
@@ -384,8 +383,8 @@ def test_ntp_disabled_is_idempotent(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("disable NTP")
-        def disable_ntp(ctx):
-            host.ntp(ctx, enabled=False)
+        def disable_ntp():
+            host.ntp(enabled=False)
         """,
     )
 
@@ -407,8 +406,8 @@ def test_ntp_enable_fails_when_unavailable(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("enable NTP")
-        def enable_ntp(ctx):
-            host.ntp(ctx, enabled=True)
+        def enable_ntp():
+            host.ntp(enabled=True)
         """,
     )
 
@@ -426,8 +425,8 @@ def test_pretty_hostname_set_and_clear(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("set pretty hostname")
-        def set_pretty(ctx):
-            host.hostname(ctx, pretty="Kitup Integration")
+        def set_pretty():
+            host.hostname(pretty="Kitup Integration")
         """,
     )
 
@@ -446,8 +445,8 @@ def test_pretty_hostname_set_and_clear(tmp_path: Path, capsys) -> None:
         from kitup.modules import host
 
         @task("clear pretty hostname")
-        def clear_pretty(ctx):
-            host.hostname(ctx, pretty="")
+        def clear_pretty():
+            host.hostname(pretty="")
         """,
     )
     assert run_kitup("apply", clear_root) == 0

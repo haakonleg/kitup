@@ -12,7 +12,7 @@ from kitup.project import (
     on_project_path,
     resolve_preset,
 )
-from kitup.vars import load_vars
+from kitup.variables import load_vars
 
 from ..helpers import make_project, write
 
@@ -109,7 +109,7 @@ def test_discovered_bundles_are_immutable(tmp_path):
             setattr(bundle, attribute, value)
 
     with pytest.raises(BundleError, match="immutable after discovery"):
-        bundle.task(lambda ctx: None)
+        bundle.task(lambda: None)
 
 
 def test_synthesizes_a_bundle_when_the_folder_has_no_init(tmp_path):
@@ -334,7 +334,7 @@ def test_load_project_isolates_projects_with_the_same_bundle_names(tmp_path):
     def bundle_files(marker):
         return {
             "__init__.py": "from kitup import bundle\n\nbundle('Same')\n",
-            "tasks.py": f"from kitup import task\n\n@task\ndef mark(ctx):\n    return {marker!r}\n",
+            "tasks.py": f"from kitup import task\n\n@task\ndef mark():\n    return {marker!r}\n",
         }
 
     first_root = make_project(tmp_path / "first", bundles={"base": bundle_files("first")})
@@ -348,8 +348,8 @@ def test_load_project_isolates_projects_with_the_same_bundle_names(tmp_path):
     assert first_bundle is not second_bundle
     assert first_bundle.path == first_root / "bundles" / "base"
     assert second_bundle.path == second_root / "bundles" / "base"
-    assert first_bundle.tasks[0].func(None) == "first"
-    assert second_bundle.tasks[0].func(None) == "second"
+    assert first_bundle.tasks[0].func() == "first"
+    assert second_bundle.tasks[0].func() == "second"
 
 
 def test_vars_are_importable_as_a_package(tmp_path):
@@ -423,14 +423,14 @@ def test_relative_imports_inside_an_external_bundle(tmp_path):
     )
     write(
         folder / "tasks.py",
-        "from kitup import task\nfrom ._helper import VALUE\n\n@task\ndef show(ctx):\n    return VALUE\n",
+        "from kitup import task\nfrom ._helper import VALUE\n\n@task\ndef show():\n    return VALUE\n",
     )
     root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
 
     project = load_project(root, bundle_paths=[external])
     (extra,) = [bundle for bundle in project.bundles if bundle.id == "extra"]
 
-    assert extra.tasks[0].func(None) == "from helper"
+    assert extra.tasks[0].func() == "from helper"
 
 
 def test_external_bundle_can_depend_on_a_local_bundle(tmp_path):

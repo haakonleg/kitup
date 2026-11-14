@@ -31,7 +31,7 @@ def fake_facts(monkeypatch):
 
 def task_source(name, *, tags="", body="ctx.changed(summary='ran')"):
     decorator = f"@task(tags={{{tags!r}}})" if tags else "@task"
-    return f"from kitup import task\n\n{decorator}\ndef {name}(ctx):\n    {body}\n"
+    return f"from kitup import ctx, task\n\n{decorator}\ndef {name}():\n    {body}\n"
 
 
 def test_apply_uses_discovered_vars(tmp_path, capsys):
@@ -41,10 +41,10 @@ def test_apply_uses_discovered_vars(tmp_path, capsys):
         var_files={"work": "VALUE = 'work'\n"},
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task
-            def show(ctx):
+            def show():
                 ctx.changed(summary=f"value={ctx.vars.VALUE}")
             """
         },
@@ -188,10 +188,10 @@ def test_list_non_verbose_shows_only_task_names(tmp_path, capsys):
             "base": {
                 "__init__.py": "from kitup import bundle\n\nbundle('Base system', 'Core packages')\n",
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task(tags={'packages'})
-                def install_packages(ctx):
+                def install_packages():
                     '''Install base packages.'''
                     pass
                 """,
@@ -217,10 +217,10 @@ def test_list_verbose_shows_task_details(tmp_path, capsys):
             "base": {
                 "__init__.py": "from kitup import bundle\n\nbundle()\n",
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task(tags={'packages'})
-                def install_packages(ctx):
+                def install_packages():
                     '''Install base packages.'''
                     pass
                 """,
@@ -245,10 +245,10 @@ def test_verbose_output_indents_multiline_descriptions(tmp_path, capsys):
             "base": {
                 "__init__.py": "from kitup import bundle\n\nbundle('Base', 'Bundle first.\\n\\nBundle second.')\n",
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task
-                def install(ctx):
+                def install():
                     '''First line.
 
                     Second paragraph.
@@ -281,10 +281,10 @@ def test_shared_task_module_is_listed_and_applied_in_each_bundle(tmp_path, capsy
     write(
         tmp_path / "bundles" / "shared.py",
         """
-        from kitup import task
+        from kitup import ctx, task
 
         @task
-        def shared(ctx):
+        def shared():
             ctx.changed(summary="ran")
         """,
     )
@@ -368,10 +368,10 @@ def test_check_never_executes_tasks(tmp_path, capsys):
         tmp_path,
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task
-            def explode(ctx):
+            def explode():
                 raise RuntimeError("task ran")
             """
         },
@@ -391,10 +391,10 @@ def test_apply_honors_dry_run(tmp_path, capsys):
             "base": f"""
             from pathlib import Path
 
-            from kitup import task
+            from kitup import ctx, task
 
             @task
-            def write_marker(ctx):
+            def write_marker():
                 if not ctx.dry_run:
                     Path({str(marker)!r}).write_text("applied")
                 ctx.changed(summary="write marker")
@@ -418,18 +418,18 @@ def test_apply_tag_filters(tmp_path, capsys):
         tmp_path,
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task(tags={'packages'})
-            def packages(ctx):
+            def packages():
                 ctx.changed(summary="packages")
 
             @task(tags={'config'})
-            def config(ctx):
+            def config():
                 ctx.changed(summary="config")
 
             @task(tags={'docs'})
-            def docs(ctx):
+            def docs():
                 ctx.changed(summary="docs")
             """
         },
@@ -536,10 +536,10 @@ def test_var_filters_select_merged_values(tmp_path, capsys):
         var_files={"laptop": "VALUE = 'laptop'\n", "work": "VALUE = 'work'\n"},
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task
-            def show(ctx):
+            def show():
                 ctx.changed(summary=f"value={ctx.vars.VALUE}")
             """
         },
@@ -761,10 +761,10 @@ def test_invalid_task_tags_are_exit_2(tmp_path, capsys):
         tmp_path,
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task(tags={'packages', 1})
-            def run(ctx):
+            def run():
                 pass
             """
         },
@@ -781,14 +781,14 @@ def test_list_does_not_show_side_effect_names(tmp_path, capsys):
         tmp_path,
         bundles={
             "base": """
-            from kitup import side_effect, task
+            from kitup import ctx, side_effect, task
 
             @side_effect
-            def refresh(ctx):
+            def refresh():
                 pass
 
             @task
-            def install(ctx):
+            def install():
                 ctx.side_effect(refresh)
             """
         },
@@ -807,18 +807,18 @@ def test_apply_shows_and_prefixes_side_effect_lines(tmp_path, capsys):
         tmp_path,
         bundles={
             "base": """
-            from kitup import side_effect, task
+            from kitup import ctx, side_effect, task
 
             @side_effect(one_shot=False)
-            def reload_nginx(ctx):
+            def reload_nginx():
                 ctx.changed(summary="+reloaded")
 
             @side_effect
-            def refresh_package_metadata(ctx):
+            def refresh_package_metadata():
                 ctx.changed(summary="+refreshed")
 
             @task
-            def configure_nginx(ctx):
+            def configure_nginx():
                 ctx.changed(summary="+conf")
                 ctx.side_effect(reload_nginx)
                 ctx.side_effect(refresh_package_metadata)
@@ -882,10 +882,10 @@ def test_apply_uses_vars_get_and_require(tmp_path, capsys):
         vars="VALUE = 1\n",
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task
-            def show(ctx):
+            def show():
                 ctx.changed(summary=f"value={ctx.vars.get('VALUE')} missing={ctx.vars.get('MISSING', 'none')}")
             """
         },
@@ -903,12 +903,12 @@ def test_project_files_overlay_bundle_files(tmp_path):
 
     def copy_task(dest):
         return f"""
-        from kitup import task
+        from kitup import ctx, task
         from kitup.modules import files
 
         @task
-        def copy_shared(ctx):
-            files.copy(ctx, "shared.conf", {str(dest)!r})
+        def copy_shared():
+            files.copy("shared.conf", {str(dest)!r})
         """
 
     make_project(
@@ -938,10 +938,10 @@ def test_write_marker_task_uses_project_root(tmp_path):
         tmp_path,
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task
-            def write_root(ctx):
+            def write_root():
                 (ctx.root / "root.txt").write_text(str(ctx.root))
                 ctx.changed(summary="write root")
             """
@@ -991,7 +991,7 @@ def make_external_bundle(root, name, *, summary=None):
     text = summary or f"ctx.changed(summary='ran {name}')"
     write(
         folder / "tasks.py",
-        f"from kitup import task\n\n@task\ndef run_{name}(ctx):\n    {text}\n",
+        f"from kitup import ctx, task\n\n@task\ndef run_{name}():\n    {text}\n",
     )
     return folder
 
@@ -1036,10 +1036,10 @@ def test_var_file_option_accepts_absolute_and_relative_paths(tmp_path, capsys):
         vars="VALUE = 'base'\n",
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task
-            def show(ctx):
+            def show():
                 ctx.changed(summary=f"value={ctx.vars.VALUE}")
             """
         },
@@ -1059,10 +1059,10 @@ def test_extra_var_files_load_after_discovered_files(tmp_path, capsys):
         var_files={"late": "VALUE = 'var'\n"},
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task
-            def show(ctx):
+            def show():
                 ctx.changed(summary=f"value={ctx.vars.VALUE}")
             """
         },
@@ -1082,10 +1082,10 @@ def test_var_filters_apply_to_extra_var_files(tmp_path, capsys):
         vars="VALUE = 'base'\n",
         bundles={
             "base": """
-            from kitup import task
+            from kitup import ctx, task
 
             @task
-            def show(ctx):
+            def show():
                 ctx.changed(summary=f"value={ctx.vars.VALUE}")
             """
         },
@@ -1109,10 +1109,10 @@ def test_bundle_vars_are_scoped_and_project_values_win(tmp_path, capsys):
         bundles={
             "base": {
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task
-                def show(ctx):
+                def show():
                     ctx.changed(
                         summary=f"base value={ctx.vars.VALUE} only={ctx.vars.get('BASE_ONLY', 'none')}"
                     )
@@ -1122,10 +1122,10 @@ def test_bundle_vars_are_scoped_and_project_values_win(tmp_path, capsys):
             "other": {
                 "__init__.py": "from kitup import bundle\n\nbundle(depends_on=['base'])\n",
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task
-                def show(ctx):
+                def show():
                     ctx.changed(
                         summary=f"other value={ctx.vars.VALUE} only={ctx.vars.get('BASE_ONLY', 'none')}"
                     )
@@ -1170,10 +1170,10 @@ def test_var_filters_do_not_remove_bundle_vars(tmp_path, capsys):
         bundles={
             "base": {
                 "tasks.py": """
-                from kitup import task
+                from kitup import ctx, task
 
                 @task
-                def show(ctx):
+                def show():
                     project = ctx.vars.get('PROJECT_ONLY', 'missing')
                     bundle = ctx.vars.get('BUNDLE_ONLY')
                     ctx.changed(summary=f"project={project} bundle={bundle}")
@@ -1269,7 +1269,7 @@ def test_list_modules_shows_custom_modules_by_registered_name(tmp_path, capsys):
     make_project(
         tmp_path,
         modules={
-            "mytool.py": 'from kitup import module\n\nmodule("other")\n\n\ndef install(ctx):\n    pass\n',
+            "mytool.py": 'from kitup import module\n\nmodule("other")\n\n\ndef install():\n    pass\n',
             "webserver/__init__.py": 'from kitup import module\n\nmodule("webserver")\n',
             "_private.py": "VALUE = 1\n",
         },
@@ -1369,7 +1369,7 @@ def test_list_modules_verbose_shows_paths_and_functions(tmp_path, capsys):
             "mytool.py": (
                 "from kitup import module\n\n"
                 'module("mytool")\n\n\n'
-                "def install(ctx):\n"
+                "def install():\n"
                 '    """Install mytool."""\n\n\n'
                 "def _helper():\n"
                 "    pass\n"
@@ -1396,7 +1396,7 @@ def test_list_modules_verbose_ignores_public_classes(tmp_path, capsys):
                 'module("mytool")\n\n\n'
                 "class Helper:\n"
                 '    """A public class."""\n\n\n'
-                "def install(ctx):\n"
+                "def install():\n"
                 '    """Install mytool."""\n'
             )
         },
@@ -1414,8 +1414,8 @@ def test_list_modules_verbose_separates_modules_with_blank_lines(tmp_path, capsy
     make_project(
         tmp_path,
         modules={
-            "one.py": 'from kitup import module\n\nmodule("one")\n\n\ndef first(ctx):\n    """First."""\n',
-            "two.py": 'from kitup import module\n\nmodule("two")\n\n\ndef second(ctx):\n    """Second."""\n',
+            "one.py": 'from kitup import module\n\nmodule("one")\n\n\ndef first():\n    """First."""\n',
+            "two.py": 'from kitup import module\n\nmodule("two")\n\n\ndef second():\n    """Second."""\n',
         },
     )
 

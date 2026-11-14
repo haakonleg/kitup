@@ -4,7 +4,16 @@ import sys
 
 import pytest
 
+from kitup.context import set_current_context
 from kitup.registry import forget_module_prefix
+
+
+@pytest.fixture(autouse=True)
+def clear_ambient_context():
+    """Run each test without a task context."""
+    set_current_context(None)
+    yield
+    set_current_context(None)
 
 
 @pytest.fixture(autouse=True)

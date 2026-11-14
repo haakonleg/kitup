@@ -4,10 +4,9 @@ RPM package, package-group, repository, and dnf.conf configuration management us
 
 ```python
 from kitup.modules import dnf
-from kitup import task
 ```
 
-## `packages(ctx, names, *, state="present", group=False, weak_deps=False, exclude=None)`
+## `packages(names, *, state="present", group=False, weak_deps=False, exclude=None)`
 
 Ensure packages or groups are present or absent.
 
@@ -28,21 +27,14 @@ Ensure packages or groups are present or absent.
 - `packages` — affected package names.
 
 ```python
-@task("Install multimedia tools", tags={"packages"})
-def install_multimedia_tools(ctx):
-    dnf.packages(
-        ctx,
-        ["@multimedia", "ripgrep"],
-        exclude=["PackageKit-gstreamer-plugin"],
-    )
-
-
-@task("Remove legacy tools")
-def remove_legacy_tools(ctx):
-    dnf.packages(ctx, ["old-tool"], state="absent")
+dnf.packages(
+    ["@multimedia", "ripgrep"],
+    exclude=["PackageKit-gstreamer-plugin"],
+)
+dnf.packages(["old-tool"], state="absent")
 ```
 
-## `swap(ctx, old, new, *, allowerasing=False)`
+## `swap(old, new, *, allowerasing=False)`
 
 Replace `old` with `new`, unless `new` is already installed.
 
@@ -58,30 +50,22 @@ Replace `old` with `new`, unless `new` is already installed.
 - `installed` — new package.
 
 ```python
-@task("Install full ffmpeg", tags={"packages"})
-def install_full_ffmpeg(ctx):
-    dnf.swap(ctx, "ffmpeg-free", "ffmpeg", allowerasing=True)
+dnf.swap("ffmpeg-free", "ffmpeg", allowerasing=True)
 ```
 
-## `autoremove(ctx)`
+## `autoremove()`
 
 Remove unused package dependencies.
-
-### Parameters
-
-This method takes no parameters beyond `ctx`.
 
 ### Result fields
 
 - `removed` — package names removed; empty when nothing needed removal.
 
 ```python
-@task("Remove unused packages", tags={"packages"})
-def remove_unused_packages(ctx):
-    dnf.autoremove(ctx)
+dnf.autoremove()
 ```
 
-## `copr(ctx, project, *, state="present")`
+## `copr(project, *, state="present")`
 
 Enable or remove a COPR project.
 
@@ -96,12 +80,10 @@ Enable or remove a COPR project.
 - `repository` — COPR project.
 
 ```python
-@task("Enable example COPR", tags={"repos"})
-def enable_example_copr(ctx):
-    dnf.copr(ctx, "owner/project")
+dnf.copr("owner/project")
 ```
 
-## `repository(ctx, source=None, *, state="present", name=None)`
+## `repository(source=None, *, state="present", name=None)`
 
 Manage a repository from a `.repo` file.
 
@@ -121,17 +103,11 @@ Manage a repository from a `.repo` file.
 - `path` — installed `.repo` file.
 
 ```python
-@task("Add vendor repository", tags={"repos"})
-def add_vendor_repository(ctx):
-    dnf.repository(ctx, "https://example.test/tool.repo")
-
-
-@task("Remove vendor repository", tags={"repos"})
-def remove_vendor_repository(ctx):
-    dnf.repository(ctx, state="absent", name="tool.repo")
+dnf.repository("https://example.test/tool.repo")
+dnf.repository(state="absent", name="tool.repo")
 ```
 
-## `rpm(ctx, sources)`
+## `rpm(sources)`
 
 Install one or more release RPMs from URLs or local paths.
 
@@ -147,18 +123,15 @@ Install one or more release RPMs from URLs or local paths.
   installed.
 
 ```python
-@task("Install example release RPMs", tags={"repos"})
-def install_example_releases(ctx):
-    dnf.rpm(
-        ctx,
-        [
-            "https://example.test/tool-release-2-1.noarch.rpm",
-            "/var/tmp/extra-release-1-1.noarch.rpm",
-        ],
-    )
+dnf.rpm(
+    [
+        "https://example.test/tool-release-2-1.noarch.rpm",
+        "/var/tmp/extra-release-1-1.noarch.rpm",
+    ],
+)
 ```
 
-## `config(ctx, option, value=None, *, section="main", state="present", path=None, sudo=True)`
+## `config(option, value=None, *, section="main", state="present", path=None, sudo=True)`
 
 Set or remove one option in a `dnf.conf`-style INI file.
 
@@ -183,30 +156,15 @@ Set or remove one option in a `dnf.conf`-style INI file.
 - `ini_action` — `"added"`, `"replaced"`, `"removed"`, or `"unchanged"`.
 
 ```python
-@task("Prefer the newest available packages", tags={"dnf"})
-def prefer_newest_packages(ctx):
-    dnf.config(ctx, "best", True)
-
-
-@task("Keep at most two installed kernels", tags={"dnf"})
-def limit_installed_kernels(ctx):
-    dnf.config(ctx, "installonly_limit", 2)
-
-
-@task("Remove a custom option", tags={"dnf"})
-def remove_custom_option(ctx):
-    dnf.config(ctx, "max_parallel_downloads", state="absent")
-
-
-@task("Edit a user-scoped dnf config", tags={"dnf"})
-def edit_user_dnf_config(ctx):
-    dnf.config(
-        ctx,
-        "keepcache",
-        True,
-        path="/home/alice/.config/dnf/dnf.conf",
-        sudo=False,
-    )
+dnf.config("best", True)
+dnf.config("installonly_limit", 2)
+dnf.config("max_parallel_downloads", state="absent")
+dnf.config(
+    "keepcache",
+    True,
+    path="/home/alice/.config/dnf/dnf.conf",
+    sudo=False,
+)
 ```
 
 ## Notes

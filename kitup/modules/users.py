@@ -18,7 +18,7 @@ from .._utils.validation import (
     require_state,
     require_text,
 )
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -49,7 +49,6 @@ class _Group:
 
 
 def user(
-    ctx: TaskContext,
     name: str,
     *,
     state: State = "present",
@@ -65,6 +64,7 @@ def user(
     ``state="absent"`` removes the account but leaves the home directory.
     ``password`` must be a pre-hashed value such as a ``$6$...`` crypt hash.
     """
+    ctx = current_context()
     require_state(state, "user")
     _require_name(name, "user name")
     if uid is not None:
@@ -123,8 +123,9 @@ def user(
     )
 
 
-def group(ctx: TaskContext, name: str, *, state: State = "present", gid: int | None = None) -> CallResult:
+def group(name: str, *, state: State = "present", gid: int | None = None) -> CallResult:
     """Ensure a local group exists or is absent."""
+    ctx = current_context()
     require_state(state, "group")
     _require_name(name, "group name")
     if gid is not None:
@@ -163,8 +164,9 @@ def group(ctx: TaskContext, name: str, *, state: State = "present", gid: int | N
     return ctx.changed(changed=False, summary=f"ensure group {name}", group=name)
 
 
-def membership(ctx: TaskContext, user: str, group: str, *, state: State = "present") -> CallResult:
+def membership(user: str, group: str, *, state: State = "present") -> CallResult:
     """Ensure a user is a supplementary member of a group."""
+    ctx = current_context()
     require_state(state, "group membership")
     _require_name(user, "user name")
     _require_name(group, "group name")

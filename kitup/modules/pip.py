@@ -24,7 +24,7 @@ from .._utils.validation import (
     require_texts,
     unique_strings,
 )
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult, format_items
@@ -44,7 +44,6 @@ _VENV_CFG: Final = Path("pyvenv.cfg")
 
 
 def packages(
-    ctx: TaskContext,
     names: Iterable[str] | str,
     *,
     state: PipState = "present",
@@ -74,6 +73,7 @@ def packages(
     same environment as the changes (otherwise packages in the invoking
     user's user site would shadow the system Python's state).
     """
+    ctx = current_context()
     wanted = unique_strings(normalize_strings(names))
     require_collection(wanted, "package names")
     require_texts(wanted, "package name")
@@ -112,7 +112,6 @@ def packages(
 
 
 def config(
-    ctx: TaskContext,
     option: str,
     value: str | bool | int | Iterable[str] | None = None,  # noqa: FBT001 - positional value matches the module API
     *,
@@ -140,6 +139,7 @@ def config(
     ``scope="user"`` rejects ``sudo=True`` (it would write a root-owned file
     into the user's home) and cannot run as root at all.
     """
+    ctx = current_context()
     require_state(state, "config")
     require_choice(scope, _CONFIG_SCOPES, "pip config scope")
     section = ini_ops.require_ini_section(section)
@@ -287,13 +287,7 @@ def _pip_install_args(names: list[str], extra: list[str], *, upgrade: bool, repo
 
 
 def _install_report(
-    ctx: TaskContext,
-    pip: list[str],
-    names: list[str],
-    extra: list[str],
-    *,
-    upgrade: bool,
-    sudo: bool,
+    ctx: TaskContext, pip: list[str], names: list[str], extra: list[str], *, upgrade: bool, sudo: bool
 ) -> list[str]:
     """Return the distribution names a ``pip install`` would still install."""
     report = _pip_json(
@@ -345,14 +339,7 @@ def _installed_names(ctx: TaskContext, pip: list[str], *, sudo: bool) -> set[str
 
 
 def _pip_json[T](
-    ctx: TaskContext,
-    pip: list[str],
-    args: list[str],
-    label: str,
-    *,
-    failure: str,
-    sudo: bool,
-    expect: type[T],
+    ctx: TaskContext, pip: list[str], args: list[str], label: str, *, failure: str, sudo: bool, expect: type[T]
 ) -> T:
     """Run a read-only pip command and return its parsed, shape-checked JSON stdout.
 
@@ -470,12 +457,7 @@ def _require_absent_name(name: str) -> None:
 
 
 def _config_target(
-    ctx: TaskContext,
-    *,
-    scope: str,
-    venv: str | Path | None,
-    path: str | Path | None,
-    sudo: bool,
+    ctx: TaskContext, *, scope: str, venv: str | Path | None, path: str | Path | None, sudo: bool
 ) -> Path:
     """Resolve the pip config file to edit for the given scope."""
     if path is not None:

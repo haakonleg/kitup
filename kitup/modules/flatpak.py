@@ -15,7 +15,7 @@ from .._utils.validation import (
     require_texts,
     unique_strings,
 )
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult, format_items
@@ -24,15 +24,10 @@ module("flatpak", "Flatpak remotes, applications, and runtimes.")
 
 
 def remote(
-    ctx: TaskContext,
-    name: str,
-    url: str | None = None,
-    *,
-    state: State = "present",
-    scope: str = "system",
-    gpg_verify: bool = True,
+    name: str, url: str | None = None, *, state: State = "present", scope: str = "system", gpg_verify: bool = True
 ) -> CallResult:
     """Ensure a Flatpak remote repository is present or absent."""
+    ctx = current_context()
     require_state(state, "flatpak")
     flag = _scope_flag(ctx, scope)
     require_text(name, "flatpak remote name")
@@ -74,14 +69,10 @@ def remote(
 
 
 def packages(
-    ctx: TaskContext,
-    names: Iterable[str] | str,
-    *,
-    state: State = "present",
-    scope: str = "system",
-    remote: str | None = None,
+    names: Iterable[str] | str, *, state: State = "present", scope: str = "system", remote: str | None = None
 ) -> CallResult:
     """Ensure Flatpak applications or runtimes are present or absent."""
+    ctx = current_context()
     require_state(state, "flatpak")
     flag = _scope_flag(ctx, scope)
     if remote is not None:

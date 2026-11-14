@@ -22,7 +22,7 @@ from .._utils.validation import (
     require_texts,
     unique_strings,
 )
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult, format_items
@@ -35,7 +35,6 @@ _MISSING_PACKAGE: Final = re.compile(r"^package (.+) is not installed$")
 
 
 def packages(
-    ctx: TaskContext,
     names: Iterable[str] | str,
     *,
     state: State = "present",
@@ -47,6 +46,7 @@ def packages(
 
     Names beginning with ``@`` are treated as package groups.
     """
+    ctx = current_context()
     require_state(state, "package")
     wanted = unique_strings(normalize_strings(names))
     require_collection(wanted, "package names")
@@ -75,8 +75,9 @@ def packages(
     return ctx.changed(result)
 
 
-def swap(ctx: TaskContext, old: str, new: str, *, allowerasing: bool = False) -> CallResult:
+def swap(old: str, new: str, *, allowerasing: bool = False) -> CallResult:
     """Replace ``old`` with ``new`` unless ``new`` is already installed."""
+    ctx = current_context()
     require_text(old, "package to remove")
     require_text(new, "package to install")
     if _rpm_installed(ctx, new):
@@ -96,11 +97,7 @@ def swap(ctx: TaskContext, old: str, new: str, *, allowerasing: bool = False) ->
 
 
 def _ensure_absent(
-    ctx: TaskContext,
-    *,
-    group_names: list[str],
-    package_names: list[str],
-    explicit_group: bool,
+    ctx: TaskContext, *, group_names: list[str], package_names: list[str], explicit_group: bool
 ) -> CallResult:
     installed_groups = _installed_groups(ctx, group_names)
     installed_packages = _installed_packages(ctx, package_names)
@@ -140,8 +137,9 @@ def _ensure_absent(
     return result
 
 
-def autoremove(ctx: TaskContext) -> CallResult:
+def autoremove() -> CallResult:
     """Remove unused package dependencies."""
+    ctx = current_context()
     unneeded = _query_package_names(
         ctx,
         ["repoquery", "--unneeded", "--quiet", "--queryformat", "%{name}\n"],
@@ -158,8 +156,9 @@ def autoremove(ctx: TaskContext) -> CallResult:
     return ctx.changed(call)
 
 
-def copr(ctx: TaskContext, project: str, *, state: State = "present") -> CallResult:
+def copr(project: str, *, state: State = "present") -> CallResult:
     """Ensure a COPR project is enabled or removed."""
+    ctx = current_context()
     require_state(state, "COPR")
     require_text(project, "COPR project")
 
@@ -193,18 +192,13 @@ def _copr_configured(output: str, project: str) -> bool:
     return False
 
 
-def repository(
-    ctx: TaskContext,
-    source: str | Path | None = None,
-    *,
-    state: State = "present",
-    name: str | None = None,
-) -> CallResult:
+def repository(source: str | Path | None = None, *, state: State = "present", name: str | None = None) -> CallResult:
     """Ensure a repository from a .repo file is present or absent.
 
     URLs are passed through, while relative local paths resolve from the
     current working directory.
     """
+    ctx = current_context()
     require_state(state, "repository")
 
     if state == "present":
@@ -245,12 +239,13 @@ def repository(
     return ctx.changed(call)
 
 
-def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> CallResult:
+def rpm(sources: str | Path | Iterable[str | Path]) -> CallResult:
     """Install release RPMs from URLs or local paths.
 
     URLs are passed through, while relative local paths resolve from the
     current working directory.
     """
+    ctx = current_context()
     if isinstance(sources, (str, Path)):
         sources = [sources]
     validated = unique_strings(sources)
@@ -272,7 +267,6 @@ def rpm(ctx: TaskContext, sources: str | Path | Iterable[str | Path]) -> CallRes
 
 
 def config(
-    ctx: TaskContext,
     option: str,
     value: str | bool | int | Iterable[str] | None = None,  # noqa: FBT001 - positional value matches the module API
     *,
@@ -289,6 +283,7 @@ def config(
     ``value`` may be a string, a boolean (written as ``True``/``False``), an
     integer, or an iterable of strings (written as a comma-separated list).
     """
+    ctx = current_context()
     require_state(state, "config")
     require_bool(sudo, "config sudo")
     section = ini_ops.require_ini_section(section)

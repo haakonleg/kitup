@@ -7,7 +7,7 @@ from typing import Any, Final
 from .._utils import file_actions, ini
 from .._utils.paths import expand_path
 from .._utils.validation import State, require_state, require_text
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -19,7 +19,6 @@ _KEY_PATTERN: Final = r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*"
 
 
 def key(
-    ctx: TaskContext,
     name: str,
     value: str | float | bool | None = None,  # noqa: FBT001 - positional value matches the module API
     *,
@@ -34,6 +33,7 @@ def key(
     requires ``file`` and only edits the file. Boolean values are written as
     ``1`` or ``0``.
     """
+    ctx = current_context()
     require_state(state, "sysctl")
     key_name = _normalize_name(name)
     if state == "absent" and value is not None:

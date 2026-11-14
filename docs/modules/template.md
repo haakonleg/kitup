@@ -5,10 +5,9 @@ files. Templates are ordinary bundle resources, and rendering is idempotent.
 
 ```python
 from kitup.modules import template
-from kitup import task
 ```
 
-## `file(ctx, src, dest, *, variables=None, mode=None, owner=None, group=None, sudo=False)`
+## `file(src, dest, *, variables=None, mode=None, owner=None, group=None, sudo=False)`
 
 Render the template `src` and write the result to `dest`.
 
@@ -29,15 +28,12 @@ Render the template `src` and write the result to `dest`.
 - `src` — resolved template path.
 
 ```python
-@task("Harden SSH", tags={"security"})
-def harden_ssh(ctx):
-    template.file(
-        ctx,
-        "sshd.conf.j2",
-        "/etc/ssh/sshd_config.d/99-kitup.conf",
-        mode=0o644,
-        sudo=True,
-    )
+template.file(
+    "sshd.conf.j2",
+    "/etc/ssh/sshd_config.d/99-kitup.conf",
+    mode=0o644,
+    sudo=True,
+)
 ```
 
 With `files/sshd.conf.j2` in the bundle:
@@ -59,16 +55,13 @@ Templates receive three things:
 - every key from `variables`, at the top level: `{{ workers }}`.
 
 ```python
-@task("Write application environment")
-def write_environment(ctx):
-    template.file(
-        ctx,
-        "app.env.j2",
-        "/etc/app.env",
-        variables={"workers": 4},
-        mode=0o640,
-        sudo=True,
-    )
+template.file(
+    "app.env.j2",
+    "/etc/app.env",
+    variables={"workers": 4},
+    mode=0o640,
+    sudo=True,
+)
 ```
 
 ```jinja

@@ -169,10 +169,7 @@ def _compile_match(match: Mapping[str, str]) -> list[tuple[re.Pattern[str], re.P
 
 
 def _match_entries(
-    entries: list[OptionEntry],
-    start: int,
-    end: int,
-    patterns: list[tuple[re.Pattern[str], re.Pattern[str]]],
+    entries: list[OptionEntry], start: int, end: int, patterns: list[tuple[re.Pattern[str], re.Pattern[str]]]
 ) -> bool:
     """Return whether compiled ``patterns`` match the entries in ``[start, end)``."""
     parsed = [(entry.name, "\n".join(entry.value_lines)) for entry in _entries_in(entries, start, end)]
@@ -372,9 +369,7 @@ def require_ini_match(match: Mapping[str, str]) -> dict[str, str]:
 
 
 def _select_span(
-    entries: list[OptionEntry],
-    spans: list[tuple[int, int]],
-    match: Mapping[str, str] | None,
+    entries: list[OptionEntry], spans: list[tuple[int, int]], match: Mapping[str, str] | None
 ) -> tuple[int, int] | None:
     """Return the first span selected by ``match``, or the first span overall."""
     if match is None:

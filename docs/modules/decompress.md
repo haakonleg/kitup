@@ -9,7 +9,7 @@ from kitup.modules import decompress
 Both functions are idempotent: only differences are written. Files that are no
 longer present in the source are not removed.
 
-## `archive(ctx, src, dest, *, creates=None, strip_components=0, include=None, exclude=None, mode=None)`
+## `archive(src, dest, *, creates=None, strip_components=0, include=None, exclude=None, mode=None)`
 
 Extract an archive into the directory `dest`.
 
@@ -41,16 +41,12 @@ Extract an archive into the directory `dest`.
 ```python
 from pathlib import Path
 
-
-@task("Install application", tags={"apps"})
-def install_application(ctx):
-    decompress.archive(
-        ctx,
-        "app.tar.gz",
-        Path.home() / ".local/share/app",
-        strip_components=1,
-        include=["bin/*", "lib/*"],
-    )
+decompress.archive(
+    "app.tar.gz",
+    Path.home() / ".local/share/app",
+    strip_components=1,
+    include=["bin/*", "lib/*"],
+)
 ```
 
 ### Formats
@@ -72,7 +68,7 @@ The format is detected from the archive contents, not the filename:
 - A `dest` that is a symlink or a file is rejected.
 - Dry runs compare the archive without creating `dest` or writing files.
 
-## `file(ctx, src, dest, *, mode=None)`
+## `file(src, dest, *, mode=None)`
 
 Decompress a single compressed file.
 
@@ -97,15 +93,11 @@ destination symlink is rejected rather than followed.
 ```python
 from pathlib import Path
 
-
-@task("Install application config", tags={"config"})
-def install_application_config(ctx):
-    decompress.file(
-        ctx,
-        "app-config.yaml.gz",
-        Path.home() / ".config/app/config.yaml",
-        mode=0o640,
-    )
+decompress.file(
+    "app-config.yaml.gz",
+    Path.home() / ".config/app/config.yaml",
+    mode=0o640,
+)
 ```
 
 No write occurs when the destination already matches. Dry runs compare the
@@ -117,14 +109,17 @@ decompressed content but do not write.
   [`download.to_file()`](download.md) first:
 
   ```python
+  from pathlib import Path
+
+  from kitup.modules import decompress, download
+
   tarball = Path("/tmp/app.tar.gz")
   download.to_file(
-      ctx,
       "https://example.test/app.tar.gz",
       tarball,
       checksum="sha256:...",
   )
-  decompress.archive(ctx, tarball, Path.home() / ".local/share/app")
+  decompress.archive(tarball, Path.home() / ".local/share/app")
   ```
 
 - Privileged extraction is not supported yet. Extract to a user-writable

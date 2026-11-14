@@ -77,8 +77,7 @@ def parse_mountinfo(text: str) -> list[dict[str, Any]]:
 
 
 def collect_mounts(
-    mountinfo_path: Path = MOUNTINFO_PATH,
-    statvfs: Callable[[str], os.statvfs_result] = os.statvfs,
+    mountinfo_path: Path = MOUNTINFO_PATH, statvfs: Callable[[str], os.statvfs_result] = os.statvfs
 ) -> tuple[Mapping[str, Any], ...]:
     """Collect mounted filesystems with their capacity, omitting unreadable ones."""
     try:

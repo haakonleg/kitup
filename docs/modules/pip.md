@@ -4,10 +4,9 @@ Install and remove Python packages with pip — in the system Python by default,
 
 ```python
 from kitup.modules import pip
-from kitup import task
 ```
 
-## `packages(ctx, names, *, state="present", venv=None, python=None, extra_args=None, sudo=False)`
+## `packages(names, *, state="present", venv=None, python=None, extra_args=None, sudo=False)`
 
 Ensure Python packages are installed, up to date, or removed.
 
@@ -28,32 +27,14 @@ Ensure Python packages are installed, up to date, or removed.
 - `venv` — the virtual environment path, when `venv` was given.
 
 ```python
-@task("Install tools into an app venv", tags={"python"})
-def install_app_packages(ctx):
-    pip.packages(ctx, ["gunicorn==23.0", "psycopg[binary]"], venv="/opt/myapp/venv")
-
-
-@task("Pin a package to an exact version", tags={"python"})
-def pin_requests(ctx):
-    pip.packages(ctx, ["requests==2.32.3"], venv="/opt/myapp/venv")
-
-
-@task("Update a package to the newest version", tags={"python"})
-def update_requests(ctx):
-    pip.packages(ctx, ["requests"], state="latest", venv="/opt/myapp/venv")
-
-
-@task("Remove a package", tags={"python"})
-def remove_legacy_tool(ctx):
-    pip.packages(ctx, ["old-tool"], state="absent", venv="/opt/myapp/venv")
-
-
-@task("Install into the system Python", tags={"python"})
-def install_system_tool(ctx):
-    pip.packages(ctx, ["httpie"], sudo=True, extra_args=["--break-system-packages"])
+pip.packages(["gunicorn==23.0", "psycopg[binary]"], venv="/opt/myapp/venv")
+pip.packages(["requests==2.32.3"], venv="/opt/myapp/venv")
+pip.packages(["requests"], state="latest", venv="/opt/myapp/venv")
+pip.packages(["old-tool"], state="absent", venv="/opt/myapp/venv")
+pip.packages(["httpie"], sudo=True, extra_args=["--break-system-packages"])
 ```
 
-## `config(ctx, option, value=None, *, section="global", state="present", scope="user", venv=None, path=None, sudo=None)`
+## `config(option, value=None, *, section="global", state="present", scope="user", venv=None, path=None, sudo=None)`
 
 Set or remove one option in a pip configuration file: global (`/etc/pip.conf`), user (`$XDG_CONFIG_HOME/pip/pip.conf`, default `~/.config/pip/pip.conf`), or site (`<venv>/pip.conf`).
 
@@ -75,24 +56,10 @@ Set or remove one option in a pip configuration file: global (`/etc/pip.conf`), 
 - `ini_action` — `"added"`, `"replaced"`, `"removed"`, or `"unchanged"`.
 
 ```python
-@task("Use a corporate package index", tags={"python"})
-def use_corporate_index(ctx):
-    pip.config(ctx, "index-url", "https://pypi.example.com/simple", scope="global")
-
-
-@task("Add local wheel mirrors", tags={"python"})
-def add_local_mirrors(ctx):
-    pip.config(ctx, "find-links", ["/srv/wheels", "https://mirror.example.com/wheels"], scope="user")
-
-
-@task("Speed up pip in the app venv", tags={"python"})
-def speed_up_app_pip(ctx):
-    pip.config(ctx, "timeout", 10, scope="site", venv="/opt/myapp/venv")
-
-
-@task("Remove a custom option", tags={"python"})
-def remove_custom_option(ctx):
-    pip.config(ctx, "retries", state="absent", scope="user")
+pip.config("index-url", "https://pypi.example.com/simple", scope="global")
+pip.config("find-links", ["/srv/wheels", "https://mirror.example.com/wheels"], scope="user")
+pip.config("timeout", 10, scope="site", venv="/opt/myapp/venv")
+pip.config("retries", state="absent", scope="user")
 ```
 
 ## Notes

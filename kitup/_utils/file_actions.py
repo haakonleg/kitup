@@ -58,12 +58,7 @@ class PathPolicy(StrEnum):
 
 
 def require_path_kind(
-    path: Path,
-    info: FileInfo | None,
-    *,
-    policy: PathPolicy,
-    label: str = "path",
-    missing_ok: bool = True,
+    path: Path, info: FileInfo | None, *, policy: PathPolicy, label: str = "path", missing_ok: bool = True
 ) -> None:
     """Raise ``TaskFailed`` when an existing path violates ``policy``.
 
@@ -594,13 +589,7 @@ def apply_ini(
 
 
 def apply_metadata_ctx(
-    ctx: TaskContext,
-    path: Path,
-    mode: int,
-    owner: str | int | None,
-    group: str | int | None,
-    *,
-    sudo: bool,
+    ctx: TaskContext, path: Path, mode: int, owner: str | int | None, group: str | int | None, *, sudo: bool
 ) -> None:
     """Apply file metadata, using the privileged worker when needed."""
     if privileged(ctx, sudo=sudo):

@@ -1,6 +1,6 @@
 # Facts
 
-`ctx.facts` is a read-only snapshot of the host, collected once at startup and
+`facts` is a read-only snapshot of the host, collected once at startup and
 shared by all tasks. Optional facts are omitted when unavailable.
 
 | Key | Type | Description |
@@ -41,15 +41,16 @@ Each mount contains:
 ## Example
 
 ```python
-hostname = ctx.facts.hostname
-os_release = ctx.facts.get("os_release", {})
+from kitup import ctx, facts, task
 
-if ctx.facts.get("distro_id") == "fedora":
-    ctx.note(f"Fedora {ctx.facts.version_id}".strip())
 
-for mount in ctx.facts.get("mounts", ()):
-    if mount.mount == "/":
-        ctx.note(f"root is {mount.bytes_used} of {mount.bytes_total} bytes used")
+@task
+def report_host_facts():
+    """Report host details and root filesystem usage."""
+    ctx.note(f"{facts.hostname} ({facts.get('distro_id', 'unknown')})")
+    root = next((m for m in facts.get("mounts", ()) if m.mount == "/"), None)
+    if root:
+        ctx.note(f"root is {root.bytes_used} of {root.bytes_total} bytes used")
 ```
 
 Bytes are raw values suitable for calculations; format them for display as needed.

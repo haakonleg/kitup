@@ -96,7 +96,7 @@ def test_to_file_downloads_and_is_idempotent(tmp_path, http_server):
     target = tmp_path / "file.txt"
     ctx = make_context(tmp_path)
 
-    result = download.to_file(ctx, f"{base}/file.txt", target)
+    result = download.to_file(f"{base}/file.txt", target)
 
     assert target.read_bytes() == state.payload
     assert stat.S_IMODE(target.stat().st_mode) == 0o644
@@ -113,7 +113,7 @@ def test_to_file_downloads_and_is_idempotent(tmp_path, http_server):
     assert "checksum" not in result
 
     second = make_context(tmp_path)
-    download.to_file(second, f"{base}/file.txt", target)
+    download.to_file(f"{base}/file.txt", target)
 
     assert state.requests == 1
     assert second.changes == []
@@ -128,8 +128,8 @@ def test_to_file_preserves_explicit_accept_encoding(tmp_path, http_server):
     state, base = http_server
     target = tmp_path / "file.txt"
 
+    make_context(tmp_path)
     download.to_file(
-        make_context(tmp_path),
         f"{base}/file.txt",
         target,
         headers={"accept-encoding": "identity"},
@@ -143,7 +143,8 @@ def test_to_file_decodes_content_encoding(tmp_path, http_server, path):
     state, base = http_server
     target = tmp_path / "file.txt"
 
-    result = download.to_file(make_context(tmp_path), f"{base}{path}", target)
+    make_context(tmp_path)
+    result = download.to_file(f"{base}{path}", target)
 
     assert target.read_bytes() == state.payload
     assert result.checksum_dest == f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
@@ -154,7 +155,8 @@ def test_to_file_decodes_content_encoding(tmp_path, http_server, path):
 def test_to_bytes_decodes_content_encoding(tmp_path, http_server, path):
     state, base = http_server
 
-    content = download.to_bytes(make_context(tmp_path), f"{base}{path}")
+    make_context(tmp_path)
+    content = download.to_bytes(f"{base}{path}")
 
     assert content == state.payload
 
@@ -164,7 +166,8 @@ def test_to_file_verifies_checksum_after_decompression(tmp_path, http_server):
     target = tmp_path / "file.txt"
     checksum = f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
 
-    download.to_file(make_context(tmp_path), f"{base}/gzip", target, checksum=checksum)
+    make_context(tmp_path)
+    download.to_file(f"{base}/gzip", target, checksum=checksum)
 
     assert target.read_bytes() == state.payload
 
@@ -174,7 +177,8 @@ def test_to_file_rejects_unsupported_content_encoding(tmp_path, http_server):
     target = tmp_path / "file.txt"
 
     with pytest.raises(TaskFailed, match="unsupported content encoding"):
-        download.to_file(make_context(tmp_path), f"{base}/brotli", target)
+        make_context(tmp_path)
+        download.to_file(f"{base}/brotli", target)
 
     assert not target.exists()
 
@@ -184,7 +188,8 @@ def test_to_file_rejects_truncated_compressed_response(tmp_path, http_server):
     target = tmp_path / "file.txt"
 
     with pytest.raises(TaskFailed, match=r"decompress|incomplete"):
-        download.to_file(make_context(tmp_path), f"{base}/truncated-gzip", target)
+        make_context(tmp_path)
+        download.to_file(f"{base}/truncated-gzip", target)
 
     assert not target.exists()
 
@@ -192,10 +197,11 @@ def test_to_file_rejects_truncated_compressed_response(tmp_path, http_server):
 def test_to_file_force_refreshes_only_changed_content(tmp_path, http_server):
     state, base = http_server
     target = tmp_path / "file.txt"
-    download.to_file(make_context(tmp_path), f"{base}/file.txt", target)
+    make_context(tmp_path)
+    download.to_file(f"{base}/file.txt", target)
 
     same = make_context(tmp_path)
-    download.to_file(same, f"{base}/file.txt", target, force=True)
+    download.to_file(f"{base}/file.txt", target, force=True)
 
     assert state.requests == 2
     assert same.changes == []
@@ -205,7 +211,7 @@ def test_to_file_force_refreshes_only_changed_content(tmp_path, http_server):
 
     state.payload = b"changed\n"
     changed = make_context(tmp_path)
-    download.to_file(changed, f"{base}/file.txt", target, force=True)
+    download.to_file(f"{base}/file.txt", target, force=True)
 
     assert state.requests == 3
     assert target.read_bytes() == b"changed\n"
@@ -223,7 +229,7 @@ def test_to_file_skips_hashing_a_target_with_a_different_size(tmp_path, http_ser
 
     monkeypatch.setattr(download, "digest_path", fail)
 
-    download.to_file(ctx, f"{base}/file.txt", target, force=True)
+    download.to_file(f"{base}/file.txt", target, force=True)
 
     assert target.read_bytes() == state.payload
     assert len(ctx.changes) == 1
@@ -236,7 +242,7 @@ def test_to_file_hashes_a_same_size_target_to_detect_changed_content(tmp_path, h
     target.write_bytes(b"content\n")
     ctx = make_context(tmp_path)
 
-    download.to_file(ctx, f"{base}/file.txt", target, force=True)
+    download.to_file(f"{base}/file.txt", target, force=True)
 
     assert target.read_bytes() == state.payload
     assert len(ctx.changes) == 1
@@ -249,7 +255,7 @@ def test_to_file_checksum_skips_matching_file(tmp_path, http_server):
     checksum = f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
 
     ctx = make_context(tmp_path)
-    download.to_file(ctx, f"{base}/file.txt", target, checksum=checksum)
+    download.to_file(f"{base}/file.txt", target, checksum=checksum)
 
     assert state.requests == 0
     assert ctx.changes == []
@@ -265,7 +271,7 @@ def test_to_file_checksum_mismatch_replaces_file(tmp_path, http_server):
     checksum = f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
 
     ctx = make_context(tmp_path)
-    download.to_file(ctx, f"{base}/file.txt", target, checksum=checksum)
+    download.to_file(f"{base}/file.txt", target, checksum=checksum)
 
     assert target.read_bytes() == state.payload
     assert state.requests == 1
@@ -288,7 +294,8 @@ def test_to_file_hashes_a_same_size_target_once(tmp_path, http_server, monkeypat
     monkeypatch.setattr(download, "digest_path", counting)
     download._digest.cache_clear()
 
-    download.to_file(make_context(tmp_path), f"{base}/file.txt", target, checksum=checksum)
+    make_context(tmp_path)
+    download.to_file(f"{base}/file.txt", target, checksum=checksum)
 
     assert target.read_bytes() == state.payload
     assert len(calls) == 1
@@ -313,8 +320,8 @@ def test_to_file_bad_checksum_leaves_destination_untouched(tmp_path, http_server
     target.write_bytes(b"keep\n")
 
     with pytest.raises(TaskFailed, match="checksum mismatch"):
+        make_context(tmp_path)
         download.to_file(
-            make_context(tmp_path),
             f"{base}/file.txt",
             target,
             checksum=f"sha256:{'0' * 64}",
@@ -329,7 +336,7 @@ def test_to_file_dry_run_does_not_fetch_or_write(tmp_path, http_server):
     target = tmp_path / "file.txt"
     ctx = make_context(tmp_path, dry_run=True)
 
-    download.to_file(ctx, f"{base}/file.txt", target)
+    download.to_file(f"{base}/file.txt", target)
 
     assert state.requests == 0
     assert not target.exists()
@@ -345,7 +352,8 @@ def test_to_file_uses_url_basename_for_directory_destination(tmp_path, http_serv
     directory = tmp_path / "downloads"
     directory.mkdir()
 
-    download.to_file(make_context(tmp_path), f"{base}/file.txt", directory)
+    make_context(tmp_path)
+    download.to_file(f"{base}/file.txt", directory)
 
     assert (directory / "file.txt").read_bytes() == state.payload
 
@@ -355,7 +363,8 @@ def test_to_file_http_error_is_a_task_failure(tmp_path, http_server):
     target = tmp_path / "file.txt"
 
     with pytest.raises(TaskFailed, match="HTTP 404"):
-        download.to_file(make_context(tmp_path), f"{base}/missing", target)
+        make_context(tmp_path)
+        download.to_file(f"{base}/missing", target)
 
     assert not target.exists()
 
@@ -365,7 +374,8 @@ def test_to_file_rejects_truncated_response(tmp_path, http_server):
     target = tmp_path / "file.txt"
 
     with pytest.raises(TaskFailed, match="incomplete download"):
-        download.to_file(make_context(tmp_path), f"{base}/truncated", target)
+        make_context(tmp_path)
+        download.to_file(f"{base}/truncated", target)
 
     assert not target.exists()
 
@@ -378,7 +388,8 @@ def test_to_file_rejects_symlink_destination(tmp_path, http_server):
     link.symlink_to(target)
 
     with pytest.raises(TaskFailed, match="symlink"):
-        download.to_file(make_context(tmp_path), f"{base}/file.txt", link)
+        make_context(tmp_path)
+        download.to_file(f"{base}/file.txt", link)
 
     assert state.requests == 0
     assert link.is_symlink()
@@ -392,14 +403,14 @@ def test_to_file_reconciles_metadata_without_download(tmp_path, http_server):
     target.chmod(0o600)
     ctx = make_context(tmp_path)
 
-    download.to_file(ctx, f"{base}/file.txt", target, mode=0o640)
+    download.to_file(f"{base}/file.txt", target, mode=0o640)
 
     assert state.requests == 0
     assert stat.S_IMODE(target.stat().st_mode) == 0o640
     assert len(ctx.changes) == 1
 
     second = make_context(tmp_path)
-    download.to_file(second, f"{base}/file.txt", target, mode=0o640)
+    download.to_file(f"{base}/file.txt", target, mode=0o640)
 
     assert second.changes == []
 
@@ -407,20 +418,20 @@ def test_to_file_reconciles_metadata_without_download(tmp_path, http_server):
 def test_to_file_validates_arguments_without_fetching(tmp_path, http_server):
     state, base = http_server
     target = tmp_path / "file.txt"
-    ctx = make_context(tmp_path)
+    make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="URL must not be empty"):
-        download.to_file(ctx, "", target)
+        download.to_file("", target)
     with pytest.raises(TaskFailed, match="only http and https"):
-        download.to_file(ctx, "file:///tmp/source", target)
+        download.to_file("file:///tmp/source", target)
     with pytest.raises(TaskFailed, match="algorithm:digest"):
-        download.to_file(ctx, f"{base}/file.txt", target, checksum="sha256")
+        download.to_file(f"{base}/file.txt", target, checksum="sha256")
     with pytest.raises(TaskFailed, match="timeout"):
-        download.to_file(ctx, f"{base}/file.txt", target, timeout=0)
+        download.to_file(f"{base}/file.txt", target, timeout=0)
     with pytest.raises(TaskFailed, match="header"):
-        download.to_file(ctx, f"{base}/file.txt", target, headers={"X-Test": "a\nb"})
+        download.to_file(f"{base}/file.txt", target, headers={"X-Test": "a\nb"})
     with pytest.raises(TaskFailed, match="mode"):
-        download.to_file(ctx, f"{base}/file.txt", target, mode=True)
+        download.to_file(f"{base}/file.txt", target, mode=True)
 
     assert state.requests == 0
 
@@ -429,7 +440,8 @@ def test_to_file_creates_new_files_with_the_requested_mode(tmp_path, http_server
     state, base = http_server
     target = tmp_path / "file.txt"
 
-    download.to_file(make_context(tmp_path), f"{base}/file.txt", target, mode=0o600)
+    make_context(tmp_path)
+    download.to_file(f"{base}/file.txt", target, mode=0o600)
 
     assert target.read_bytes() == state.payload
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
@@ -440,7 +452,7 @@ def test_to_bytes_returns_content_and_verifies_checksum(tmp_path, http_server):
     ctx = make_context(tmp_path)
     checksum = f"sha256:{hashlib.sha256(state.payload).hexdigest()}"
 
-    content = download.to_bytes(ctx, f"{base}/file.txt", checksum=checksum)
+    content = download.to_bytes(f"{base}/file.txt", checksum=checksum)
 
     assert content == state.payload
     assert state.requests == 1
@@ -453,4 +465,5 @@ def test_to_bytes_enforces_max_bytes(tmp_path, http_server):
     _, base = http_server
 
     with pytest.raises(TaskFailed, match="max_bytes"):
-        download.to_bytes(make_context(tmp_path), f"{base}/file.txt", max_bytes=4)
+        make_context(tmp_path)
+        download.to_bytes(f"{base}/file.txt", max_bytes=4)

@@ -16,7 +16,7 @@ from .args import Args, Command, Option, Parser
 from .commands import CommandRunner
 from .context import TaskContext
 from .errors import KitupError, PrivilegeError, ProjectError, UsageError
-from .facts import collect_facts
+from .host_facts import collect_facts
 from .modules import discover_builtin_modules
 from .output import Output, bundle_label
 from .presets import parse_with_presets
@@ -34,7 +34,7 @@ from .project import (
 from .registry import Bundle, Module
 from .resolver import BundlePlan, filter_plan, resolve
 from .runner import Runner
-from .vars import Vars, filter_var_paths, load_bundle_vars, load_vars
+from .variables import Vars, filter_var_paths, load_bundle_vars, load_vars
 
 _NO_DEFAULT: Final = object()
 _VERSION: Final = f"{PACKAGE_NAME} {__version__}"
@@ -458,12 +458,7 @@ def _dependency_id(dependency: str | Bundle) -> str:
 
 
 def _print_module_group(
-    label: str,
-    modules: Sequence[Module],
-    output: Output,
-    *,
-    verbose: bool,
-    show_path: bool,
+    label: str, modules: Sequence[Module], output: Output, *, verbose: bool, show_path: bool
 ) -> None:
     output.write()
     output.write(f"{label}:")
@@ -578,18 +573,18 @@ def _init_files(root: Path) -> dict[Path, str]:
     return {
         bundle / "__init__.py": textwrap.dedent(
             """
-            from kitup import Bundle
+            from kitup import bundle
 
-            Bundle("Example bundle")
+            bundle("Example bundle")
             """
         ).lstrip(),
         bundle / "tasks.py": textwrap.dedent(
             """
-            from kitup import task
+            from kitup import ctx, task
 
 
             @task
-            def hello(ctx):
+            def hello():
                 \"\"\"Say hello from the example bundle.\"\"\"
                 ctx.note("Hello from the example bundle")
             """

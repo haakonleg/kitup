@@ -63,12 +63,7 @@ class Parser:
     """
 
     def __init__(
-        self,
-        *,
-        prog: str,
-        description: str,
-        commands: Sequence[Command],
-        top_options: Sequence[Option] = (),
+        self, *, prog: str, description: str, commands: Sequence[Command], top_options: Sequence[Option] = ()
     ) -> None:
         self.prog = prog
         self.description = description
@@ -158,13 +153,7 @@ class Parser:
         return args, extras
 
     def _consume(
-        self,
-        option: Option,
-        inline: str | None,
-        tokens: Sequence[str],
-        index: int,
-        args: Args,
-        command: Command | None,
+        self, option: Option, inline: str | None, tokens: Sequence[str], index: int, args: Args, command: Command | None
     ) -> int:
         if option.kind == "version":
             if inline is not None:

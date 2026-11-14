@@ -30,7 +30,7 @@ from .._utils.file_primitives import (
 )
 from .._utils.paths import expand_path
 from .._utils.validation import normalize_strings, require_mode, require_non_negative_int, require_path, require_text
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -80,7 +80,6 @@ class _Member:
 
 
 def archive(
-    ctx: TaskContext,
     src: str | Path,
     dest: str | Path,
     *,
@@ -99,6 +98,7 @@ def archive(
     exists the archive is not opened. ``strip_components`` removes leading path
     components before ``include`` and ``exclude`` patterns are matched.
     """
+    ctx = current_context()
     require_path(src, "archive source")
     require_path(dest, "archive destination")
     require_mode(mode)
@@ -135,7 +135,7 @@ def archive(
     return ctx.changed(_archive_result(source, target, changes=changed, files=files, size=_directory_size(target)))
 
 
-def file(ctx: TaskContext, src: str | Path, dest: str | Path, *, mode: int | None = None) -> CallResult:
+def file(src: str | Path, dest: str | Path, *, mode: int | None = None) -> CallResult:
     """Decompress a single-file compression format into ``dest``.
 
     Supported formats are gzip, bzip2, xz, and zstd, detected from the file
@@ -144,6 +144,7 @@ def file(ctx: TaskContext, src: str | Path, dest: str | Path, *, mode: int | Non
     compression suffix. Archive formats are rejected; use
     :func:`archive` for those.
     """
+    ctx = current_context()
     require_path(src, "compressed source")
     require_path(dest, "decompressed destination")
     require_mode(mode)
@@ -442,10 +443,7 @@ def _open_archive(path: Path) -> _Archive:
 
 
 def _select_entries(
-    archive: _Archive,
-    strip_components: int,
-    include: tuple[str, ...],
-    exclude: tuple[str, ...],
+    archive: _Archive, strip_components: int, include: tuple[str, ...], exclude: tuple[str, ...]
 ) -> dict[str, _Member]:
     selected: dict[str, _Member] = {}
     try:

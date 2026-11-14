@@ -8,6 +8,7 @@ PACKAGE_NAME: Final = __name__
 
 # PACKAGE_NAME and __version__ must exist before these imports: submodules such
 # as ``output`` and ``_privileged.client`` read them from the package root.
+from ._proxy import ctx, facts, vars  # noqa: E402
 from .context import TaskContext  # noqa: E402
 from .registry import Bundle, Module, bundle, bundle_of, module, side_effect, task  # noqa: E402
 from .results import CallResult  # noqa: E402
@@ -21,7 +22,10 @@ __all__: Final = [
     "__version__",
     "bundle",
     "bundle_of",
+    "ctx",
+    "facts",
     "module",
     "side_effect",
     "task",
+    "vars",
 ]

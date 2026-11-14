@@ -4,11 +4,10 @@ Manage Podman images, containers, registry drop-ins, registry logins, and
 systemd or Quadlet units.
 
 ```python
-from kitup.modules import podman
-from kitup import task
+from kitup.modules import podman, systemd
 ```
 
-## `image(ctx, name, *, source=None, state="present", pull="missing", platform=None, force=False, timeout=600, sudo=False)`
+## `image(name, *, source=None, state="present", pull="missing", platform=None, force=False, timeout=600, sudo=False)`
 
 Ensure an image is present locally or absent.
 
@@ -35,16 +34,15 @@ resolution may store the image under a different local name. Pulls with
 - `source` — pull source, when supplied (pull results only).
 
 ```python
-podman.image(ctx, "docker.io/library/fedora:latest")
+podman.image("docker.io/library/fedora:latest")
 podman.image(
-    ctx,
     "localhost/example:latest",
     source="oci-archive:/tmp/example.tar",
 )
-podman.image(ctx, "localhost/example:old", state="absent", force=True)
+podman.image("localhost/example:old", state="absent", force=True)
 ```
 
-## `build(ctx, context, *, tag, containerfile=None, build_args=None, pull=False, force=False, no_cache=False, timeout=600, sudo=False)`
+## `build(context, *, tag, containerfile=None, build_args=None, pull=False, force=False, no_cache=False, timeout=600, sudo=False)`
 
 Build an image from a context directory.
 
@@ -75,14 +73,13 @@ Content changes in the context are not detected. Use `force=True` to rebuild.
 
 ```python
 podman.build(
-    ctx,
     "container",
     tag="localhost/example:latest",
     build_args={"VERSION": "1.0"},
 )
 ```
 
-## `tag(ctx, image, targets, *, sudo=False)`
+## `tag(image, targets, *, sudo=False)`
 
 Add one or more target names to a local image. Targets that already point at
 the source image are skipped.
@@ -99,10 +96,10 @@ the source image are skipped.
 - `targets` — tags added; empty when nothing changed.
 
 ```python
-podman.tag(ctx, "localhost/example:latest", ["localhost/example:stable"])
+podman.tag("localhost/example:latest", ["localhost/example:stable"])
 ```
 
-## `container(ctx, name, *, state="started", image=None, command=None, options=None, recreate=False, stop_timeout=None, timeout=600, sudo=False)`
+## `container(name, *, state="started", image=None, command=None, options=None, recreate=False, stop_timeout=None, timeout=600, sudo=False)`
 
 Ensure a container is created, started, stopped, or absent.
 
@@ -140,16 +137,15 @@ separately with `podman run --rm`.
 
 ```python
 podman.container(
-    ctx,
     "web",
     image="localhost/web:latest",
     options={"publish": "8080:80", "env": ["MODE=production"]},
     command=["/app/serve"],
 )
-podman.container(ctx, "web", state="absent")
+podman.container("web", state="absent")
 ```
 
-## `registry(ctx, name, *, state="present", location=None, prefix=None, insecure=False, blocked=False, mirrors=(), scope="system", path=None, mode=0o644)`
+## `registry(name, *, state="present", location=None, prefix=None, insecure=False, blocked=False, mirrors=(), scope="system", path=None, mode=0o644)`
 
 Ensure a `registries.conf.d` drop-in exists or is absent.
 
@@ -175,7 +171,6 @@ Parent directories must already exist; create them with
 
 ```python
 podman.registry(
-    ctx,
     "example",
     location="docker.io",
     prefix="mirror.example.com",
@@ -183,7 +178,7 @@ podman.registry(
 )
 ```
 
-## `login(ctx, registry, *, username, password, authfile=None, tls_verify=None, force=False, sudo=False)`
+## `login(registry, *, username, password, authfile=None, tls_verify=None, force=False, sudo=False)`
 
 Log in to a container registry. The password is passed with
 `--password-stdin`, not in argv. An existing login for the same user is a
@@ -205,10 +200,10 @@ no-op unless `force=True`.
 - `username` — account name.
 
 ```python
-podman.login(ctx, "registry.example.com", username="kitup", password=secret)
+podman.login("registry.example.com", username="kitup", password="s3cret")
 ```
 
-## `logout(ctx, registry, *, authfile=None, sudo=False)`
+## `logout(registry, *, authfile=None, sudo=False)`
 
 Log out of a container registry. A missing login is a no-op.
 
@@ -222,7 +217,7 @@ Log out of a container registry. A missing login is a no-op.
 
 - `registry` — registry host.
 
-## `generate_systemd(ctx, name, *, dest=None, scope="system", new=False, restart_policy=None, restart_sec=None, start_timeout=None, stop_timeout=None, container_prefix=None, separator=None, env=None, wants=(), requires=(), after=(), mode=0o644)`
+## `generate_systemd(name, *, dest=None, scope="system", new=False, restart_policy=None, restart_sec=None, start_timeout=None, stop_timeout=None, container_prefix=None, separator=None, env=None, wants=(), requires=(), after=(), mode=0o644)`
 
 Generate a systemd unit for a container.
 
@@ -255,11 +250,11 @@ module writes the unit but does not run `systemctl daemon-reload`; use
 - `container` — container name.
 
 ```python
-podman.generate_systemd(ctx, "web", restart_policy="always")
-systemd.daemon_reload(ctx)
+podman.generate_systemd("web", restart_policy="always")
+systemd.daemon_reload()
 ```
 
-## `quadlet(ctx, name, *, image, dest=None, scope="system", command=None, options=None, extra_options=None, install_target=None, stop_timeout=None, mode=0o644)`
+## `quadlet(name, *, image, dest=None, scope="system", command=None, options=None, extra_options=None, install_target=None, stop_timeout=None, mode=0o644)`
 
 Write a Quadlet `.container` file.
 
@@ -294,7 +289,6 @@ afterwards.
 
 ```python
 podman.quadlet(
-    ctx,
     "web",
     image="localhost/web:latest",
     options={"publish": "8080:80"},

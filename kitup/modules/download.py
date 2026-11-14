@@ -21,7 +21,7 @@ from .._utils.http import open_url, read_response
 from .._utils.paths import expand_path
 from .._utils.timing import timed
 from .._utils.validation import has_control_characters, require_bool, require_mode, require_path, require_timeout
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -138,7 +138,6 @@ def _decoder_for(response: Any) -> _Decoder | None:
 
 
 def to_file(
-    ctx: TaskContext,
     url: str,
     dest: str | Path,
     *,
@@ -156,6 +155,7 @@ def to_file(
     true or a supplied ``checksum`` does not match. Downloads are written to a
     temporary file and installed atomically.
     """
+    ctx = current_context()
     url, parts = _validate_url(url)
     if not isinstance(dest, (str, Path)):
         raise TaskFailed("download destination must be a path")
@@ -239,7 +239,6 @@ def to_file(
 
 
 def to_bytes(
-    ctx: TaskContext,  # noqa: ARG001 - part of the module API convention
     url: str,
     *,
     checksum: str | None = None,
@@ -314,12 +313,7 @@ def _open_url(url: str, display: str, headers: Mapping[str, str], timeout: float
 
 
 def _read_response(
-    response: Any,
-    sink: BinaryIO,
-    *,
-    expected: _Checksum | None,
-    max_bytes: int | None,
-    display: str,
+    response: Any, sink: BinaryIO, *, expected: _Checksum | None, max_bytes: int | None, display: str
 ) -> str:
     decoder = _decoder_for(response)
     if decoder is not None:
@@ -465,11 +459,7 @@ def _digest(path: Path, _mtime_ns: int, _size: int, algorithm: str) -> str:
 
 
 def _needs_download(
-    target: Path,
-    info: file_actions.FileInfo | None,
-    *,
-    force: bool,
-    checksum: _Checksum | None,
+    target: Path, info: file_actions.FileInfo | None, *, force: bool, checksum: _Checksum | None
 ) -> bool:
     if info is None or force:
         return True
@@ -521,12 +511,7 @@ def _reconcile_metadata(
 
 
 def _download_data(
-    display: str,
-    target: Path,
-    *,
-    checksum_dest: str | None,
-    duration: float,
-    size: int,
+    display: str, target: Path, *, checksum_dest: str | None, duration: float, size: int
 ) -> dict[str, Any]:
     return {
         "url": display,

@@ -1,18 +1,24 @@
 from contextlib import contextmanager
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
+import kitup
+from kitup import ctx as ambient_ctx
+from kitup import facts as ambient_facts
+from kitup import vars as ambient_vars
+from kitup.context import current_context
 from kitup.errors import TaskFailed, VarsError
+from kitup.modules import files
 from kitup.project import Project
 from kitup.registry import Bundle, side_effect
 from kitup.results import CallResult, Status, TaskResult
-from kitup.vars import Vars
+from kitup.variables import Vars
 
 from .helpers import FakeCommandRunner, FakeSudo, add_task, make_context, response
 
 
-def _noop(ctx):
+def _noop():
     return None
 
 
@@ -20,6 +26,44 @@ def task_for(name: str = "test"):
     bundle = Bundle("test")
     add_task(bundle, _noop, name=name)
     return bundle.tasks[0]
+
+
+def test_module_function_outside_a_task_fails_clearly(tmp_path):
+    with pytest.raises(TaskFailed, match="no active task context"):
+        files.file(tmp_path / "file", content="value\n")
+
+
+def test_ambient_proxies_resolve_the_current_context(tmp_path):
+    context = make_context(tmp_path, vars=Vars(VALUE="base"), facts={"os": "fedora"})
+
+    assert current_context() is context
+    assert ambient_ctx.vars is context.vars
+    assert ambient_vars.VALUE == "base"
+    assert ambient_facts["os"] == "fedora"
+
+
+def test_ambient_proxy_without_a_context_raises_attribute_error():
+    with pytest.raises(AttributeError, match="no active task context"):
+        _ = ambient_ctx.vars
+
+
+def test_ambient_proxy_repr_is_safe_without_a_context():
+    assert "inactive" in repr(ambient_ctx)
+
+
+def test_ambient_facts_proxy_supports_mapping_operations(tmp_path):
+    make_context(tmp_path, facts={"os": "fedora", "arch": "x86_64"})
+
+    assert len(ambient_facts) == 2
+    assert "os" in ambient_facts
+    assert sorted(ambient_facts) == ["arch", "os"]
+
+
+def test_public_vars_and_facts_are_proxies():
+    assert kitup.vars is ambient_vars
+    assert kitup.facts is ambient_facts
+    assert not isinstance(kitup.vars, ModuleType)
+    assert not isinstance(kitup.facts, ModuleType)
 
 
 def test_changed_records_calls_notes_and_task_scope(tmp_path):
@@ -145,7 +189,7 @@ def test_result_returns_stored_results_and_raises_for_unrun_tasks(tmp_path):
 
     assert context.result(task.func) is result
 
-    def other(ctx):
+    def other():
         return None
 
     other_bundle = Bundle("other")
@@ -333,7 +377,7 @@ def test_non_sudo_failure_is_not_retried(tmp_path):
 
 def test_bundle_is_the_owning_bundle_for_the_current_task(tmp_path):
     bundle = Bundle("base", path=tmp_path)
-    add_task(bundle, lambda ctx: None, name="Task")
+    add_task(bundle, lambda: None, name="Task")
     context = make_context(tmp_path)
 
     context.begin_task(bundle.tasks[0])
@@ -378,7 +422,7 @@ def test_begin_task_switches_to_bundle_scoped_vars(tmp_path):
 def test_side_effect_queues_for_the_current_task(tmp_path):
     context = make_context(tmp_path)
     context.begin_task(task_for())
-    effect = side_effect("Refresh")(lambda ctx: None)
+    effect = side_effect("Refresh")(lambda: None)
 
     context.side_effect(effect)
 
@@ -387,7 +431,7 @@ def test_side_effect_queues_for_the_current_task(tmp_path):
 
 def test_side_effect_rejects_invalid_contexts(tmp_path):
     context = make_context(tmp_path)
-    effect = side_effect("Refresh")(lambda ctx: None)
+    effect = side_effect("Refresh")(lambda: None)
 
     with pytest.raises(TaskFailed, match="side effects can only be registered from a task"):
         context.side_effect(effect)
@@ -398,17 +442,17 @@ def test_side_effect_rejects_invalid_contexts(tmp_path):
 
     context.begin_task(task_for())
     with pytest.raises(TaskFailed, match="side_effect expects a SideEffect"):
-        context.side_effect(lambda ctx: None)  # type: ignore[arg-type]
+        context.side_effect(lambda: None)  # type: ignore[arg-type]
 
 
 def test_side_effect_queue_lifecycle(tmp_path):
     context = make_context(tmp_path)
     context.begin_task(task_for())
 
-    def first_effect(ctx):
+    def first_effect():
         pass
 
-    def second_effect(ctx):
+    def second_effect():
         pass
 
     first = side_effect("First")(first_effect)
@@ -428,7 +472,7 @@ def test_side_effect_rejects_duplicate_function_names(tmp_path):
     context = make_context(tmp_path)
     context.begin_task(task_for())
 
-    def refresh(ctx):
+    def refresh():
         pass
 
     first = side_effect("Refresh")(refresh)
@@ -444,7 +488,7 @@ def test_side_effect_rejects_duplicate_function_names(tmp_path):
 def test_side_effect_rejects_task_function_name_collisions(tmp_path):
     bundle = Bundle("test")
 
-    def shared(ctx):
+    def shared():
         pass
 
     add_task(bundle, shared, name="Shared")

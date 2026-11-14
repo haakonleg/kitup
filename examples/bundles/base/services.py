@@ -3,12 +3,12 @@ from kitup.modules import systemd
 
 
 @task(tags={"services"})
-def enable_firewall(ctx):
+def enable_firewall():
     """Enable and start firewalld."""
-    systemd.unit(ctx, "firewalld.service", enabled=True, state="started")
+    systemd.unit("firewalld.service", enabled=True, state="started")
 
 
 @task(tags={"services"})
-def enable_time_sync(ctx):
+def enable_time_sync():
     """Enable and start time synchronization."""
-    systemd.unit(ctx, "chronyd.service", enabled=True, state="started")
+    systemd.unit("chronyd.service", enabled=True, state="started")

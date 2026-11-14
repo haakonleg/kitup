@@ -54,7 +54,7 @@ def write_bundle(root: Path, name: str, source: str) -> Path:
 
     body = textwrap.dedent(source).strip()
     (folder / "tasks.py").write_text(
-        f"from kitup import task\n\n{body}\n",
+        f"from kitup import ctx, task\n\n{body}\n",
         encoding="utf-8",
     )
     return root

@@ -1,11 +1,8 @@
 """uv project dependencies, per-user CLI tools, and uv configuration files.
 
-All operations use uv's native, project-centric interface (``uv sync``,
-``uv tool``, ``uv.toml``) rather than the ``uv pip`` compatibility layer.
-``dependencies`` and ``tools`` run with the invoking user's privileges — uv
-projects, tools, and user config all live under the user's home — so manage
-root-owned project directories by running kitup as root. Only ``config`` takes
-``sudo``, for the root-owned ``/etc/uv/uv.toml``.
+Operations use uv's native project interface (``uv sync``, ``uv tool``,
+``uv.toml``) rather than ``uv pip``. ``dependencies`` and ``tools`` run as the
+invoking user; only ``config`` takes ``sudo`` for ``/etc/uv/uv.toml``.
 """
 
 import os
@@ -35,7 +32,7 @@ from .._utils.validation import (
     require_texts,
     unique_strings,
 )
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult, format_items
@@ -52,7 +49,6 @@ _TOOL_LINE_RE: Final = re.compile(r"^(?P<name>\S+) v(?P<version>\S+)")
 
 
 def dependencies(
-    ctx: TaskContext,
     names: Iterable[str] | str,
     *,
     project: str | Path,
@@ -63,27 +59,18 @@ def dependencies(
 ) -> CallResult:
     """Ensure PEP 508 dependencies of a uv project are declared, up to date, or removed.
 
-    ``names`` are registry requirement strings (``"requests>=2"``, ``"psycopg[binary]"``)
-    written verbatim into the project's ``pyproject.toml`` — ``[project.dependencies]``,
-    or the ``<group>`` key of ``[dependency-groups]`` (PEP 735) when ``group`` is
-    given. URLs, VCS, and local paths are rejected (they need ``[tool.uv.sources]``
-    entries), as are uv tool ``@`` specifiers (``name@latest`` is not valid in a
-    dependency table); existing non-registry entries in the table are left
-    untouched. ``state="present"`` adds or replaces entries whose PEP 503-normalized
-    name matches with a different specifier; ``state="latest"`` additionally upgrades
-    bare names via ``uv sync --upgrade-package`` and detects an available newer
-    version with an upgrade-aware ``--check`` probe; ``state="absent"`` removes
-    entries by name. ``project`` is the project directory; a missing one is
-    initialized with ``uv init --bare`` (never for ``state="absent"``). After editing
-    ``pyproject.toml``, ``uv sync --project`` converges ``uv.lock`` and ``.venv``;
-    convergence is probed with the stable ``uv sync --check`` / ``uv lock --check``
-    exit codes plus the existence of the project environment, and a post-sync check
-    must pass. ``python`` is passed as ``--python`` to select the project interpreter.
-    ``extra_args`` are extra resolver options for ``uv sync``/``uv lock``, e.g.
-    ``["--no-index", "--find-links=/srv/wheels"]``. Note that ``uv sync`` re-resolves
-    during ``--check``, so an offline run can report a change even when correct.
-    No ``sudo``: run kitup as root for root-owned project directories.
+    ``names`` are registry requirement strings written into ``pyproject.toml``:
+    ``[project.dependencies]``, or the ``<group>`` of ``[dependency-groups]``
+    (PEP 735) when ``group`` is given. URLs, VCS, local paths, and uv tool ``@``
+    specifiers are rejected; existing non-registry entries are left untouched.
+    ``present`` adds or replaces entries by normalized name, ``latest`` also
+    upgrades bare names, and ``absent`` removes entries by name. ``project`` is
+    initialized with ``uv init --bare`` when missing (never for ``absent``), then
+    ``uv sync`` converges ``uv.lock`` and ``.venv``. ``python`` selects the
+    interpreter and ``extra_args`` are extra resolver options for ``uv sync``/
+    ``uv lock``. No ``sudo``: run kitup as root for root-owned projects.
     """
+    ctx = current_context()
     wanted = unique_strings(normalize_strings(names))
     require_collection(wanted, "dependency names")
     require_texts(wanted, "dependency name")
@@ -94,7 +81,7 @@ def dependencies(
     if python is not None:
         require_text(python, "python")
     extra = normalize_extra_args(extra_args)
-    # Project dependencies reject ``@`` specifiers; those are uv tool syntax.
+    # ``@`` specifiers are uv tool syntax, not project dependency syntax.
     requirements = [_parse_registry_requirement(name, state=state, tool=False) for name in wanted]
 
     pyproject = project_path / "pyproject.toml"
@@ -103,15 +90,14 @@ def dependencies(
         raise TaskFailed(f"project path is not a directory: {project_path}")
     pyproject_info = file_actions.stat(ctx, pyproject, sudo=False)
     if pyproject_info is None and state == "absent":
-        # nothing to remove from a missing project; no uv needed
+        # Nothing to remove from a missing project.
         return ctx.changed(_absent_no_change(wanted, project_path, state))
 
     initialized = _init_project(ctx, pyproject_info, pyproject, project_path, python)
     snapshot, lines, table, key = _read_table(ctx, pyproject, initialized=initialized, state=state, group=group)
     current_raw = toml_ops.array_items(lines, table, key)
     if state == "absent" and group is not None and current_raw is None:
-        # the group is not defined, so there is nothing to remove and a
-        # `uv sync --group <name>` probe would fail with "Group not defined"
+        # Undefined group: nothing to remove, and a sync probe would fail.
         return ctx.changed(_absent_no_change(wanted, project_path, state))
     current = current_raw if current_raw is not None else []
     desired, added, removed = _diff_dependencies(current, requirements, state=state)
@@ -122,13 +108,12 @@ def dependencies(
     sync_base = [uv, "sync", "--project", str(project_path), *group_args, *_python_args(python)]
     lock_base = [uv, "lock", "--project", str(project_path)]
     upgrade_args = _upgrade_package_args(requirements, state)
-    # for state="latest" the pre-probe is upgrade-aware, so a merely available
-    # newer version is detected; the post-sync checks stay plain
+    # The pre-probe is upgrade-aware for ``latest``; post-sync checks stay plain.
     sync_probe = _check_args(sync_base, extra, upgrade_args)
     lock_probe = _check_args(lock_base, extra, upgrade_args)
     check_args = _check_args(sync_base, extra)
     lock_args = _check_args(lock_base, extra)
-    # An edit forces a sync, so only probe convergence when nothing is being edited.
+    # An edit forces a sync, so only probe convergence when nothing is edited.
     converged = not edits_needed and _project_converged(
         ctx, project_path, sync_probe, lock_probe, initialized=initialized, dry_run=ctx.dry_run
     )
@@ -161,7 +146,6 @@ def dependencies(
 
 
 def tools(
-    ctx: TaskContext,
     names: Iterable[str] | str,
     *,
     state: UvState = "present",
@@ -170,24 +154,16 @@ def tools(
 ) -> CallResult:
     """Ensure per-user uv CLI tools are installed, up to date, or uninstalled.
 
-    ``names`` are registry requirement strings (``"ruff"``, ``"httpie==3.2"``),
-    including uv's ``{package}@{version}`` / ``{package}@latest`` specifiers; URLs
-    and paths are rejected. ``state="present"`` installs missing tools and reinstalls
-    a tool whose requested specifier, extras, or marker differ from the installed
-    one (compared normalized, so spacing and ``@``-form differences don't reinstall),
-    but leaves a satisfied bare name alone; ``state="latest"`` additionally refreshes
-    installed tools — with ``uv tool upgrade``, or ``uv tool install <name>@latest``
-    only when the tool was installed with an exact ``==`` pin, which ``uv tool
-    upgrade`` refuses to move; ``state="absent"`` uninstalls by name. Reinstalling a
-    tool that was installed with ``--with`` requirements under a different specifier
-    is rejected. Installed tools are detected from the ``uv-receipt.toml`` receipts
-    in ``uv tool dir``, and upgrades are confirmed by comparing ``uv tool list``
-    versions before and after.
-    ``python`` is passed as ``--python`` to select the tool environment interpreter.
-    ``extra_args`` are extra options for ``uv tool install`` and ``uv tool upgrade``,
-    e.g. ``["--no-index", "--find-links=/srv/wheels"]``. No ``sudo``: uv tools are
-    per-user by design (XDG directories under ``$HOME``).
+    ``names`` are registry requirement strings, including uv's ``{package}@latest``
+    specifiers; URLs and paths are rejected. ``present`` installs missing tools and
+    reinstalls tools whose specifier, extras, or marker differ from the installed
+    one; ``latest`` also upgrades installed tools; ``absent`` uninstalls by name.
+    Reinstalling a tool installed with ``--with`` requirements under a different
+    specifier is rejected. ``python`` selects the tool environment interpreter and
+    ``extra_args`` are extra options for ``uv tool install``/``uv tool upgrade``.
+    No ``sudo``: uv tools are per-user.
     """
+    ctx = current_context()
     wanted = unique_strings(normalize_strings(names))
     require_collection(wanted, "tool names")
     require_texts(wanted, "tool name")
@@ -235,7 +211,7 @@ def tools(
     if not install and not upgrade:
         return ctx.changed(_tools_no_change(wanted, state))
 
-    # dist names of installed tools a "latest" run refreshes, confirmed by version change
+    # dist names of installed tools a "latest" run refreshes
     refresh = [req.name for req in requirements if state == "latest" and req.normalized in installed]
     changed_items = [name.removesuffix("@latest") for name in install]
     if ctx.dry_run:
@@ -243,8 +219,7 @@ def tools(
             try:
                 outdated = _outdated_tools(ctx, uv)
             except TaskFailed as exc:
-                # Offline or custom-index runs may not be able to query the
-                # index; fall back to the previous over-approximation.
+                # Offline or custom-index runs may not reach the index; over-approximate.
                 ctx.note(
                     f"could not check for outdated uv tools; reporting installed tools as potentially outdated: {exc}"
                 )
@@ -280,7 +255,6 @@ def tools(
 
 
 def config(
-    ctx: TaskContext,
     option: str,
     value: str | bool | float | Iterable[str] | None = None,  # noqa: FBT001 - positional value matches the module API
     *,
@@ -292,29 +266,18 @@ def config(
 ) -> CallResult:
     """Set or remove one option in a uv configuration file.
 
-    uv reads ``uv.toml`` files at three levels — system (``$XDG_CONFIG_DIRS/uv/uv.toml``
-    or ``/etc/uv/uv.toml``), user (``$XDG_CONFIG_HOME/uv/uv.toml`` or
-    ``~/.config/uv/uv.toml``), and project (a project-level ``uv.toml``, or the
-    ``[tool.uv]`` table of the project's ``pyproject.toml``) — with precedence
-    project > user > system for scalar settings; array settings are concatenated
-    instead, project-first. A project-level ``uv.toml`` takes precedence over
-    ``[tool.uv]`` in ``pyproject.toml``, so ``scope="project"`` can be a no-op when
-    both exist. ``scope`` selects the default target file; pass an explicit
-    ``path`` to edit any other TOML file (a ``pyproject.toml`` path automatically
-    uses its ``[tool.uv]`` table, a ``uv.toml`` path its top-level keys), and
-    ``project`` with ``scope="project"`` for a project's ``[tool.uv]`` table.
-    ``option`` is a (possibly dotted) bare TOML key such as ``index-url``; a dotted
-    option resolves into an existing sub-table (e.g. ``pip.no-cache`` into
-    ``[tool.uv.pip]``) when that header exists.
-    ``value`` follows TOML types: a string renders as a basic string, a boolean as
-    ``true``/``false``, an integer or float in decimal form, and a list or tuple of
-    strings as an array (``[]`` when empty). A missing file is created. ``sudo``
-    defaults to ``True`` for ``scope="system"`` without an explicit ``path``;
-    ``scope="user"`` rejects ``sudo=True`` without a ``path`` (it would write a
-    root-owned file into the user's home) and cannot run as root at all; with an
-    explicit ``path``, ``sudo=True`` is permitted like in ``pip.config``.
-    Array-of-tables (``[[tool.uv.index]]``) cannot be edited and are rejected.
+    uv reads ``uv.toml`` at system, user, and project level, with project > user >
+    system precedence for scalars and project-first concatenation for arrays. A
+    project-level ``uv.toml`` overrides ``[tool.uv]`` in ``pyproject.toml``, so
+    ``scope="project"`` can be a no-op when both exist. ``scope`` selects the
+    default target; pass ``path`` to edit another TOML file (``pyproject.toml``
+    uses ``[tool.uv]``, ``uv.toml`` its top-level keys). ``option`` is a possibly
+    dotted bare TOML key; ``value`` follows TOML types and a missing file is
+    created. ``sudo`` defaults to ``True`` for system scope without ``path``;
+    user scope rejects ``sudo=True`` without a ``path`` and cannot run as root.
+    Array-of-tables (``[[tool.uv.index]]``) cannot be edited.
     """
+    ctx = current_context()
     require_state(state, "config")
     require_choice(scope, _CONFIG_SCOPES, "uv config scope")
     option = toml_ops.require_toml_key(option, "uv config option")
@@ -408,12 +371,7 @@ def _init_project(
 
 
 def _read_table(
-    ctx: TaskContext,
-    pyproject: Path,
-    *,
-    initialized: bool,
-    state: UvState,
-    group: str | None,
+    ctx: TaskContext, pyproject: Path, *, initialized: bool, state: UvState, group: str | None
 ) -> tuple[file_actions.FileSnapshot, list[str], str, str]:
     """Read ``pyproject.toml`` and return ``(snapshot, lines, table, key)`` for the edited table."""
     snapshot = file_actions.read_snapshot(ctx, pyproject, sudo=False)
@@ -501,8 +459,7 @@ def _uv_bin(ctx: TaskContext) -> str:
 def _require_uv(ctx: TaskContext, argv: list[str], *, failure: str) -> subprocess.CompletedProcess[str]:
     """Run a read-only uv command that must succeed.
 
-    A failing command is re-checked with ``uv --version`` so that a missing or
-    broken uv is reported as such, not as a command failure.
+    A failure is re-checked with ``uv --version`` to report a broken uv clearly.
     """
     result = ctx.probe(argv)
     if result.returncode != 0:
@@ -589,18 +546,13 @@ def _try_parse_requirement(item: str) -> Requirement | None:
 
 
 def _diff_dependencies(
-    current: list[str],
-    wanted: list[Requirement],
-    *,
-    state: UvState,
+    current: list[str], wanted: list[Requirement], *, state: UvState
 ) -> tuple[list[str], list[str], list[str]]:
     """Return ``(desired, added, removed)`` for the pyproject table diff.
 
-    ``present``/``latest`` add missing requirements and replace entries whose
-    normalized name matches with a different verbatim string (all duplicates of
-    the name are reconciled); ``absent`` removes entries by normalized name.
-    Non-registry entries (URLs, paths, direct references) are preserved verbatim
-    and never matched. Current entries are parsed once.
+    ``present``/``latest`` add missing requirements and replace entries by
+    normalized name; ``absent`` removes by name. Non-registry entries are kept
+    verbatim and never matched.
     """
     parsed = [_try_parse_requirement(item) for item in current]
     if state == "absent":
@@ -718,12 +670,9 @@ def _receipt_name(item: object) -> str | None:
 
 
 def _installed_tools(ctx: TaskContext, tools_dir: Path) -> dict[str, InstalledTool]:
-    """Return normalized tool name -> installed tool, read from ``uv-receipt.toml`` receipts.
+    """Return normalized tool name -> installed tool, read from ``uv-receipt.toml``.
 
-    The environment directory name is the normalized tool name; the receipt's
-    ``requirements`` may hold additional packages (``--with``), so the tool's own
-    entry is the one matching the directory name. Unreadable receipts are skipped
-    with a note instead of aborting every call.
+    Unreadable receipts are skipped with a note instead of aborting the call.
     """
     installed: dict[str, InstalledTool] = {}
     if not tools_dir.is_dir():
@@ -790,7 +739,7 @@ def _config_target(*, scope: str, project: str | Path | None, path: str | Path |
     if path is not None:
         require_path(path, "config path")
         target = expand_path(path, error=TaskFailed)
-        # a pyproject.toml holds uv settings in its [tool.uv] table; a uv.toml at the top level
+        # pyproject.toml keeps uv settings in [tool.uv]; uv.toml uses top-level keys.
         return target, "tool.uv" if target.name == "pyproject.toml" else None
     if scope == "system":
         return _SYSTEM_CONFIG_PATH, None

@@ -15,7 +15,7 @@ from .._utils.validation import (
     require_text,
     require_timeout,
 )
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -24,7 +24,6 @@ module("command", "Guarded one-off commands.")
 
 
 def run(
-    ctx: TaskContext,
     cmd: str | Sequence[str],
     *,
     creates: str | Path | None = None,
@@ -37,6 +36,7 @@ def run(
     check: bool | None = None,
 ) -> CallResult:
     """Run a command unless a guard says it is already satisfied."""
+    ctx = current_context()
     return ctx.changed(
         _run(
             ctx,
@@ -54,7 +54,6 @@ def run(
 
 
 def shell(
-    ctx: TaskContext,
     cmd: str,
     *,
     shell: str | Path | None = None,
@@ -72,6 +71,7 @@ def shell(
     Uses the shell from ``SHELL`` or the current user's passwd entry when
     ``shell`` is not specified. ``unless`` is also run through that shell.
     """
+    ctx = current_context()
     require_text(cmd, "shell command")
     if shell is not None:
         require_path(shell, "shell")

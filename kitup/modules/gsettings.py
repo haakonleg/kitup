@@ -3,7 +3,7 @@
 from typing import Any
 
 from .._utils.validation import State, require_state, require_text
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -11,8 +11,9 @@ from ..results import CallResult
 module("gsettings", "GNOME settings.")
 
 
-def key(ctx: TaskContext, schema: str, key: str, value: Any = None, *, state: State = "present") -> CallResult:
+def key(schema: str, key: str, value: Any = None, *, state: State = "present") -> CallResult:
     """Manage a gsettings key, or reset it to its schema default."""
+    ctx = current_context()
     require_state(state, "gsettings")
     require_text(schema, "gsettings schema")
     require_text(key, "gsettings key")

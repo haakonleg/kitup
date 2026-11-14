@@ -18,7 +18,7 @@ from ..._utils.validation import (
     require_texts,
     unique_strings,
 )
-from ...context import TaskContext
+from ...context import TaskContext, current_context
 from ...errors import TaskFailed
 from ...results import CallResult
 from ._common import (
@@ -29,7 +29,6 @@ from ._common import (
 
 
 def registry(
-    ctx: TaskContext,
     name: str,
     *,
     state: State = "present",
@@ -47,6 +46,7 @@ def registry(
     The parent directory must already exist; create it with
     :func:`kitup.modules.files.directory` first.
     """
+    ctx = current_context()
     require_scope(scope, "podman", is_root=ctx.sudo.is_root)
     require_state(state, "registry")
     require_object_name(name, "registry name")
@@ -105,7 +105,6 @@ def registry(
 
 
 def login(
-    ctx: TaskContext,
     registry: str,
     *,
     username: str,
@@ -116,6 +115,7 @@ def login(
     sudo: bool = False,
 ) -> CallResult:
     """Log in to a container registry using a password from stdin."""
+    ctx = current_context()
     require_text(registry, "registry")
     require_text(username, "registry username")
     require_text(password, "registry password")
@@ -161,8 +161,9 @@ def login(
     return ctx.changed(call)
 
 
-def logout(ctx: TaskContext, registry: str, *, authfile: str | Path | None = None, sudo: bool = False) -> CallResult:
+def logout(registry: str, *, authfile: str | Path | None = None, sudo: bool = False) -> CallResult:
     """Log out of a container registry."""
+    ctx = current_context()
     require_text(registry, "registry")
     if authfile is not None:
         require_path(authfile, "registry authfile")
@@ -199,12 +200,7 @@ def _registry_path(name: str, *, scope: str, path: str | Path | None) -> Path:
 
 
 def _registry_document(
-    location: str,
-    *,
-    prefix: str | None,
-    insecure: bool,
-    blocked: bool,
-    mirrors: Sequence[str],
+    location: str, *, prefix: str | None, insecure: bool, blocked: bool, mirrors: Sequence[str]
 ) -> str:
     lines = [
         "# Managed by kitup.",
@@ -221,12 +217,7 @@ def _registry_document(
 
 
 def _login_status(
-    ctx: TaskContext,
-    podman_command: str,
-    registry: str,
-    *,
-    authfile: str | Path | None,
-    sudo: bool,
+    ctx: TaskContext, podman_command: str, registry: str, *, authfile: str | Path | None, sudo: bool
 ) -> str | None:
     command = [podman_command, "login", "--get-login"]
     if authfile is not None:

@@ -44,9 +44,9 @@ def test_enable_start_and_disable_stop(tmp_path: Path, unit: str) -> None:
         from kitup.modules import systemd
 
         @task("reload, enable, and start unit")
-        def enable_and_start(ctx):
-            systemd.daemon_reload(ctx)
-            systemd.unit(ctx, {unit!r}, enabled=True, state="started")
+        def enable_and_start():
+            systemd.daemon_reload()
+            systemd.unit({unit!r}, enabled=True, state="started")
         """,
     )
     assert run_kitup("apply", start_root) == 0
@@ -60,8 +60,8 @@ def test_enable_start_and_disable_stop(tmp_path: Path, unit: str) -> None:
         from kitup.modules import systemd
 
         @task("disable and stop unit")
-        def disable_and_stop(ctx):
-            systemd.unit(ctx, {unit!r}, enabled=False, state="stopped")
+        def disable_and_stop():
+            systemd.unit({unit!r}, enabled=False, state="stopped")
         """,
     )
     assert run_kitup("apply", stop_root) == 0

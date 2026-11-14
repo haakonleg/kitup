@@ -5,6 +5,7 @@ import subprocess
 import sys
 import traceback
 from collections.abc import Callable, Mapping, Sequence
+from contextvars import ContextVar, Token
 from pathlib import Path
 from types import FrameType
 from typing import Any, Final, Never, cast, overload
@@ -20,7 +21,7 @@ from .project import FILES_DIR, Project
 from .registry import Bundle, SideEffect, Task, action_prefix
 from .results import CallResult, TaskResult
 from .runtime import BundleState, RunState
-from .vars import Vars
+from .variables import Vars
 
 _MISSING: Final = object()
 
@@ -280,12 +281,7 @@ class TaskContext:
     def changed(self, *, changed: bool = True, summary: str, **data: Any) -> CallResult: ...
 
     def changed(
-        self,
-        result: CallResult | None = None,
-        *,
-        changed: bool = True,
-        summary: str = "",
-        **data: Any,
+        self, result: CallResult | None = None, *, changed: bool = True, summary: str = "", **data: Any
     ) -> CallResult:
         """Record one module-level call for the current task and return it.
 
@@ -373,3 +369,32 @@ class TaskContext:
         if default is _MISSING:
             raise TaskFailed(f"no stored value for key: {key}")
         return default
+
+
+_current: ContextVar[TaskContext | None] = ContextVar("kitup_current_context", default=None)
+
+
+def current_context() -> TaskContext:
+    """Return the context of the task currently executing.
+
+    Module functions and tasks call this to reach the run's :class:`TaskContext`
+    without receiving it as an argument. Raises ``TaskFailed`` when called
+    outside a running task.
+    """
+    context = _current.get()
+    if context is None:
+        raise TaskFailed("no active task context; module functions and tasks must run inside a task")
+    return context
+
+
+def set_current_context(context: TaskContext | None) -> Token[TaskContext | None]:
+    """Make ``context`` the active task context, or clear it with ``None``.
+
+    Returns a token for :func:`reset_current_context`.
+    """
+    return _current.set(context)
+
+
+def reset_current_context(token: Token[TaskContext | None]) -> None:
+    """Restore the task context to its value before ``set_current_context``."""
+    _current.reset(token)

@@ -189,8 +189,8 @@ def test_image_lifecycle(tmp_path: Path, fixture_archive: Path) -> None:
     from kitup.modules import podman
 
     @task("remove image")
-    def remove_image(ctx):
-        podman.image(ctx, {image!r}, state="absent")
+    def remove_image():
+        podman.image({image!r}, state="absent")
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "image_absent", remove_source) == 0
@@ -200,15 +200,13 @@ def test_image_lifecycle(tmp_path: Path, fixture_archive: Path) -> None:
     from kitup.modules import podman
 
     @task("pull image")
-    def pull_image(ctx):
+    def pull_image():
         podman.image(
-            ctx,
             {PULL_IMAGE!r},
             source={f"oci-archive:{fixture_archive}"!r},
         )
         assert len(ctx.changes) == 1
         podman.image(
-            ctx,
             {PULL_IMAGE!r},
             source={f"oci-archive:{fixture_archive}"!r},
         )
@@ -221,8 +219,8 @@ def test_image_lifecycle(tmp_path: Path, fixture_archive: Path) -> None:
     from kitup.modules import podman
 
     @task("remove image")
-    def remove_image(ctx):
-        podman.image(ctx, {PULL_IMAGE!r}, state="absent")
+    def remove_image():
+        podman.image({PULL_IMAGE!r}, state="absent")
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "image_pull_absent", absent_source) == 0
@@ -235,8 +233,8 @@ def test_image_pull_never_fails_when_missing(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("pull image")
-    def pull_image(ctx):
-        podman.image(ctx, {image!r}, pull="never")
+    def pull_image():
+        podman.image({image!r}, pull="never")
     """
     assert apply_bundle(tmp_path, "image_never", source) != 0
 
@@ -247,10 +245,10 @@ def test_build_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("build image")
-    def build_image(ctx):
-        podman.build(ctx, {str(FIXTURE)!r}, tag={BUILT_IMAGE!r})
+    def build_image():
+        podman.build({str(FIXTURE)!r}, tag={BUILT_IMAGE!r})
         assert len(ctx.changes) == 1
-        podman.build(ctx, {str(FIXTURE)!r}, tag={BUILT_IMAGE!r})
+        podman.build({str(FIXTURE)!r}, tag={BUILT_IMAGE!r})
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "build_image", source) == 0
@@ -260,8 +258,8 @@ def test_build_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("force build image")
-    def build_image(ctx):
-        podman.build(ctx, {str(FIXTURE)!r}, tag={BUILT_IMAGE!r}, force=True)
+    def build_image():
+        podman.build({str(FIXTURE)!r}, tag={BUILT_IMAGE!r}, force=True)
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "build_image_force", force_source) == 0
@@ -281,9 +279,8 @@ def test_build_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("build image with args")
-    def build_image(ctx):
+    def build_image():
         podman.build(
-            ctx,
             {str(args_context)!r},
             tag={args_image!r},
             build_args={{"MESSAGE": "kitup"}},
@@ -308,9 +305,8 @@ def test_build_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("build image with containerfile")
-    def build_image(ctx):
+    def build_image():
         podman.build(
-            ctx,
             {str(context)!r},
             tag={image!r},
             containerfile={str(containerfile)!r},
@@ -327,10 +323,10 @@ def test_tag_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("tag image")
-    def tag_image(ctx):
-        podman.tag(ctx, {BASE_IMAGE!r}, [{first!r}, {second!r}])
+    def tag_image():
+        podman.tag({BASE_IMAGE!r}, [{first!r}, {second!r}])
         assert len(ctx.changes) == 1
-        podman.tag(ctx, {BASE_IMAGE!r}, [{first!r}, {second!r}])
+        podman.tag({BASE_IMAGE!r}, [{first!r}, {second!r}])
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "tag_image", source) == 0
@@ -348,8 +344,8 @@ def test_tag_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("retag image")
-    def tag_image(ctx):
-        podman.tag(ctx, {BASE_IMAGE!r}, {target!r})
+    def tag_image():
+        podman.tag({BASE_IMAGE!r}, {target!r})
     """
     assert apply_bundle(tmp_path, "tag_update", update_source) == 0
     assert image_id(target) == image_id(BASE_IMAGE)
@@ -361,10 +357,10 @@ def test_container_lifecycle(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("start container")
-    def start_container(ctx):
-        podman.container(ctx, {name!r}, image={BASE_IMAGE!r})
+    def start_container():
+        podman.container({name!r}, image={BASE_IMAGE!r})
         assert len(ctx.changes) == 1
-        podman.container(ctx, {name!r}, image={BASE_IMAGE!r})
+        podman.container({name!r}, image={BASE_IMAGE!r})
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "container_start", source) == 0
@@ -375,8 +371,8 @@ def test_container_lifecycle(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("stop container")
-    def stop_container(ctx):
-        podman.container(ctx, {name!r}, state="stopped", stop_timeout=5)
+    def stop_container():
+        podman.container({name!r}, state="stopped", stop_timeout=5)
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "container_stop", stop_source) == 0
@@ -386,8 +382,8 @@ def test_container_lifecycle(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("start container")
-    def start_container(ctx):
-        podman.container(ctx, {name!r}, image={BASE_IMAGE!r})
+    def start_container():
+        podman.container({name!r}, image={BASE_IMAGE!r})
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "container_restart", restart_source) == 0
@@ -398,8 +394,8 @@ def test_container_lifecycle(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("remove container")
-    def remove_container(ctx):
-        podman.container(ctx, {name!r}, state="absent")
+    def remove_container():
+        podman.container({name!r}, state="absent")
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "container_absent", absent_source) == 0
@@ -412,8 +408,8 @@ def test_container_present_does_not_start(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("create container")
-    def create_container(ctx):
-        podman.container(ctx, {name!r}, state="present", image={BASE_IMAGE!r})
+    def create_container():
+        podman.container({name!r}, state="present", image={BASE_IMAGE!r})
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "container_present", source) == 0
@@ -426,9 +422,8 @@ def test_container_started_short_lived_container_is_rejected(tmp_path: Path) -> 
     from kitup.modules import podman
 
     @task("start short-lived container")
-    def start_container(ctx):
+    def start_container():
         podman.container(
-            ctx,
             {name!r},
             image={BASE_IMAGE!r},
             command=["/init", "exit"],
@@ -444,9 +439,8 @@ def test_container_options_and_command_string(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("create container with options")
-    def create_container(ctx):
+    def create_container():
         podman.container(
-            ctx,
             {name!r},
             state="present",
             image={BASE_IMAGE!r},
@@ -485,9 +479,8 @@ def test_container_options_and_command_string(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("create container with string command")
-    def create_container(ctx):
+    def create_container():
         podman.container(
-            ctx,
             {name!r},
             state="present",
             image={BASE_IMAGE!r},
@@ -514,8 +507,8 @@ def test_container_recreate_replaces_container(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("recreate container")
-    def recreate_container(ctx):
-        podman.container(ctx, {name!r}, image={BASE_IMAGE!r}, recreate=True)
+    def recreate_container():
+        podman.container({name!r}, image={BASE_IMAGE!r}, recreate=True)
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "container_recreate", source) == 0
@@ -530,9 +523,8 @@ def test_registry_system_scope(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("write registry")
-    def write_registry(ctx):
+    def write_registry():
         podman.registry(
-            ctx,
             {name!r},
             location="docker.io",
             prefix="mirror.example.com",
@@ -542,7 +534,6 @@ def test_registry_system_scope(tmp_path: Path) -> None:
         )
         assert len(ctx.changes) == 1
         podman.registry(
-            ctx,
             {name!r},
             location="docker.io",
             prefix="mirror.example.com",
@@ -565,8 +556,8 @@ def test_registry_system_scope(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("remove registry")
-    def remove_registry(ctx):
-        podman.registry(ctx, {name!r}, state="absent")
+    def remove_registry():
+        podman.registry({name!r}, state="absent")
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "registry_system_absent", absent_source) == 0
@@ -580,8 +571,8 @@ def test_registry_user_scope(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("write user registry")
-    def write_registry(ctx):
-        podman.registry(ctx, {name!r}, location="docker.io", scope="user")
+    def write_registry():
+        podman.registry({name!r}, location="docker.io", scope="user")
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "registry_user", source) == 0
@@ -592,8 +583,8 @@ def test_registry_user_scope(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("remove user registry")
-    def remove_registry(ctx):
-        podman.registry(ctx, {name!r}, state="absent", scope="user")
+    def remove_registry():
+        podman.registry({name!r}, state="absent", scope="user")
     """
     assert apply_bundle(tmp_path, "registry_user_absent", absent_source) == 0
     assert not path.exists()
@@ -643,9 +634,8 @@ def test_login_scenarios(tmp_path: Path, local_registry: str) -> None:
     from kitup.modules import podman
 
     @task("login")
-    def login(ctx):
+    def login():
         podman.login(
-            ctx,
             {local_registry!r},
             username="kitup",
             password="secret",
@@ -654,7 +644,6 @@ def test_login_scenarios(tmp_path: Path, local_registry: str) -> None:
         )
         assert len(ctx.changes) == 1
         podman.login(
-            ctx,
             {local_registry!r},
             username="kitup",
             password="secret",
@@ -678,10 +667,10 @@ def test_login_scenarios(tmp_path: Path, local_registry: str) -> None:
     from kitup.modules import podman
 
     @task("logout")
-    def logout(ctx):
-        podman.logout(ctx, {local_registry!r}, authfile={str(authfile)!r})
+    def logout():
+        podman.logout({local_registry!r}, authfile={str(authfile)!r})
         assert len(ctx.changes) == 1
-        podman.logout(ctx, {local_registry!r}, authfile={str(authfile)!r})
+        podman.logout({local_registry!r}, authfile={str(authfile)!r})
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "logout", logout_source) == 0
@@ -701,9 +690,8 @@ def test_login_scenarios(tmp_path: Path, local_registry: str) -> None:
     from kitup.modules import podman
 
     @task("force login")
-    def login(ctx):
+    def login():
         podman.login(
-            ctx,
             {local_registry!r},
             username="kitup",
             password="secret",
@@ -713,7 +701,6 @@ def test_login_scenarios(tmp_path: Path, local_registry: str) -> None:
         )
         assert len(ctx.changes) == 1
         podman.login(
-            ctx,
             {local_registry!r},
             username="kitup",
             password="secret",
@@ -730,9 +717,8 @@ def test_login_scenarios(tmp_path: Path, local_registry: str) -> None:
     from kitup.modules import podman
 
     @task("login")
-    def login(ctx):
+    def login():
         podman.login(
-            ctx,
             {local_registry!r},
             username="kitup",
             password="wrong",
@@ -751,16 +737,14 @@ def test_generate_systemd_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("generate systemd")
-    def generate(ctx):
+    def generate():
         podman.generate_systemd(
-            ctx,
             {name!r},
             dest={str(tmp_path)!r},
             scope="user",
         )
         assert len(ctx.changes) == 1
         podman.generate_systemd(
-            ctx,
             {name!r},
             dest={str(tmp_path)!r},
             scope="user",
@@ -785,9 +769,8 @@ def test_generate_systemd_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("generate systemd")
-    def generate(ctx):
+    def generate():
         podman.generate_systemd(
-            ctx,
             {name!r},
             dest={str(tmp_path)!r},
             scope="user",
@@ -822,8 +805,8 @@ def test_generate_systemd_system_scope(tmp_path: Path, rootful_image: str, clean
     from kitup.modules import podman
 
     @task("generate systemd")
-    def generate(ctx):
-        podman.generate_systemd(ctx, {name!r})
+    def generate():
+        podman.generate_systemd({name!r})
     """
     assert apply_bundle(tmp_path, "systemd_system", source) == 0
     assert run(sudo("test", "-e", str(unit)), check=False).returncode == 0
@@ -836,9 +819,8 @@ def test_quadlet_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("write quadlet")
-    def write_quadlet(ctx):
+    def write_quadlet():
         podman.quadlet(
-            ctx,
             {name!r},
             image={BASE_IMAGE!r},
             dest={str(tmp_path)!r},
@@ -850,7 +832,6 @@ def test_quadlet_scenarios(tmp_path: Path) -> None:
         )
         assert len(ctx.changes) == 1
         podman.quadlet(
-            ctx,
             {name!r},
             image={BASE_IMAGE!r},
             dest={str(tmp_path)!r},
@@ -893,9 +874,8 @@ def test_quadlet_scenarios(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("write quadlet")
-    def write_quadlet(ctx):
+    def write_quadlet():
         podman.quadlet(
-            ctx,
             {name!r},
             image={BASE_IMAGE!r},
             dest={str(tmp_path)!r},
@@ -914,8 +894,8 @@ def test_quadlet_system_scope(tmp_path: Path) -> None:
     from kitup.modules import podman
 
     @task("write quadlet")
-    def write_quadlet(ctx):
-        podman.quadlet(ctx, {name!r}, image={BASE_IMAGE!r})
+    def write_quadlet():
+        podman.quadlet({name!r}, image={BASE_IMAGE!r})
     """
     assert apply_bundle(tmp_path, "quadlet_system", source) == 0
     assert run(sudo("test", "-e", str(path)), check=False).returncode == 0
@@ -927,9 +907,9 @@ def test_rootful_path(tmp_path: Path, rootful_image: str, clean_rootful: None) -
     from kitup.modules import podman
 
     @task("rootful image and container")
-    def rootful(ctx):
-        podman.image(ctx, {rootful_image!r}, sudo=True)
-        podman.container(ctx, {name!r}, image={rootful_image!r}, sudo=True)
+    def rootful():
+        podman.image({rootful_image!r}, sudo=True)
+        podman.container({name!r}, image={rootful_image!r}, sudo=True)
         assert len(ctx.changes) == 1
     """
     assert apply_bundle(tmp_path, "rootful", source) == 0

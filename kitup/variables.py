@@ -78,10 +78,7 @@ def load_bundle_vars(values: Vars, bundles: Sequence[Bundle]) -> dict[Bundle, Va
 
 
 def filter_var_paths(
-    paths: Sequence[Path],
-    *,
-    include: Collection[str] | None = None,
-    exclude: Collection[str] | None = None,
+    paths: Sequence[Path], *, include: Collection[str] | None = None, exclude: Collection[str] | None = None
 ) -> tuple[Path, ...]:
     """Return var files restricted to the selected var ids."""
     _reject_duplicate_ids(paths)

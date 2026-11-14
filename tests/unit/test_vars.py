@@ -4,7 +4,7 @@ import pytest
 
 from kitup.errors import VarsError
 from kitup.registry import Bundle
-from kitup.vars import Vars, filter_var_paths, load_bundle_vars, load_vars
+from kitup.variables import Vars, filter_var_paths, load_bundle_vars, load_vars
 
 from ..helpers import write
 

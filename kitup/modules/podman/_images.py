@@ -16,7 +16,7 @@ from ..._utils.validation import (
     require_timeout,
     unique_strings,
 )
-from ...context import TaskContext
+from ...context import current_context
 from ...errors import TaskFailed
 from ...results import CallResult
 from ._common import (
@@ -32,7 +32,6 @@ from ._common import (
 
 
 def image(
-    ctx: TaskContext,
     name: str,
     *,
     source: str | None = None,
@@ -52,6 +51,7 @@ def image(
     are not verified afterwards because short-name resolution may store the
     image under a different local name.
     """
+    ctx = current_context()
     require_text(name, "image name")
     if source is not None:
         require_text(source, "image source")
@@ -112,7 +112,6 @@ def image(
 
 
 def build(
-    ctx: TaskContext,
     context: str | Path,
     *,
     tag: str,
@@ -130,6 +129,7 @@ def build(
     as-is. Content changes in the context are not detected. Use ``force=True``
     to rebuild an existing tag.
     """
+    ctx = current_context()
     require_path(context, "build context")
     require_text(tag, "image tag")
     require_bool(pull, "build pull")
@@ -171,8 +171,9 @@ def build(
     return ctx.changed(call)
 
 
-def tag(ctx: TaskContext, image: str, targets: str | Iterable[str], *, sudo: bool = False) -> CallResult:
+def tag(image: str, targets: str | Iterable[str], *, sudo: bool = False) -> CallResult:
     """Add one or more target names to a local image."""
+    ctx = current_context()
     require_text(image, "image name")
     wanted = unique_strings(normalize_strings(targets))
     require_collection(wanted, "image targets")

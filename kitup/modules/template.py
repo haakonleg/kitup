@@ -9,7 +9,7 @@ from .._utils import file_actions
 from .._utils.file_actions import PathPolicy, require_path_kind
 from .._utils.paths import expand_path
 from .._utils.validation import require_bool, require_metadata, require_mode, require_path
-from ..context import TaskContext
+from ..context import TaskContext, current_context
 from ..errors import TaskFailed
 from ..registry import module
 from ..results import CallResult
@@ -21,7 +21,6 @@ _RESERVED_VARIABLES: Final = frozenset({"vars", "facts"})
 
 
 def file(
-    ctx: TaskContext,
     src: str | Path,
     dest: str | Path,
     *,
@@ -41,6 +40,7 @@ def file(
     Undefined variables are errors. The rendered text is compared with the
     destination and only written when it differs.
     """
+    ctx = current_context()
     require_path(src, "template source")
     require_path(dest, "template destination")
     require_metadata(owner, group)

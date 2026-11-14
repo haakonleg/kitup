@@ -33,21 +33,20 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
         from kitup.modules import files, template
 
         @task("write privileged marker")
-        def write_privileged(ctx):
+        def write_privileged():
             path = {WORKER_PATH!r}
-            files.file(ctx, path, content="applied\\n", mode=0o600, sudo=True)
+            files.file(path, content="applied\\n", mode=0o600, sudo=True)
             if not ctx.dry_run:
                 assert ctx.probe(["cat", path], sudo=True).stdout == "applied\\n"
-                files.file(ctx, path, state="absent", sudo=True)
+                files.file(path, state="absent", sudo=True)
 
         @task("write marker")
-        def write_marker(ctx):
-            files.file(ctx, {str(tmp_path / "marker.txt")!r}, content="applied\\n")
+        def write_marker():
+            files.file({str(tmp_path / "marker.txt")!r}, content="applied\\n")
 
         @task("render template")
-        def render_template(ctx):
+        def render_template():
             template.file(
-                ctx,
                 "message.j2",
                 {str(rendered_path)!r},
                 variables={{"name": "zipapp"}},

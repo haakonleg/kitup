@@ -152,12 +152,7 @@ def set_key(lines: list[str], table: str | None, key: str, value_text: str) -> t
 
 
 def _set_key_scanned(
-    lines: list[str],
-    headers: list[_Header],
-    entries: list[_Entry],
-    table: str | None,
-    key: str,
-    value_text: str,
+    lines: list[str], headers: list[_Header], entries: list[_Entry], table: str | None, key: str, value_text: str
 ) -> tuple[list[str], _KeyAction]:
     """Set a key using an existing header and entry scan."""
     span = _table_span(lines, headers, table)
@@ -227,12 +222,7 @@ def set_array(lines: list[str], table: str | None, key: str, items: list[str]) -
 
 
 def _set_array_scanned(
-    lines: list[str],
-    headers: list[_Header],
-    entries: list[_Entry],
-    table: str | None,
-    key: str,
-    items: list[str],
+    lines: list[str], headers: list[_Header], entries: list[_Entry], table: str | None, key: str, items: list[str]
 ) -> tuple[list[str], _KeyAction]:
     """Set an array using an existing header and entry scan."""
     span = _table_span(lines, headers, table)
@@ -330,11 +320,7 @@ def apply_toml_key(
 
 
 def _set_array_value(
-    lines: list[str],
-    table: str | None,
-    key: str,
-    items: list[str],
-    value_text: str,
+    lines: list[str], table: str | None, key: str, items: list[str], value_text: str
 ) -> tuple[list[str], _KeyAction]:
     """Set an array value, keeping an existing array entry's layout.
 
@@ -459,9 +445,7 @@ def _find_entry(entries: list[_Entry], table: str | None, key: str) -> _Entry | 
 
 
 def _scan_resolved(
-    lines: list[str],
-    table: str | None,
-    key: str,
+    lines: list[str], table: str | None, key: str
 ) -> tuple[list[_Header], list[_Entry], str | None, str]:
     """Scan ``lines`` and resolve a dotted ``key`` against existing sub-table and dotted-key forms."""
     headers, entries = _scan(lines)
@@ -498,11 +482,7 @@ def _table_span(lines: list[str], headers: list[_Header], table: str | None) -> 
 
 
 def _insert_block(
-    lines: list[str],
-    span: tuple[int, int] | None,
-    table: str | None,
-    block: list[str],
-    nl: str,
+    lines: list[str], span: tuple[int, int] | None, table: str | None, block: list[str], nl: str
 ) -> list[str]:
     """Insert ``block`` at the end of the table span, creating the table when missing."""
     new_lines = list(lines)
@@ -567,10 +547,7 @@ def _value_equals(entry: _Entry, value_text: str) -> bool:
 
 
 def _resolve_target(
-    headers: list[_Header],
-    entries: list[_Entry],
-    table: str | None,
-    key: str,
+    headers: list[_Header], entries: list[_Entry], table: str | None, key: str
 ) -> tuple[str | None, str]:
     """Resolve a dotted ``key`` against existing sub-tables and dotted keys.
 
