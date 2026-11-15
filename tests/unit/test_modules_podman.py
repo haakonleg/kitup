@@ -1070,14 +1070,16 @@ def test_dry_run_does_not_write_files(tmp_path):
     assert len(ctx.changes) == 2
 
 
-def test_dry_run_rejects_a_missing_parent(tmp_path):
-    context(tmp_path, dry_run=True, sudo=FakeSudo(is_root=True))
+def test_dry_run_defers_missing_parent_checks(tmp_path):
+    ctx = context(tmp_path, dry_run=True, sudo=FakeSudo(is_root=True))
     missing = tmp_path / "missing"
 
-    with pytest.raises(TaskFailed, match="parent directory does not exist"):
-        podman.registry("example", location="docker.io", path=missing / "example.conf")
-    with pytest.raises(TaskFailed, match="parent directory does not exist"):
-        podman.quadlet(CONTAINER, image=IMAGE, dest=missing)
+    podman.registry("example", location="docker.io", path=missing / "example.conf")
+    podman.quadlet(CONTAINER, image=IMAGE, dest=missing)
+
+    assert not missing.exists()
+    assert len(ctx.changes) == 2
+    assert all(change.changed for change in ctx.changes)
 
 
 def test_invalid_boolean_and_timeout_arguments_are_rejected(tmp_path):

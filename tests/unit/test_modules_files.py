@@ -212,25 +212,48 @@ def test_file_requires_parent_directory(tmp_path):
         files.file(tmp_path / "missing" / "file", content="content")
 
 
-def test_file_requires_parent_directory_also_in_dry_run(tmp_path):
-    context(tmp_path, dry_run=True)
+def test_file_defers_parent_directory_check_in_dry_run(tmp_path):
+    # An earlier task may create the parent in a real run, so a dry run reports
+    # the write without requiring the parent to exist yet.
+    ctx = context(tmp_path, dry_run=True)
 
-    with pytest.raises(TaskFailed, match="parent directory"):
-        files.file(tmp_path / "missing" / "file", content="content")
+    files.file(tmp_path / "missing" / "file", content="content")
+
     assert not (tmp_path / "missing").exists()
+    assert len(ctx.changes) == 1
+    assert ctx.changes[0].changed
 
 
-def test_copy_requires_parent_directory_also_in_dry_run(tmp_path):
+def test_copy_defers_parent_directory_check_in_dry_run(tmp_path):
     source = tmp_path / "source"
     source.write_text("data\n")
-    context(tmp_path, dry_run=True)
+    ctx = context(tmp_path, dry_run=True)
 
-    with pytest.raises(TaskFailed, match="parent directory"):
-        files.copy(source, tmp_path / "missing" / "dest")
-    with pytest.raises(TaskFailed, match="parent directory"):
-        files.copy(source, str(tmp_path / "missing-dir") + "/")
+    files.copy(source, tmp_path / "missing" / "dest")
+    files.copy(source, str(tmp_path / "missing-dir") + "/")
+
     assert not (tmp_path / "missing").exists()
     assert not (tmp_path / "missing-dir").exists()
+    assert len(ctx.changes) == 2
+    assert all(change.changed for change in ctx.changes)
+
+
+def test_dry_run_allows_a_parent_created_by_an_earlier_task(tmp_path):
+    # Mirrors a bundle that creates a directory and then writes into it: the
+    # dry run must not fail just because the directory does not exist yet.
+    directory = tmp_path / "plugins"
+    source = tmp_path / "source"
+    source.write_text("data\n")
+    ctx = context(tmp_path, dry_run=True)
+
+    files.directory(directory)
+    files.file(directory / "init.zsh", content="setopt\n")
+    files.copy(source, directory / "plugin.zsh")
+    files.symlink("init.zsh", directory / "link")
+
+    assert not directory.exists()
+    assert len(ctx.changes) == 4
+    assert all(change.changed for change in ctx.changes)
 
 
 def test_file_refuses_directory_in_both_states(tmp_path):
@@ -624,6 +647,17 @@ def test_directory_creates_and_is_idempotent(tmp_path):
     assert ctx.calls[-1].summary == f"ensure directory {path}"
 
 
+def test_directory_defers_parent_directory_check_in_dry_run(tmp_path):
+    path = tmp_path / "missing" / "newdir"
+    ctx = context(tmp_path, dry_run=True)
+
+    files.directory(path)
+
+    assert not (tmp_path / "missing").exists()
+    assert len(ctx.changes) == 1
+    assert ctx.changes[0].changed
+
+
 def test_directory_refuses_file_in_both_states(tmp_path):
     path = tmp_path / "file"
     path.write_text("x")
@@ -723,6 +757,17 @@ def test_symlink_refuses_directory(tmp_path):
     with pytest.raises(TaskFailed, match="directory"):
         context(tmp_path)
         files.symlink("new", link)
+
+
+def test_symlink_defers_parent_directory_check_in_dry_run(tmp_path):
+    link = tmp_path / "missing" / "link"
+    ctx = context(tmp_path, dry_run=True)
+
+    files.symlink("new", link)
+
+    assert not (tmp_path / "missing").exists()
+    assert len(ctx.changes) == 1
+    assert ctx.changes[0].changed
 
 
 def test_copy_preserves_mode_and_is_idempotent(tmp_path):
@@ -972,6 +1017,20 @@ def test_move_dry_run_reports_without_moving(tmp_path):
     assert source.read_text() == "value\n"
     assert not dest.exists()
     assert len(ctx.changes) == 1
+
+
+def test_move_defers_parent_directory_check_in_dry_run(tmp_path):
+    source = tmp_path / "source.conf"
+    source.write_text("value\n")
+    dest = tmp_path / "missing" / "dest.conf"
+    ctx = context(tmp_path, dry_run=True)
+
+    files.move(source, dest)
+
+    assert source.read_text() == "value\n"
+    assert not (tmp_path / "missing").exists()
+    assert len(ctx.changes) == 1
+    assert ctx.changes[0].changed
 
 
 def test_move_missing_source_without_destination_fails(tmp_path):

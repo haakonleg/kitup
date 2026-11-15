@@ -111,7 +111,7 @@ def archive(
     target = expand_path(dest, error=TaskFailed)
     target_info = file_actions.stat_local(target)
     require_path_kind(target, target_info, policy=PathPolicy.DIRECTORY, label="archive destination")
-    if target_info is None:
+    if target_info is None and not ctx.dry_run:
         file_actions.require_parent_local(target)
     if creates is not None:
         marker = expand_path(creates, error=TaskFailed)
@@ -154,7 +154,7 @@ def file(src: str | Path, dest: str | Path, *, mode: int | str | None = None) ->
     _reject_archive(source)
     target, info = _single_destination(source, dest)
     require_path_kind(target, info, policy=PathPolicy.FILE, label="decompressed destination")
-    if info is None:
+    if info is None and not ctx.dry_run:
         file_actions.require_parent_local(target)
 
     if ctx.dry_run:

@@ -43,7 +43,7 @@ def registry(
 ) -> CallResult:
     """Ensure a ``registries.conf.d`` drop-in exists or is absent.
 
-    The parent directory must already exist; create it with
+    The parent directory must already exist in a real run; create it with
     :func:`kitup.modules.files.directory` first.
     """
     ctx = current_context()
@@ -86,7 +86,6 @@ def registry(
         blocked=blocked,
         mirrors=wanted_mirrors,
     )
-    file_actions.require_parent(ctx, target, sudo=sudo)
     return ctx.changed(
         file_actions.apply_bytes(
             ctx,
@@ -99,7 +98,6 @@ def registry(
             unchanged_summary=f"ensure registry {name} in {target}",
             data={"path": str(target), "registry": name},
             sudo=sudo,
-            check_parent=False,
         )
     )
 

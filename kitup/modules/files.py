@@ -91,7 +91,6 @@ def file(
         snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo, content_size=len(data))
         summary = f"write {target}"
 
-    file_actions.require_parent(ctx, target, sudo=sudo)
     return ctx.changed(
         file_actions.apply_bytes(
             ctx,
@@ -105,7 +104,6 @@ def file(
             unchanged_summary=f"ensure file {target}",
             data={"path": str(target)},
             sudo=sudo,
-            check_parent=False,
         )
     )
 
@@ -167,9 +165,6 @@ def copy(
         if target_info is not None and target_info.is_file:
             target_content = file_actions.read_bytes(ctx, target, target_info, sudo=sudo)
 
-    if target_info is None:
-        file_actions.require_parent(ctx, target, sudo=sudo)
-
     def write() -> None:
         file_actions.copy_file(
             ctx,
@@ -193,7 +188,6 @@ def copy(
             write=write,
             owner=owner,
             group=group,
-            check_parent=False,
         )
     )
 
@@ -252,7 +246,6 @@ def move(
     if source.absolute() == target.absolute():
         return ctx.changed(reconcile())
 
-    file_actions.require_parent(ctx, target, sudo=sudo)
     move_summary = f"move {source} -> {target}"
     metadata_requested = mode is not None or owner is not None or group is not None
 
@@ -266,6 +259,7 @@ def move(
             return ctx.changed(result(metadata=True))
         return ctx.changed(result(metadata=False))
 
+    file_actions.require_parent(ctx, target, sudo=sudo)
     _move(ctx, source, target, sudo=sudo)
     if not metadata_requested:
         return ctx.changed(result(metadata=False))
@@ -561,10 +555,10 @@ def directory(
     require_path_kind(target, info, policy=PathPolicy.DIRECTORY)
 
     if info is None:
-        file_actions.require_parent(ctx, target, sudo=sudo)
         if ctx.dry_run:
             file_actions.resolve_metadata(owner, group)
             return ctx.changed(CallResult(changed=True, summary=f"mkdir {target}", path=str(target)))
+        file_actions.require_parent(ctx, target, sudo=sudo)
         file_actions.make_directory(
             ctx,
             target,
@@ -604,10 +598,10 @@ def symlink(target: str | Path, path: str | Path, *, sudo: bool = False) -> Call
         return ctx.changed(changed=False, summary=f"ensure symlink {link} -> {desired}", path=str(link), target=desired)
     require_path_kind(link, info, policy=PathPolicy.NOT_DIRECTORY)
 
-    file_actions.require_parent(ctx, link, sudo=sudo)
     result = CallResult(changed=True, summary=f"symlink {link} -> {desired}", path=str(link), target=desired)
     if ctx.dry_run:
         return ctx.changed(result)
+    file_actions.require_parent(ctx, link, sudo=sudo)
     if file_actions.privileged(ctx, sudo=sudo):
         file_actions.worker_request(ctx, "symlink", path=str(link), target=desired)
         return ctx.changed(result)

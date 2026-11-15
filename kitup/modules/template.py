@@ -48,7 +48,6 @@ def file(
     require_bool(sudo, "template sudo")
     extra = _require_variables(variables)
     target = expand_path(dest, error=TaskFailed)
-    file_actions.require_parent(ctx, target, sudo=sudo)
 
     source = ctx.resolve_source(src)
     text = _read_template(ctx, source)
@@ -66,7 +65,6 @@ def file(
             unchanged_summary=f"ensure {target} from {source}",
             data={"dest": str(target), "src": str(source)},
             sudo=sudo,
-            check_parent=False,
         )
     )
 

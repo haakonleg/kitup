@@ -182,7 +182,6 @@ def to_file(
             )
         )
 
-    file_actions.require_parent_local(target)
     if ctx.dry_run:
         return ctx.changed(
             CallResult(
@@ -192,6 +191,7 @@ def to_file(
             )
         )
 
+    file_actions.require_parent_local(target)
     with timed() as timing:
         temporary, checksum_dest = _download_to_temp(
             url,

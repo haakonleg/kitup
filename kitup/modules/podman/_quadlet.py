@@ -37,8 +37,9 @@ def quadlet(
 ) -> CallResult:
     """Write a Quadlet ``.container`` file.
 
-    The parent directory must already exist. The Quadlet is written but not
-    reloaded; use :func:`kitup.modules.systemd.daemon_reload` afterwards.
+    The parent directory must already exist in a real run. The Quadlet is
+    written but not reloaded; use :func:`kitup.modules.systemd.daemon_reload`
+    afterwards.
     """
     ctx = current_context()
     require_scope(scope, "podman", is_root=ctx.sudo.is_root)
@@ -79,7 +80,6 @@ def quadlet(
         extra_lines=extra_lines,
         install_target=target,
     )
-    file_actions.require_parent(ctx, path, sudo=sudo)
     return ctx.changed(
         file_actions.apply_bytes(
             ctx,
@@ -92,7 +92,6 @@ def quadlet(
             unchanged_summary=f"ensure quadlet {name} in {path}",
             data={"path": str(path), "container": name},
             sudo=sudo,
-            check_parent=False,
         )
     )
 

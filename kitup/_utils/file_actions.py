@@ -387,8 +387,7 @@ def apply_change(
 
     ``write`` performs the actual mutation. ``check_parent`` verifies that the
     destination's parent exists before writing. A dry run returns before the
-    parent check, matching :func:`apply_bytes`; callers that need the check in a
-    dry run must perform it themselves.
+    parent check, because an earlier task may create the parent in a real run.
     """
     if new is not None:
         emit_diff(ctx, path, old, new)

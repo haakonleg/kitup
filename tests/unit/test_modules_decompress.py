@@ -413,6 +413,17 @@ def test_archive_dry_run_reports_without_writing(tmp_path, tar_archive):
     assert ctx.changes[0].size == 0
 
 
+def test_archive_dry_run_defers_missing_parent_check(tmp_path, tar_archive):
+    dest = tmp_path / "missing" / "dest"
+    ctx = make_context(tmp_path, dry_run=True)
+
+    decompress.archive(tar_archive, dest)
+
+    assert not (tmp_path / "missing").exists()
+    assert len(ctx.changes) == 1
+    assert ctx.changes[0].changed
+
+
 @pytest.mark.parametrize("name", ["../evil", "/absolute", "a/../../evil"])
 def test_archive_rejects_unsafe_paths(tmp_path, name):
     archive = tmp_path / "unsafe.tar"
@@ -666,6 +677,19 @@ def test_file_dry_run_reports_without_writing(tmp_path):
 
     assert not dest.exists()
     assert len(ctx.changes) == 1
+
+
+def test_file_dry_run_defers_missing_parent_check(tmp_path):
+    source = tmp_path / "data.txt.gz"
+    source.write_bytes(gzip.compress(b"payload\n"))
+    dest = tmp_path / "missing" / "out.txt"
+    ctx = make_context(tmp_path, dry_run=True)
+
+    decompress.file(source, dest)
+
+    assert not (tmp_path / "missing").exists()
+    assert len(ctx.changes) == 1
+    assert ctx.changes[0].changed
 
 
 def test_file_rejects_archives(tmp_path):

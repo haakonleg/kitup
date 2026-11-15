@@ -347,6 +347,19 @@ def test_to_file_dry_run_does_not_fetch_or_write(tmp_path, http_server):
     assert ctx.changes[0].size == 0
 
 
+def test_to_file_dry_run_defers_missing_parent_check(tmp_path, http_server):
+    state, base = http_server
+    target = tmp_path / "missing" / "file.txt"
+    ctx = make_context(tmp_path, dry_run=True)
+
+    download.to_file(f"{base}/file.txt", target)
+
+    assert state.requests == 0
+    assert not (tmp_path / "missing").exists()
+    assert len(ctx.changes) == 1
+    assert ctx.changes[0].changed
+
+
 def test_to_file_uses_url_basename_for_directory_destination(tmp_path, http_server):
     state, base = http_server
     directory = tmp_path / "downloads"
