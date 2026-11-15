@@ -21,6 +21,10 @@ DRY_FILE = Path("/etc/kitup-integration-dry.conf")
 DRY_LINK = Path("/etc/kitup-integration-dry.link")
 NONEMPTY_DIR = WORKER_ROOT / "nonempty"
 NONEMPTY_FILE = NONEMPTY_DIR / "keep.conf"
+PARENTS_ROOT = Path("/etc/kitup-integration-parents")
+PARENTS_EXISTING = PARENTS_ROOT / "existing"
+PARENTS_NEW = PARENTS_EXISTING / "new"
+PARENTS_TARGET = PARENTS_NEW / "leaf"
 MOVE_PATH = Path("/etc/kitup-integration-move.conf")
 LARGE_PATH = Path("/etc/kitup-integration-large.conf")
 
@@ -33,7 +37,7 @@ def managed_paths_absent() -> Iterator[None]:
 
 
 def _cleanup() -> None:
-    for path in (MANAGED_PATH, WORKER_ROOT, DRY_FILE, DRY_LINK, MOVE_PATH, LARGE_PATH):
+    for path in (MANAGED_PATH, WORKER_ROOT, PARENTS_ROOT, DRY_FILE, DRY_LINK, MOVE_PATH, LARGE_PATH):
         run(sudo("rm", "-rf", str(path)), check=False)
 
 
@@ -271,6 +275,37 @@ def test_privileged_directory_requires_force_for_non_empty(tmp_path: Path) -> No
 
     assert run_kitup("apply", root) == 1
     assert exists(NONEMPTY_FILE)
+
+
+def test_privileged_directory_parents_preserve_existing_modes(tmp_path: Path) -> None:
+    run(sudo("mkdir", "-p", str(PARENTS_EXISTING)))
+    run(sudo("chmod", "0711", str(PARENTS_EXISTING)))
+    root = write_bundle(
+        tmp_path / "parents",
+        "files_parents",
+        f"""
+        from kitup.modules import files
+
+        @task("create a privileged directory tree")
+        def create():
+            files.directory(
+                {str(PARENTS_TARGET)!r},
+                mode=0o750,
+                owner="root",
+                group="root",
+                parents=True,
+                sudo=True,
+            )
+        """,
+    )
+
+    assert run_kitup("apply", root) == 0
+    assert run(sudo("stat", "-c", "%a", str(PARENTS_EXISTING))).stdout.strip() == "711"
+    assert run(sudo("stat", "-c", "%a %u %g", str(PARENTS_NEW))).stdout.strip() == "750 0 0"
+    assert run(sudo("stat", "-c", "%a %u %g", str(PARENTS_TARGET))).stdout.strip() == "750 0 0"
+
+    assert run_kitup("apply", root) == 0
+    assert run(sudo("stat", "-c", "%a", str(PARENTS_EXISTING))).stdout.strip() == "711"
 
 
 def test_privileged_large_file_copy_is_idempotent(tmp_path: Path) -> None:

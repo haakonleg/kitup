@@ -518,19 +518,28 @@ def directory(
     *,
     state: State = "present",
     force: bool = False,
+    parents: bool = False,
     mode: int | str | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
     sudo: bool = False,
 ) -> CallResult:
-    """Ensure a directory exists or is absent."""
+    """Ensure a directory exists or is absent.
+
+    ``parents=True`` creates missing parent directories with the same ``mode``,
+    ``owner``, and ``group`` as the target. Existing parents are never modified,
+    so their mode and ownership are preserved.
+    """
     ctx = current_context()
     require_state(state, "directory")
     require_path(path, "directory path")
     require_metadata(owner, group)
     mode = normalize_mode(mode)
     require_bool(force, "directory force")
+    require_bool(parents, "directory parents")
     require_bool(sudo, "directory sudo")
+    if parents and state == "absent":
+        raise TaskFailed("directory parents=True requires state 'present'")
 
     target = expand_path(path, error=TaskFailed)
     if state == "absent":
@@ -555,19 +564,33 @@ def directory(
     require_path_kind(target, info, policy=PathPolicy.DIRECTORY)
 
     if info is None:
-        if ctx.dry_run:
-            file_actions.resolve_metadata(owner, group)
-            return ctx.changed(CallResult(changed=True, summary=f"mkdir {target}", path=str(target)))
-        file_actions.require_parent(ctx, target, sudo=sudo)
-        file_actions.make_directory(
-            ctx,
-            target,
-            mode=0o755 if mode is None else mode,
-            owner=owner,
-            group=group,
-            sudo=sudo,
+        directory_mode = 0o755 if mode is None else mode
+        file_actions.resolve_metadata(owner, group)
+        created = (
+            file_actions.ensure_parent(
+                ctx,
+                target,
+                sudo=sudo,
+                mode=directory_mode,
+                owner=owner,
+                group=group,
+            )
+            if parents
+            else []
         )
-        return ctx.changed(CallResult(changed=True, summary=f"mkdir {target}", path=str(target)))
+        if not ctx.dry_run:
+            if not parents:
+                file_actions.require_parent(ctx, target, sudo=sudo)
+            file_actions.make_directory(
+                ctx,
+                target,
+                mode=directory_mode,
+                owner=owner,
+                group=group,
+                sudo=sudo,
+            )
+        summary = f"mkdir -p {target}" if created else f"mkdir {target}"
+        return ctx.changed(CallResult(changed=True, summary=summary, path=str(target)))
 
     return ctx.changed(
         file_actions.reconcile_metadata(

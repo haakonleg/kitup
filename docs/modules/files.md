@@ -224,7 +224,7 @@ files.toml("/etc/app/config.toml", table="server", key="port", state="absent", s
 files.toml("/etc/app/config.toml", table="legacy", state="absent", sudo=True)
 ```
 
-## `directory(path, *, state="present", force=False, mode=None, owner=None, group=None, sudo=False)`
+## `directory(path, *, state="present", force=False, parents=False, mode=None, owner=None, group=None, sudo=False)`
 
 Ensure a directory exists or is absent.
 
@@ -233,16 +233,25 @@ Ensure a directory exists or is absent.
 - `path` — directory to create, update, or remove.
 - `state="absent"` removes an empty directory; `force=True` removes it
   recursively.
+- `parents=True` also creates any missing parent directories, outermost first.
+  New parents receive the same `mode`, `owner`, and `group` as the target.
+  Existing parents are never modified, so their mode and ownership are
+  preserved. It requires `state="present"`.
 - `mode=None` preserves an existing mode; new directories default to `0o755`.
   Accepts an integer or an octal string such as `"0755"`.
 - `owner` and `group` accept a name or numeric ID.
 - `sudo=True` performs the operation as root.
 
-Existing non-directory paths and symlinks are rejected.
+Existing non-directory paths and symlinks are rejected. With `parents=True`,
+an existing parent that is not a directory is rejected as well.
 
 ### Result fields
 
 - `path` — managed directory path.
+
+```python
+files.directory("/srv/app/data", mode=0o750, owner="app", group="app", parents=True, sudo=True)
+```
 
 ## `symlink(target, path, *, sudo=False)`
 

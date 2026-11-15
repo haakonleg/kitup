@@ -690,6 +690,106 @@ def test_directory_new_directory_uses_default_mode(tmp_path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o755
 
 
+def test_directory_parents_creates_missing_ancestors(tmp_path):
+    path = tmp_path / "one" / "two" / "three"
+    ctx = context(tmp_path)
+
+    result = files.directory(path, mode=0o700, parents=True)
+
+    assert path.is_dir()
+    for directory in (tmp_path / "one", tmp_path / "one" / "two", path):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    assert len(ctx.changes) == 1
+    assert result.summary == f"mkdir -p {path}"
+
+
+def test_directory_parents_never_changes_existing_parent_modes(tmp_path):
+    parent = tmp_path / "one" / "two"
+    parent.mkdir(parents=True)
+    (tmp_path / "one").chmod(0o750)
+    parent.chmod(0o711)
+    path = parent / "three"
+    ctx = context(tmp_path)
+
+    result = files.directory(path, mode=0o700, parents=True)
+
+    assert stat.S_IMODE((tmp_path / "one").stat().st_mode) == 0o750
+    assert stat.S_IMODE(parent.stat().st_mode) == 0o711
+    assert stat.S_IMODE(path.stat().st_mode) == 0o700
+    assert result.summary == f"mkdir {path}"
+
+    files.directory(path, mode=0o700, parents=True)
+
+    assert stat.S_IMODE((tmp_path / "one").stat().st_mode) == 0o750
+    assert stat.S_IMODE(parent.stat().st_mode) == 0o711
+    assert len(ctx.changes) == 1
+
+
+def test_directory_parents_is_idempotent(tmp_path):
+    path = tmp_path / "one" / "two"
+    ctx = context(tmp_path)
+
+    files.directory(path, mode=0o700, parents=True)
+    files.directory(path, mode=0o700, parents=True)
+
+    assert len(ctx.changes) == 1
+    assert ctx.calls[-1].summary == f"ensure directory {path}"
+
+
+def test_directory_parents_dry_run_creates_nothing(tmp_path):
+    path = tmp_path / "one" / "two"
+    context(tmp_path, dry_run=True)
+
+    result = files.directory(path, parents=True)
+
+    assert not (tmp_path / "one").exists()
+    assert result.changed
+    assert result.summary == f"mkdir -p {path}"
+
+
+def test_directory_parents_requires_present_state(tmp_path):
+    context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="parents"):
+        files.directory(tmp_path / "dir", state="absent", parents=True)
+
+
+def test_directory_parents_accepts_a_symlinked_parent(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    context(tmp_path)
+
+    files.directory(link / "child", parents=True)
+
+    assert (real / "child").is_dir()
+
+
+def test_directory_parents_rejects_a_parent_file(tmp_path):
+    parent = tmp_path / "file"
+    parent.write_text("keep\n")
+    context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="could not stat"):
+        files.directory(parent / "child", parents=True)
+
+    assert parent.read_text() == "keep\n"
+
+
+def test_privileged_directory_parents_use_worker(tmp_path):
+    path = tmp_path / "one" / "two"
+    ctx = privileged_context(tmp_path)
+
+    try:
+        files.directory(path, mode=0o700, parents=True, sudo=True)
+
+        assert stat.S_IMODE((tmp_path / "one").stat().st_mode) == 0o700
+        assert stat.S_IMODE(path.stat().st_mode) == 0o700
+    finally:
+        ctx.close()
+
+
 def test_directory_absent_removes_empty_directory(tmp_path):
     path = tmp_path / "olddir"
     path.mkdir()

@@ -224,23 +224,38 @@ def make_directory(
         raise TaskFailed(f"could not create directory {path}: {exc}") from exc
 
 
-def ensure_parent(ctx: TaskContext, path: Path, *, sudo: bool, mode: int = 0o755) -> None:
+def ensure_parent(
+    ctx: TaskContext,
+    path: Path,
+    *,
+    sudo: bool,
+    mode: int = 0o755,
+    owner: str | int | None = None,
+    group: str | int | None = None,
+) -> list[Path]:
     """Create missing parent directories of ``path``, outermost first.
 
-    Does nothing when the parent already exists and never mutates anything
-    during a dry run.
+    Existing parents are validated as directories and left untouched, so their
+    mode and ownership never change. Returns the created directories, outermost
+    first; a dry run reports them without creating anything.
     """
     chain: list[Path] = []
     current = path.parent
-    while stat(ctx, current, sudo=sudo) is None:
+    while True:
+        info = stat(ctx, current, sudo=sudo, follow=True)
+        if info is not None:
+            require_path_kind(current, info, policy=PathPolicy.DIRECTORY, label="parent directory")
+            break
         chain.append(current)
         if current.parent == current:
             break
         current = current.parent
+    created = list(reversed(chain))
     if ctx.dry_run:
-        return
-    for directory in reversed(chain):
-        make_directory(ctx, directory, mode=mode, sudo=sudo)
+        return created
+    for directory in created:
+        make_directory(ctx, directory, mode=mode, owner=owner, group=group, sudo=sudo)
+    return created
 
 
 def resolve_metadata(owner: str | int | None, group: str | int | None) -> None:
