@@ -28,8 +28,9 @@ the result first.
 ### `list`
 
 Show the active project, vars, bundles, and tasks without running anything.
-Bundle ids and display names are shown. Add `--verbose` to include descriptions,
-dependencies, bundle var files, task ids, and tags.
+Bundles are shown as the display name followed by the id in parentheses, or
+just the id when no display name is set. Add `--verbose` to include
+descriptions, dependencies, bundle var files, task ids, and tags.
 
 ### `list-modules`
 

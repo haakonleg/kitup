@@ -119,4 +119,4 @@ def test_zipapp_init_check_and_list(tmp_path: Path) -> None:
         check=False,
     )
     assert listed.returncode == 0, listed.stderr
-    assert "bundle: example" in listed.stdout
+    assert "bundle: Example bundle (example)" in listed.stdout

@@ -32,9 +32,9 @@ _DIM: Final = "\033[2m"
 
 
 def bundle_label(bundle: Bundle) -> str:
-    """Return the standard bundle label: ``id (name)`` when they differ."""
+    """Return the standard bundle label: ``name (id)`` when a name is set."""
     if bundle.name and bundle.name != bundle.id:
-        return f"{bundle.id} ({bundle.name})"
+        return f"{bundle.name} ({bundle.id})"
     return bundle.id
 
 

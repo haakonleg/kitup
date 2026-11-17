@@ -178,7 +178,7 @@ def test_list_shows_ids_and_display_names(tmp_path, capsys):
     code = cli.main(["list", str(tmp_path), "--no-color"])
 
     assert code == 0
-    assert "bundle: base (Base system)" in capsys.readouterr().out
+    assert "bundle: Base system (base)" in capsys.readouterr().out
 
 
 def test_list_non_verbose_shows_only_task_names(tmp_path, capsys):
@@ -203,7 +203,7 @@ def test_list_non_verbose_shows_only_task_names(tmp_path, capsys):
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "bundle: base (Base system)" in out
+    assert "bundle: Base system (base)" in out
     assert "- Install packages" in out
     assert "Core packages" not in out
     assert "tags:" not in out
@@ -310,8 +310,8 @@ def test_shared_task_module_is_listed_and_applied_in_each_bundle(tmp_path, capsy
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "bundle: one (One)" in out
-    assert "bundle: two (Two)" in out
+    assert "bundle: One (one)" in out
+    assert "bundle: Two (two)" in out
     assert out.count("Shared") == 2
 
 
@@ -621,7 +621,7 @@ def test_init_scaffolds_a_working_project(tmp_path, capsys):
 
     assert cli.main(["check", str(root), "--no-color"]) == 0
     assert cli.main(["list", str(root), "--no-color"]) == 0
-    assert "bundle: example" in capsys.readouterr().out
+    assert "bundle: Example bundle (example)" in capsys.readouterr().out
 
 
 def test_init_refuses_to_overwrite_without_force(tmp_path, capsys):

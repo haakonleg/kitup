@@ -44,7 +44,7 @@ def test_project_merges_vars_and_resolves_dependencies(tmp_path: Path, capsys: p
 
     out = capsys.readouterr().out
     assert "base/child" in out
-    assert out.index("bundle: base (Base)") < out.index("bundle: extra (Extra)")
+    assert out.index("bundle: Base (base)") < out.index("bundle: Extra (extra)")
 
 
 def test_preset_selects_bundles(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
