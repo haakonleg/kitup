@@ -131,7 +131,8 @@ def configure_ssh_and_firewall():
 - Record the operation with `ctx.changed(...)` and return the resulting
   `CallResult`. Use `changed=False` when nothing changed.
 - Use `ctx.probe([...])` for read-only queries and `ctx.run([...])` for
-  mutations.
+  mutations. Pass `check=False` to `ctx.run()` when the exit code is part of
+  the logic; commands that cannot start are reported as exit code `127`.
 
 ```python
 from kitup import CallResult

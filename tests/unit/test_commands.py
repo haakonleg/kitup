@@ -48,6 +48,13 @@ def patch_popen(monkeypatch, process):
     return calls
 
 
+def patch_popen_raises(monkeypatch, error):
+    def fake_popen(argv, **kwargs):
+        raise error
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+
 def test_command_captures_output(monkeypatch):
     patch_popen(monkeypatch, FakeProcess(stdout="hello"))
     runner = CommandRunner(PrivilegeManager())
@@ -86,6 +93,25 @@ def test_nonzero_exit_can_be_probed(monkeypatch):
     result = runner.run(["tool"], check=False)
 
     assert result.returncode == 4
+
+
+def test_unstartable_command_can_be_probed(monkeypatch):
+    patch_popen_raises(monkeypatch, FileNotFoundError(2, "No such file or directory", "missing"))
+    runner = CommandRunner(PrivilegeManager())
+
+    result = runner.run(["missing"], check=False)
+
+    assert result.args == ["missing"]
+    assert result.returncode == 127
+    assert "could not run missing" in result.stderr
+
+
+def test_unstartable_command_raises_when_checked(monkeypatch):
+    patch_popen_raises(monkeypatch, FileNotFoundError(2, "No such file or directory", "missing"))
+    runner = CommandRunner(PrivilegeManager())
+
+    with pytest.raises(TaskFailed, match="could not run missing"):
+        runner.run(["missing"])
 
 
 def test_commands_use_a_process_group_without_a_new_session(monkeypatch):

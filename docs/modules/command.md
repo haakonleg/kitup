@@ -6,7 +6,7 @@ Run guarded one-off commands.
 from kitup.modules import command
 ```
 
-## `run(cmd, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None)`
+## `run(cmd, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None, ignore_errors=False)`
 
 Run `cmd` unless a guard is already satisfied.
 
@@ -23,11 +23,17 @@ Run `cmd` unless a guard is already satisfied.
 - `timeout` — command timeout in seconds.
 - `check` — fail on a nonzero exit. Defaults to `changed`, so `changed=False`
   probes return their exit code instead of failing.
+- `ignore_errors` — return a failed result instead of failing the task when the
+  command exits nonzero or cannot be started. Cannot be combined with
+  `check=True`; timeouts still fail.
 
 ### Result fields
 
 - `cmd` — command and arguments.
-- `returncode` — exit code (executed results only).
+- `failed` — whether an executed command failed or could not start. Guarded
+  skips and dry runs report `False`.
+- `returncode` — exit code, or `127` when the command could not start (executed
+  results only).
 - `stdout` — captured standard output (executed results only).
 - `stderr` — captured standard error (executed results only).
 - `start` — UTC start timestamp in ISO 8601 format (executed results only).
@@ -41,7 +47,15 @@ command.run(
 )
 ```
 
-## `shell(cmd, *, shell=None, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None)`
+To act on an expected failure, check `failed` on the returned result:
+
+```python
+result = command.run(["optional-tool", "--cleanup"], ignore_errors=True)
+if result.failed:
+    ctx.note(f"optional cleanup failed with exit code {result.returncode}")
+```
+
+## `shell(cmd, *, shell=None, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None, ignore_errors=False)`
 
 Run a command string through a shell. Other arguments match `run()`.
 
@@ -70,3 +84,7 @@ command.shell(
   argument and is not split. Commands never receive interactive stdin.
 - A nonzero exit fails the task when `check` is true. With `changed=False`,
   `check` defaults to false so probes can inspect the exit code.
+- With `ignore_errors=True`, a nonzero exit or a command that cannot be started
+  returns a result with `failed=True` instead of failing the task. The recorded
+  `changed` value still follows the `changed` argument; use `changed=False` for
+  probes that should not count as changes.

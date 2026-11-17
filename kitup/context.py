@@ -290,7 +290,7 @@ class TaskContext:
         return result
 
     def probe(self, argv: str | Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        """Run a query command without failing on a nonzero exit."""
+        """Run a query command without failing on a nonzero exit or start error."""
         kwargs.pop("check", None)
         return self.run(argv, check=False, **kwargs)
 

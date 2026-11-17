@@ -34,8 +34,13 @@ def run(
     sudo: bool = False,
     timeout: float = 600,
     check: bool | None = None,
+    ignore_errors: bool = False,
 ) -> CallResult:
-    """Run a command unless a guard says it is already satisfied."""
+    """Run a command unless a guard says it is already satisfied.
+
+    With ``ignore_errors=True``, failures and start errors return a result with
+    ``failed=True`` instead of failing the task.
+    """
     ctx = current_context()
     return ctx.changed(
         _run(
@@ -49,6 +54,7 @@ def run(
             sudo=sudo,
             timeout=timeout,
             check=check,
+            ignore_errors=ignore_errors,
         )
     )
 
@@ -65,11 +71,13 @@ def shell(
     sudo: bool = False,
     timeout: float = 600,
     check: bool | None = None,
+    ignore_errors: bool = False,
 ) -> CallResult:
     """Run a command string through a shell.
 
     Uses the shell from ``SHELL`` or the current user's passwd entry when
     ``shell`` is not specified. ``unless`` is also run through that shell.
+    Other arguments match :func:`run`.
     """
     ctx = current_context()
     require_text(cmd, "shell command")
@@ -92,6 +100,7 @@ def shell(
             sudo=sudo,
             timeout=timeout,
             check=check,
+            ignore_errors=ignore_errors,
         )
     )
 
@@ -108,13 +117,17 @@ def _run(
     sudo: bool,
     timeout: float,
     check: bool | None,
+    ignore_errors: bool,
 ) -> CallResult:
     cmd = normalize_strings(cmd)
     require_collection(cmd, "cmd")
     require_bool(changed, "changed")
     require_bool(sudo, "sudo")
+    require_bool(ignore_errors, "ignore_errors")
     if check is not None:
         require_bool(check, "check")
+    if ignore_errors and check is True:
+        raise TaskFailed("ignore_errors cannot be combined with check=True")
     require_timeout(timeout)
     if unless is not None:
         unless = normalize_strings(unless)
@@ -132,17 +145,19 @@ def _run(
         if cwd_path is not None and not marker.is_absolute():
             marker = cwd_path / marker
         if os.path.lexists(marker):
-            return CallResult(changed=False, summary=f"skip {' '.join(cmd)}", cmd=cmd)
+            return CallResult(changed=False, summary=f"skip {' '.join(cmd)}", cmd=cmd, failed=False)
 
     if unless is not None:
         probe = ctx.probe(unless, cwd=cwd_path, env=env, sudo=sudo, timeout=timeout)
         if probe.returncode == 0:
-            return CallResult(changed=False, summary=f"skip {' '.join(cmd)}", cmd=cmd)
+            return CallResult(changed=False, summary=f"skip {' '.join(cmd)}", cmd=cmd, failed=False)
 
     if ctx.dry_run:
-        return CallResult(changed=changed, summary=f"would run: {' '.join(cmd)}", cmd=cmd)
+        return CallResult(changed=changed, summary=f"would run: {' '.join(cmd)}", cmd=cmd, failed=False)
 
-    if check is None:
+    if ignore_errors:
+        check = False
+    elif check is None:
         check = changed
 
     with timed() as timing:
@@ -158,6 +173,7 @@ def _run(
         changed=changed,
         summary=" ".join(cmd),
         cmd=cmd,
+        failed=process.returncode != 0,
         returncode=process.returncode,
         stdout=process.stdout,
         stderr=process.stderr,

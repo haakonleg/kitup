@@ -34,7 +34,9 @@ class CommandRunner:
         """Run an argv-style command and return its completed process.
 
         When ``stdin`` is set, it is written to the command's standard input.
-        Callers that use ``sudo=True`` must ensure credentials are valid.
+        Callers that use ``sudo=True`` must ensure credentials are valid. With
+        ``check=False``, a command that cannot be started is returned with exit
+        code 127 and the startup error in ``stderr``.
         """
         command = [str(part) for part in normalize_strings(argv)]
         if not command:
@@ -68,10 +70,11 @@ class CommandRunner:
                 process_group=0,
             )
         except OSError as exc:
-            raise TaskFailed(
-                f"could not run {' '.join(command)}: {exc}",
-                command=command,
-            ) from exc
+            message = f"could not run {' '.join(command)}: {exc}"
+            if check:
+                raise TaskFailed(message, command=command) from exc
+            self._report(command, started, 127, "", message)
+            return subprocess.CompletedProcess(command, 127, "", message)
 
         try:
             stdout, stderr = process.communicate(input=stdin, timeout=timeout)
