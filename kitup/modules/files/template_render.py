@@ -22,6 +22,8 @@ def template(
     dest: str | Path,
     *,
     variables: Mapping[str, Any] | None = None,
+    trim_blocks: bool = True,
+    lstrip_blocks: bool = False,
     mode: int | str | None = None,
     owner: str | int | None = None,
     group: str | int | None = None,
@@ -31,6 +33,9 @@ def template(
 
     ``src`` resolves like :func:`kitup.modules.files.copy`. Absolute paths are
     used as-is.
+
+    ``trim_blocks`` removes the first newline after a block tag, and
+    ``lstrip_blocks`` strips leading whitespace before one.
 
     Templates see ``vars`` (the merged variable values), ``facts`` (the
     system facts snapshot), and any keys supplied through ``variables``.
@@ -43,12 +48,14 @@ def template(
     require_metadata(owner, group)
     mode = normalize_mode(mode)
     require_bool(sudo, "template sudo")
+    require_bool(trim_blocks, "template trim_blocks")
+    require_bool(lstrip_blocks, "template lstrip_blocks")
     extra = _require_variables(variables)
     target = expand_path(dest, error=TaskFailed)
 
     source = ctx.resolve_source(src)
     text = _read_template(ctx, source)
-    rendered = _render(ctx, source, text, extra)
+    rendered = _render(ctx, source, text, extra, trim_blocks=trim_blocks, lstrip_blocks=lstrip_blocks)
 
     return ctx.changed(
         file_actions.apply_bytes(
@@ -91,9 +98,17 @@ def _read_template(ctx: TaskContext, source: Path) -> str:
         raise TaskFailed(f"template source is not UTF-8 text: {source}") from exc
 
 
-def _render(ctx: TaskContext, source: Path, text: str, variables: Mapping[str, Any]) -> str:
+def _render(
+    ctx: TaskContext,
+    source: Path,
+    text: str,
+    variables: Mapping[str, Any],
+    *,
+    trim_blocks: bool,
+    lstrip_blocks: bool,
+) -> str:
     jinja2 = _load_jinja2()
-    environment = _jinja_environment()
+    environment = _jinja_environment(trim_blocks=trim_blocks, lstrip_blocks=lstrip_blocks)
     context = {
         # Builtin vars() exposes the Vars namespace as a mapping.
         "vars": dict(vars(ctx.vars)),
@@ -102,7 +117,7 @@ def _render(ctx: TaskContext, source: Path, text: str, variables: Mapping[str, A
     }
     try:
         template = environment.from_string(text)
-        return str(template.render(context))
+        rendered = str(template.render(context))
     except jinja2.TemplateSyntaxError as exc:
         location = f"{source}:{exc.lineno}" if exc.lineno else str(source)
         raise TaskFailed(f"template syntax error in {location}: {exc.message}") from exc
@@ -112,6 +127,15 @@ def _render(ctx: TaskContext, source: Path, text: str, variables: Mapping[str, A
         raise TaskFailed(f"template error in {source}: {exc}") from exc
     except Exception as exc:
         raise TaskFailed(f"template rendering error in {source}: {exc}") from exc
+
+    return _preserve_trailing_newlines(text, rendered)
+
+
+def _preserve_trailing_newlines(source: str, rendered: str) -> str:
+    """Restore trailing newlines that rendering removed from the template."""
+    source_count = len(source) - len(source.rstrip("\n"))
+    rendered_count = len(rendered) - len(rendered.rstrip("\n"))
+    return rendered + "\n" * max(source_count - rendered_count, 0)
 
 
 @cache
@@ -124,11 +148,13 @@ def _load_jinja2() -> Any:
 
 
 @cache
-def _jinja_environment() -> Any:
-    """Return the shared Jinja2 environment used for every template render."""
+def _jinja_environment(*, trim_blocks: bool = True, lstrip_blocks: bool = False) -> Any:
+    """Return a cached Jinja2 environment for the given whitespace settings."""
     jinja2 = _load_jinja2()
     environment = jinja2.Environment(
         undefined=jinja2.StrictUndefined,
+        trim_blocks=trim_blocks,
+        lstrip_blocks=lstrip_blocks,
         keep_trailing_newline=True,
         autoescape=False,
     )

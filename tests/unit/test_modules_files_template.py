@@ -58,15 +58,78 @@ def test_template_is_idempotent(tmp_path):
     assert ctx.calls[-1].summary == f"ensure {dest} from {source}"
 
 
-def test_template_preserves_trailing_newline(tmp_path):
+@pytest.mark.parametrize(
+    ("template_text", "expected"),
+    [
+        ("line\n", b"line\n"),
+        ("{% if true %}line{% endif %}\n", b"line\n"),
+        ("{% if true %}line{% endif %}\n\n", b"line\n\n"),
+    ],
+    ids=["literal", "block-tag", "multiple"],
+)
+def test_template_preserves_trailing_newlines(tmp_path, template_text, expected):
     source = tmp_path / "template.j2"
-    write_source(source, "line\n")
+    write_source(source, template_text)
     dest = tmp_path / "rendered.conf"
     context(tmp_path)
 
     files.template(source, dest)
 
+    assert dest.read_bytes() == expected
+
+
+def test_template_trims_newlines_after_block_tags(tmp_path):
+    source = tmp_path / "plugins.j2"
+    write_source(
+        source,
+        "{% for plugin in vars.plugins %}\n"
+        "{% if plugin.enabled %}\n"
+        "source {{ plugin.name }}\n"
+        "{% endif %}\n"
+        "{% endfor %}\n",
+    )
+    dest = tmp_path / "plugins.zsh"
+    plugins = [
+        SimpleNamespace(name="first", enabled=True),
+        SimpleNamespace(name="second", enabled=True),
+    ]
+    context(tmp_path, vars=SimpleNamespace(plugins=plugins))
+
+    files.template(source, dest)
+
+    assert dest.read_text() == "source first\nsource second\n"
+
+
+def test_template_can_preserve_newlines_after_block_tags(tmp_path):
+    source = tmp_path / "template.j2"
+    write_source(source, "{% if vars.ENABLED %}\nline\n{% endif %}\n")
+    dest = tmp_path / "rendered.conf"
+    context(tmp_path, vars=SimpleNamespace(ENABLED=True))
+
+    files.template(source, dest, trim_blocks=False)
+
+    assert dest.read_bytes() == b"\nline\n\n"
+
+
+def test_template_can_strip_leading_whitespace_before_block_tags(tmp_path):
+    source = tmp_path / "template.j2"
+    write_source(source, "  {% if vars.ENABLED %}\nline\n  {% endif %}\n")
+    dest = tmp_path / "rendered.conf"
+    context(tmp_path, vars=SimpleNamespace(ENABLED=True))
+
+    files.template(source, dest, lstrip_blocks=True)
+
     assert dest.read_bytes() == b"line\n"
+
+
+@pytest.mark.parametrize("option", ["trim_blocks", "lstrip_blocks"])
+def test_template_rejects_non_boolean_whitespace_options(tmp_path, option):
+    source = tmp_path / "template.j2"
+    write_source(source, "line\n")
+    context(tmp_path)
+
+    with pytest.raises(TaskFailed, match=f"template {option} must be a boolean"):
+        files.template(source, tmp_path / "rendered.conf", **{option: "yes"})
 
 
 def test_template_renders_empty_template(tmp_path):

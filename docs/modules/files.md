@@ -272,6 +272,10 @@ file.
 - `dest` — destination file path. The parent directory must already exist; use
   `directory()` first.
 - `variables` — an optional mapping of extra values exposed to the template.
+- `trim_blocks=True` removes the first newline after a block tag. Set it to
+  `False` when that newline is significant.
+- `lstrip_blocks=False` strips leading spaces and tabs before a block tag when
+  enabled.
 - `mode=None` preserves an existing mode; new files default to `0o644`.
   Accepts an integer or an octal string such as `"0644"`.
 - `owner` and `group` accept a name or numeric ID.
@@ -337,8 +341,12 @@ LOG_LEVEL={{ vars.LOG_LEVEL | default("info") }}
 
 Rendering behavior:
 
-- Templates use Jinja2's default syntax. Autoescaping is disabled.
-- A trailing newline in the template is preserved.
+- Templates use Jinja2's default syntax, with `trim_blocks` enabled by default:
+  the first newline after a block tag is removed, so loops and conditionals do
+  not leave blank lines in the output. Both `trim_blocks` and `lstrip_blocks`
+  can be overridden per call. Autoescaping is disabled.
+- Trailing newlines in the template are preserved, including newlines consumed
+  by a block tag at the end of the file.
 - `include`, `extends`, and custom loaders are not supported.
 - `--dry-run` renders the template and reports the change without writing.
   Template syntax and variable errors still fail in dry-run mode.
