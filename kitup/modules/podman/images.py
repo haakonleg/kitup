@@ -19,7 +19,7 @@ from ..._utils.validation import (
 from ...context import current_context
 from ...errors import TaskFailed
 from ...results import CallResult
-from ._common import (
+from .common import (
     PULL_POLICIES,
     PullPolicy,
     build_arg_args,

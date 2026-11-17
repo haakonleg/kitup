@@ -1,32 +1,23 @@
-"""Idempotent file, directory, symlink, and text-file management."""
+"""Idempotent file, directory, symlink, and move operations."""
 
-import re
-from collections.abc import Mapping
 from pathlib import Path
 
-from .._utils import file_actions
-from .._utils import ini as ini_ops
-from .._utils import toml as toml_ops
-from .._utils.file_actions import PathPolicy, require_path_kind
-from .._utils.file_primitives import move_path, symlink_path
-from .._utils.paths import expand_path
-from .._utils.validation import (
+from ..._utils import file_actions
+from ..._utils.file_actions import PathPolicy, require_path_kind
+from ..._utils.file_primitives import move_path, symlink_path
+from ..._utils.paths import expand_path
+from ..._utils.validation import (
     State,
     normalize_mode,
     require_bool,
     require_metadata,
     require_path,
-    require_regex,
-    require_single_line,
     require_state,
     require_text,
 )
-from ..context import TaskContext, current_context
-from ..errors import TaskFailed
-from ..registry import module
-from ..results import CallResult
-
-module("files", "Files, directories, symlinks, lines, blocks, INI files, and moves.")
+from ...context import TaskContext, current_context
+from ...errors import TaskFailed
+from ...results import CallResult
 
 
 def file(
@@ -280,239 +271,6 @@ def move(
     return ctx.changed(result(metadata=False))
 
 
-def line(
-    path: str | Path, line: str, *, match: str | None = None, state: State = "present", sudo: bool = False
-) -> CallResult:
-    """Add, replace, or remove a line selected by an exact value or regex."""
-    ctx = current_context()
-    require_state(state, "line")
-    require_path(path, "line path")
-    require_single_line(line, "line")
-    require_bool(sudo, "line sudo")
-    pattern: re.Pattern[str] | None = None
-    if match is not None:
-        pattern = require_regex(match, "line match")
-
-    target = expand_path(path, error=TaskFailed)
-    snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
-    text = snapshot.text(target)
-    lines = text.splitlines(keepends=True)
-    desired = line
-
-    if state == "present":
-        index = _matching_line(lines, desired, pattern)
-        rendered = desired + "\n"
-        if index is None:
-            if lines and not lines[-1].endswith("\n"):
-                lines[-1] += "\n"
-            new_lines = [*lines, rendered]
-        elif lines[index].rstrip("\n") == desired:
-            new_lines = lines
-        else:
-            new_lines = list(lines)
-            new_lines[index] = rendered
-        summary = f"{'replace' if index is not None else 'append'} line in {target}"
-        unchanged_summary = f"ensure line in {target}"
-    else:
-        new_lines = [existing for existing in lines if not _line_matches(existing, desired, pattern)]
-        summary = f"remove line from {target}"
-        unchanged_summary = f"ensure line is absent from {target}"
-
-    new_text = "".join(new_lines)
-    return ctx.changed(
-        file_actions.apply_text(
-            ctx,
-            target,
-            new_text,
-            snapshot=snapshot,
-            summary=summary,
-            unchanged_summary=unchanged_summary,
-            data={"path": str(target)},
-            sudo=sudo,
-        )
-    )
-
-
-def block(path: str | Path, marker: str, content: str, *, state: State = "present", sudo: bool = False) -> CallResult:
-    """Create, update, or remove a marked block in a file."""
-    ctx = current_context()
-    require_state(state, "block")
-    require_path(path, "block path")
-    require_text(marker, "block marker")
-    require_single_line(marker, "block marker")
-    require_bool(sudo, "block sudo")
-
-    target = expand_path(path, error=TaskFailed)
-    snapshot = file_actions.read_snapshot(ctx, target, sudo=sudo)
-    text = snapshot.text(target)
-    lines = text.splitlines(keepends=True)
-    begin = f"# BEGIN {marker}\n"
-    end = f"# END {marker}\n"
-    bounds = _block_bounds(lines, marker)
-
-    block_lines = [begin, *_content_lines(content), end]
-    if state == "present":
-        if bounds is None:
-            prefix = list(lines)
-            if prefix and not prefix[-1].endswith("\n"):
-                prefix[-1] += "\n"
-            new_lines = [*prefix, *block_lines]
-            summary = f"add {marker} block to {target}"
-        else:
-            start, stop = bounds
-            new_lines = [*lines[:start], *block_lines, *lines[stop + 1 :]]
-            summary = f"update {marker} block in {target}"
-        unchanged_summary = f"ensure {marker} block in {target}"
-    else:
-        if bounds is None:
-            return ctx.changed(
-                changed=False,
-                summary=f"ensure {marker} block is absent from {target}",
-                path=str(target),
-            )
-        start, stop = bounds
-        new_lines = [*lines[:start], *lines[stop + 1 :]]
-        summary = f"remove {marker} block from {target}"
-        unchanged_summary = f"ensure {marker} block is absent from {target}"
-
-    new_text = "".join(new_lines)
-    return ctx.changed(
-        file_actions.apply_text(
-            ctx,
-            target,
-            new_text,
-            snapshot=snapshot,
-            summary=summary,
-            unchanged_summary=unchanged_summary,
-            data={"path": str(target)},
-            sudo=sudo,
-        )
-    )
-
-
-def ini(
-    path: str | Path,
-    *,
-    section: str | None = None,
-    option: str | None = None,
-    value: str | None = None,
-    match: Mapping[str, str] | None = None,
-    state: State = "present",
-    create: bool = True,
-    sudo: bool = False,
-) -> CallResult:
-    """Set or remove one option in an INI-style file, section by section.
-
-    Sections are matched case-sensitively as ``[section]`` headers; with
-    ``section=None`` the preamble before the first header is edited. Options
-    are written canonically as ``option = value``. ``match`` selects one of
-    several same-named sections and is never written to the file.
-    """
-    ctx = current_context()
-    require_state(state, "ini")
-    require_path(path, "ini path")
-    require_bool(create, "ini create")
-    require_bool(sudo, "ini sudo")
-    if section is not None:
-        section = ini_ops.require_ini_section(section)
-    if option is not None:
-        option = ini_ops.require_ini_option(option)
-    if match is not None:
-        if section is None:
-            raise TaskFailed("ini match requires a section")
-        match = ini_ops.require_ini_match(match)
-    # Validate the state-dependent arguments before any filesystem access.
-    set_value: str | None = None
-    if state == "present":
-        if option is None:
-            raise TaskFailed("ini state 'present' requires an option")
-        if value is None:
-            raise TaskFailed("ini state 'present' requires a value")
-        set_value = ini_ops.require_ini_value(value)
-    elif section is None and option is None:
-        raise TaskFailed("ini state 'absent' requires a section or an option")
-    elif value is not None:
-        raise TaskFailed("ini state 'absent' does not take a value")
-
-    return ctx.changed(
-        file_actions.apply_ini(
-            ctx,
-            expand_path(path, error=TaskFailed),
-            section=section,
-            option=option,
-            value=set_value,
-            match=match,
-            create=create,
-            sudo=sudo,
-        )
-    )
-
-
-def toml(
-    path: str | Path,
-    *,
-    table: str | None = None,
-    key: str | None = None,
-    value: toml_ops.TomlValue | None = None,
-    state: State = "present",
-    create: bool = True,
-    sudo: bool = False,
-) -> CallResult:
-    """Set or remove one key in a TOML file, table by table.
-
-    ``table`` is a dotted table path (``tool.uv``); ``None`` edits the
-    top-level keys before the first header. ``key`` may be dotted
-    (``pip.no-cache``) and resolves into an existing sub-table
-    (``[tool.uv.pip]``) when that header exists. ``value`` follows TOML
-    types: a string renders as a basic string, a boolean as ``true`` or
-    ``false``, an integer or float in decimal form, and a list or tuple of
-    strings as an array (a multi-line array keeps its layout). Existing
-    entries are matched by parsed value, so spacing and quote style do not
-    cause rewrites; a missing table is appended at the end of the file.
-    Array-of-tables (``[[...]]``) cannot be edited and are rejected.
-    ``state="absent"`` removes the ``key`` — or the whole ``table``,
-    comments included, when ``key`` is ``None`` — and takes no ``value``.
-    ``create=False`` fails when the file does not exist; otherwise a missing
-    file is created with mode ``0o644`` (parent directories ``0o755``), and
-    an absent edit on a missing file is a no-op. ``sudo=True`` edits through
-    the privileged worker.
-    """
-    ctx = current_context()
-    require_state(state, "toml")
-    require_path(path, "toml path")
-    require_bool(create, "toml create")
-    require_bool(sudo, "toml sudo")
-    if table is not None:
-        table = toml_ops.require_toml_key(table, "toml table")
-    if key is not None:
-        key = toml_ops.require_toml_key(key, "toml key")
-    # Validate the state-dependent arguments before any filesystem access.
-    rendered: str | None = None
-    if state == "present":
-        if key is None:
-            raise TaskFailed("toml state 'present' requires a key")
-        if value is None:
-            raise TaskFailed("toml state 'present' requires a value")
-        rendered = toml_ops.toml_value(value)  # validate the type before touching the filesystem
-    elif key is None and table is None:
-        raise TaskFailed("toml state 'absent' requires a key or a table")
-    elif value is not None:
-        raise TaskFailed("toml state 'absent' does not take a value")
-
-    return ctx.changed(
-        toml_ops.apply_toml_key(
-            ctx,
-            expand_path(path, error=TaskFailed),
-            table=table,
-            key=key,
-            value=value,
-            create=create,
-            sudo=sudo,
-            rendered=rendered,
-        )
-    )
-
-
 def directory(
     path: str | Path,
     *,
@@ -645,36 +403,3 @@ def _move(ctx: TaskContext, source: Path, target: Path, *, sudo: bool) -> None:
         raise TaskFailed(str(exc)) from exc
     except OSError as exc:
         raise TaskFailed(f"could not move {source} to {target}: {exc}") from exc
-
-
-def _matching_line(lines: list[str], desired: str, match: re.Pattern[str] | None) -> int | None:
-    for index, existing in enumerate(lines):
-        if _line_matches(existing, desired, match):
-            return index
-    return None
-
-
-def _line_matches(existing: str, desired: str, match: re.Pattern[str] | None) -> bool:
-    candidate = existing.rstrip("\n")
-    if match is None:
-        return candidate == desired
-    return match.search(candidate) is not None
-
-
-def _block_bounds(lines: list[str], marker: str) -> tuple[int, int] | None:
-    begin = f"# BEGIN {marker}"
-    end = f"# END {marker}"
-    starts = [index for index, line in enumerate(lines) if line.rstrip("\n") == begin]
-    ends = [index for index, line in enumerate(lines) if line.rstrip("\n") == end]
-    if not starts and not ends:
-        return None
-    if len(starts) != 1 or len(ends) != 1 or starts[0] > ends[0]:
-        raise TaskFailed(f"malformed {marker} block markers")
-    return starts[0], ends[0]
-
-
-def _content_lines(content: str) -> list[str]:
-    if not content:
-        return []
-    normalized = content if content.endswith("\n") else f"{content}\n"
-    return normalized.splitlines(keepends=True)

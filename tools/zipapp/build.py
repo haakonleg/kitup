@@ -45,6 +45,8 @@ def _dependency_names(requirements: object) -> tuple[str, ...]:
 BUNDLED_DISTRIBUTIONS: Final = _dependency_names(PROJECT.get("dependencies"))
 NOTICES: Final = Path(__file__).with_name("THIRD_PARTY_NOTICES.txt")
 IGNORE: Final = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.so")
+# PyYAML's legacy ``_yaml`` shim is unusable without the excluded C extension.
+EXCLUDED_PACKAGES: Final = frozenset({"_yaml"})
 
 LAUNCHER: Final = f"""\
 from {MODULE} import {FUNCTION}
@@ -215,7 +217,7 @@ def _find_packages(python: Path, distributions: tuple[str, ...]) -> dict[str, Pa
         raise SystemExit(f"could not locate bundled packages: {detail}")
 
     paths = json.loads(result.stdout)
-    return {name: Path(path) for name, path in paths.items()}
+    return {name: Path(path) for name, path in paths.items() if name not in EXCLUDED_PACKAGES}
 
 
 def _run(

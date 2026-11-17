@@ -1,8 +1,7 @@
 # Modules
 
-Built-in modules provide idempotent operations for bundle tasks. Functions that
-need the task context retrieve it themselves. Methods inspect the current system
-state and change only what is needed, and mutating operations honor `--dry-run`.
+Built-in modules provide operations for bundle tasks. Functions that need the
+task context retrieve it themselves, and mutating operations honor `--dry-run`.
 
 ```python
 from kitup import ctx
@@ -40,12 +39,11 @@ Each module page documents its parameters, result fields, and usage examples.
 
 - [dnf](dnf.md) — RPM packages, groups, repositories, COPR, and dnf.conf options
 - [flatpak](flatpak.md) — Flatpak remotes, applications, and runtimes
-- [files](files.md) — files, directories, symlinks, lines, blocks, INI files, and moves
+- [files](files.md) — filesystem and text-file management, including templating
 - [command](command.md) — guarded one-off commands
 - [github_release](github_release.md) — public GitHub release metadata and assets
 - [download](download.md) — remote file download over HTTP(S)
 - [decompress](decompress.md) — archive extraction and single-file decompression
-- [template](template.md) — Jinja2 templates rendered into managed files
 - [systemd](systemd.md) — systemd units
 - [gsettings](gsettings.md) — GNOME settings
 - [git](git.md) — repository clones and checkouts

@@ -240,7 +240,7 @@ install_tree(ctx.files / "dotfiles", Path.home())
 ```
 
 Relative source paths passed to modules such as `files.copy()` and
-`template.file()` resolve like this:
+`files.template()` resolve like this:
 
 1. A bare name such as `"sshd.conf"`, or a `files/...` path such as
    `"files/sshd.conf"`, resolves inside `ctx.files`, so extra overlays win over

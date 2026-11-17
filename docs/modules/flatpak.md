@@ -19,9 +19,9 @@ Manage a Flatpak remote repository.
 - `gpg_verify` — when `False`, disable GPG verification for an added remote.
   Useful for unsigned local repositories.
 
-`"present"` adds the remote only when the name is missing. An existing remote is
-left unchanged, including its URL. `"absent"` removes the remote; if installed
-applications still use it, the task fails.
+`"present"` adds the remote. An existing remote is left unchanged, including
+its URL. `"absent"` removes the remote; if installed applications still use it,
+the task fails.
 
 ### Result fields
 
@@ -57,7 +57,7 @@ A bare ID such as `org.gnome.Calculator` matches any installed branch. A full
 ref such as `org.gnome.Calculator/x86_64/stable` or
 `app/org.gnome.Calculator/x86_64/stable` matches that exact ref.
 
-`"present"` installs only missing refs. `"absent"` removes only installed refs.
+`"present"` installs missing refs. `"absent"` removes installed refs.
 `remote` only selects the source for new installs; an already-installed app is
 not moved or reinstalled.
 

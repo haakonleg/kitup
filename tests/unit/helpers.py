@@ -86,6 +86,12 @@ def plain_output() -> Output:
     return Output(StringIO(), no_color=True)
 
 
+def write_source(path: Path, content: str) -> None:
+    """Write UTF-8 source text, creating parent directories as needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
 @contextmanager
 def serve_http(handler: type[http.server.BaseHTTPRequestHandler]) -> Iterator[str]:
     """Run a local HTTP server on a random port and yield its base URL."""
@@ -175,6 +181,18 @@ def make_context(
     )
     set_current_context(context)
     return context
+
+
+def template_context(tmp_path, *, vars=None, facts=None, dry_run=False, diff=False):
+    """Return a plain-output context for template rendering tests."""
+    return make_context(
+        tmp_path,
+        dry_run=dry_run,
+        diff=diff,
+        vars=vars,
+        facts=facts,
+        output=plain_output(),
+    )
 
 
 def privileged_context(tmp_path) -> TaskContext:

@@ -12,7 +12,7 @@ Run `cmd` unless a guard is already satisfied.
 
 ### Parameters
 
-- `cmd` — command and arguments; no shell is used.
+- `cmd` — command and arguments, executed directly.
 - `creates` — path that, if it exists, skips the command. Relative paths resolve
   against `cwd`.
 - `unless` — command that, if it exits successfully, skips the command.

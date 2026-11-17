@@ -62,8 +62,8 @@ Existing destination symlinks are rejected rather than followed. Parent
 directories are not created automatically; use `files.directory()` first.
 
 With `force=False` and no checksum, an existing file is never re-downloaded.
-Use `force=True` to check the remote content on each run; the file is reported
-as changed only when its bytes differ. Dry runs do not contact the remote server.
+Use `force=True` to check the remote content on each run. Dry runs do not
+contact the remote server.
 
 ## `to_bytes(url, *, checksum=None, headers=None, timeout=30, validate_certs=True, max_bytes=10485760)`
 

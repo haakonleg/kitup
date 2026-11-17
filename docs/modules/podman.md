@@ -48,11 +48,12 @@ Build an image from a context directory.
 
 ### Parameters
 
-- `context` — build context. Relative paths resolve like [`files.copy()`](files.md).
-  Absolute paths are used as-is, and `~` is expanded.
+- `context` — build context. Relative paths use the project and bundle lookup
+  described in [Projects](../project.md#resources). Absolute paths are used
+  as-is, and `~` is expanded.
 - `tag` — image name to create.
-- `containerfile` — optional Containerfile path, resolved like `context` and
-  independently of it.
+- `containerfile` — optional Containerfile path, resolved independently of
+  `context`.
 - `build_args` — mapping of build argument names to values.
 - `pull` — always pull the base image.
 - `force` — rebuild even when the tag already exists.
@@ -181,8 +182,8 @@ podman.registry(
 ## `login(registry, *, username, password, authfile=None, tls_verify=None, force=False, sudo=False)`
 
 Log in to a container registry. The password is passed with
-`--password-stdin`, not in argv. An existing login for the same user is a
-no-op unless `force=True`.
+`--password-stdin`, not in argv. Logging in again for the same user requires
+`force=True`.
 
 ### Parameters
 
@@ -205,7 +206,7 @@ podman.login("registry.example.com", username="kitup", password="s3cret")
 
 ## `logout(registry, *, authfile=None, sudo=False)`
 
-Log out of a container registry. A missing login is a no-op.
+Log out of a container registry.
 
 ### Parameters
 

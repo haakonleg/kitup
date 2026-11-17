@@ -95,12 +95,10 @@ users.membership("deploy", "docker", state="absent")
 
 ## Behavior
 
-- A missing user or group is created; existing accounts are changed only when
-  the requested attributes differ.
+- A missing user or group is created.
 - Removing a user from their primary group fails; change the primary group with
   `user(..., group=...)` instead.
-- Passwords are only changed when the stored hash differs. Password hashes are
-  never shown in output.
+- Password hashes are never shown in output.
 - All mutating operations request sudo automatically. `--dry-run` reports what
   would change without modifying the system.
 

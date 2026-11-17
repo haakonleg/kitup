@@ -30,7 +30,7 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
         tmp_path / "config",
         "zipapp_bundle",
         f"""
-        from kitup.modules import files, template
+        from kitup.modules import files
 
         @task("write privileged marker")
         def write_privileged():
@@ -46,7 +46,7 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
 
         @task("render template")
         def render_template():
-            template.file(
+            files.template(
                 "message.j2",
                 {str(rendered_path)!r},
                 variables={{"name": "zipapp"}},

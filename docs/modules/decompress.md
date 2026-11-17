@@ -6,8 +6,7 @@ Extract tar and zip archives, or decompress single compressed files.
 from kitup.modules import decompress
 ```
 
-Both functions are idempotent: only differences are written. Files that are no
-longer present in the source are not removed.
+Files that are no longer present in the source are not removed.
 
 ## `archive(src, dest, *, creates=None, strip_components=0, include=None, exclude=None, mode=None)`
 
@@ -15,8 +14,9 @@ Extract an archive into the directory `dest`.
 
 ### Parameters
 
-- `src` — archive source. Relative paths resolve like [`files.copy()`](files.md).
-  Absolute paths are used as-is. `~` is expanded.
+- `src` — archive source. Relative paths use the project and bundle lookup
+  described in [Projects](../project.md#resources). Absolute paths are used
+  as-is. `~` is expanded.
 - `dest` — destination directory. It is created when missing; its parent must
   exist.
 - `creates` — path, relative to `dest` unless absolute. When it exists the
@@ -59,9 +59,8 @@ The format is detected from the archive contents, not the filename:
 
 ### Behavior
 
-- Existing directories are left unchanged. New files use the archive mode
-  unless `mode` is set.
-- Symlinks are replaced only when their target differs.
+- New files use the archive mode unless `mode` is set.
+- Symlinks are replaced to match the archive.
 - Archive ownership is not restored; extracted files are owned by the user
   running kitup.
 - Absolute member paths, `..` components, and entries that would write outside
@@ -75,7 +74,9 @@ Decompress a single compressed file.
 
 ### Parameters
 
-- `src` — compressed source, resolved like `archive()`.
+- `src` — compressed source. Relative paths use the project and bundle lookup
+  described in [Projects](../project.md#resources). Absolute paths are used
+  as-is. `~` is expanded.
 - `dest` — destination file, existing directory, or path ending with `/`. A
   directory destination uses the source filename with its `.gz`, `.bz2`, `.xz`,
   `.zst`, or `.zstd` suffix removed.
@@ -102,8 +103,7 @@ decompress.file(
 )
 ```
 
-No write occurs when the destination already matches. Dry runs compare the
-decompressed content but do not write.
+Dry runs compare the decompressed content but do not write.
 
 ## Notes
 

@@ -36,7 +36,7 @@ dnf.packages(["old-tool"], state="absent")
 
 ## `swap(old, new, *, allowerasing=False)`
 
-Replace `old` with `new`, unless `new` is already installed.
+Replace `old` with `new`.
 
 ### Parameters
 
@@ -72,7 +72,7 @@ Enable or remove a COPR project.
 ### Parameters
 
 - `project` — COPR project in `owner/project` form.
-- `state="present"` enables the project unless it is already enabled.
+- `state="present"` enables the project.
 - `state="absent"` removes the project's repository if configured.
 
 ### Result fields
@@ -115,7 +115,7 @@ Install one or more release RPMs from URLs or local paths.
 
 - `sources` — a single source or an iterable. Local paths resolve from the
   current working directory. URLs and absolute paths are used as-is, and `~` is
-  expanded. Already-installed packages are left alone.
+  expanded.
 
 ### Result fields
 

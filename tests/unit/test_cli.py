@@ -1568,7 +1568,7 @@ def test_list_modules_verbose_shows_builtin_functions(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "  - files" in out
     assert "- file: Ensure a text file exists" in out
-    assert "      description: Files, directories" in out
+    assert "      description: Filesystem and text-file management" in out
     assert "path:" not in out
 
 

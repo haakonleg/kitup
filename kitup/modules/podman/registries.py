@@ -21,7 +21,7 @@ from ..._utils.validation import (
 from ...context import TaskContext, current_context
 from ...errors import TaskFailed
 from ...results import CallResult
-from ._common import (
+from .common import (
     default_dir,
     podman,
     require_object_name,

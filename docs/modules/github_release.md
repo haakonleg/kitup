@@ -166,11 +166,10 @@ known digest yourself.
 
 ## Notes
 
-- Only public repositories are supported. No authentication is used, so private
-  repositories are not accessible.
+- Only public repositories are supported, so private repositories are not
+  accessible.
 - Requests go to `https://api.github.com` using the GitHub REST API headers and
-  the standard Python `urllib` user agent. No token is read from the environment
-  or sent.
+  the standard Python `urllib` user agent.
 - Unauthenticated GitHub API requests are rate-limited. Metadata is cached for
   the rest of the run, so repeated tasks do not make repeated requests.
 - These functions are read-only: they record no changes and still contact the

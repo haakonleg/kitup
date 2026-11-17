@@ -1,12 +1,12 @@
 """Idempotent Podman images, containers, registries, and systemd units."""
 
 from ...registry import module
-from ._common import ContainerState, PodmanOption, PullPolicy
-from ._containers import container
-from ._images import build, image, tag
-from ._quadlet import quadlet
-from ._registries import login, logout, registry
-from ._units import generate_systemd
+from .common import ContainerState, PodmanOption, PullPolicy
+from .containers import container
+from .images import build, image, tag
+from .quadlet import quadlet
+from .registries import login, logout, registry
+from .units import generate_systemd
 
 module("podman", "Images, containers, registries, and systemd/Quadlet units.")
 

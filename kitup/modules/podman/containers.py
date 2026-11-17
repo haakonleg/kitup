@@ -12,7 +12,7 @@ from ..._utils.validation import (
 from ...context import TaskContext, current_context
 from ...errors import TaskFailed
 from ...results import CallResult
-from ._common import (
+from .common import (
     CONTAINER_STATES,
     CONTAINER_STATUSES,
     ContainerState,

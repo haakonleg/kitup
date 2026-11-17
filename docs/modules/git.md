@@ -77,8 +77,8 @@ git.repo(
 ## Notes
 
 - `git` must be installed.
-- The module runs as the current user; there is no sudo support. Clone into
-  user-writable locations, or run kitup itself as root.
+- The module runs as the current user. Clone into user-writable locations, or
+  run kitup itself as root.
 - Network operations set `GIT_TERMINAL_PROMPT=0`, so missing credentials fail
   fast instead of hanging.
 - The fetch during an update only adds objects under `.git`; it never changes

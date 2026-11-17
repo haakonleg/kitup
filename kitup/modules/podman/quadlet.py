@@ -10,7 +10,7 @@ from ..._utils.validation import normalize_mode, require_non_negative_int, requi
 from ...context import current_context
 from ...errors import TaskFailed
 from ...results import CallResult
-from ._common import (
+from .common import (
     NATIVE_QUADLET_KEYS,
     QUADLET_KEY,
     PodmanOption,

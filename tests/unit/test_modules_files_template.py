@@ -5,21 +5,11 @@ from types import SimpleNamespace
 import pytest
 
 from kitup.errors import TaskFailed
-from kitup.modules import template
+from kitup.modules import files
 from kitup.registry import Bundle
 
-from .helpers import call_data, make_context, plain_output, privileged_context
-
-
-def context(tmp_path, *, vars=None, facts=None, dry_run=False, diff=False):
-    return make_context(
-        tmp_path,
-        dry_run=dry_run,
-        diff=diff,
-        vars=vars,
-        facts=facts,
-        output=plain_output(),
-    )
+from .helpers import call_data, make_context, privileged_context, write_source
+from .helpers import template_context as context
 
 
 def bundle_context(tmp_path, *, vars=None, facts=None):
@@ -32,12 +22,7 @@ def bundle_context(tmp_path, *, vars=None, facts=None):
     return ctx, bundle_dir
 
 
-def write_source(path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def test_file_renders_vars_facts_and_variables(tmp_path):
+def test_template_renders_vars_facts_and_variables(tmp_path):
     source = tmp_path / "template.j2"
     write_source(
         source,
@@ -50,91 +35,91 @@ def test_file_renders_vars_facts_and_variables(tmp_path):
         facts={"hostname": "example"},
     )
 
-    template.file(source, dest, variables={"user": "ada"})
+    files.template(source, dest, variables={"user": "ada"})
 
     assert dest.read_text() == "port=2222\nhost=example\nfact=example\nuser=ada\n"
     assert stat.S_IMODE(dest.stat().st_mode) == 0o644
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].action == "template.file"
+    assert ctx.changes[0].action == "files.template"
     assert call_data(ctx.changes[0]) == {"dest": str(dest), "src": str(source)}
 
 
-def test_file_is_idempotent(tmp_path):
+def test_template_is_idempotent(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "value={{ vars.VALUE }}\n")
     dest = tmp_path / "rendered.conf"
     ctx = context(tmp_path, vars=SimpleNamespace(VALUE=1))
 
-    template.file(source, dest)
-    template.file(source, dest)
+    files.template(source, dest)
+    files.template(source, dest)
 
     assert dest.read_text() == "value=1\n"
     assert len(ctx.changes) == 1
     assert ctx.calls[-1].summary == f"ensure {dest} from {source}"
 
 
-def test_file_preserves_trailing_newline(tmp_path):
+def test_template_preserves_trailing_newline(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "line\n")
     dest = tmp_path / "rendered.conf"
     context(tmp_path)
 
-    template.file(source, dest)
+    files.template(source, dest)
 
     assert dest.read_bytes() == b"line\n"
 
 
-def test_file_renders_empty_template(tmp_path):
+def test_template_renders_empty_template(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "")
     dest = tmp_path / "rendered.conf"
     context(tmp_path)
 
-    template.file(source, dest)
+    files.template(source, dest)
 
     assert dest.read_text() == ""
 
 
-def test_file_rejects_undefined_variable(tmp_path):
+def test_template_rejects_undefined_variable(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "{{ missing }}\n")
     dest = tmp_path / "rendered.conf"
     context(tmp_path)
 
     with pytest.raises(TaskFailed, match="undefined variable"):
-        template.file(source, dest)
+        files.template(source, dest)
 
     assert not dest.exists()
 
 
-def test_file_rejects_undefined_var_field(tmp_path):
+def test_template_rejects_undefined_var_field(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "{{ vars.MISSING }}\n")
     dest = tmp_path / "rendered.conf"
     context(tmp_path, vars=SimpleNamespace(PRESENT="yes"))
 
     with pytest.raises(TaskFailed, match="undefined variable"):
-        template.file(source, dest)
+        files.template(source, dest)
 
     assert not dest.exists()
 
 
-def test_file_wraps_runtime_rendering_errors(tmp_path):
+def test_template_wraps_runtime_rendering_errors(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "{{ 1 / 0 }}\n")
     context(tmp_path)
 
     with pytest.raises(TaskFailed, match="template rendering error"):
-        template.file(source, tmp_path / "rendered.conf")
+        files.template(source, tmp_path / "rendered.conf")
 
 
-def test_file_reports_syntax_error_location(tmp_path):
+def test_template_reports_syntax_error_location(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "{% if %}\n")
     context(tmp_path)
 
     with pytest.raises(TaskFailed) as caught:
-        template.file(source, tmp_path / "rendered.conf")
+        files.template(source, tmp_path / "rendered.conf")
 
     message = str(caught.value)
     assert "template syntax error" in message
@@ -151,32 +136,32 @@ def test_file_reports_syntax_error_location(tmp_path):
         ({"facts": {}}, "reserved"),
     ],
 )
-def test_file_rejects_invalid_variables(tmp_path, variables, message):
+def test_template_rejects_invalid_variables(tmp_path, variables, message):
     source = tmp_path / "template.j2"
     write_source(source, "value\n")
     context(tmp_path)
 
     with pytest.raises(TaskFailed, match=message):
-        template.file(source, tmp_path / "rendered.conf", variables=variables)
+        files.template(source, tmp_path / "rendered.conf", variables=variables)
 
 
-def test_file_rejects_non_boolean_sudo(tmp_path):
+def test_template_rejects_non_boolean_sudo(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "value\n")
     context(tmp_path)
 
     with pytest.raises(TaskFailed, match="template sudo must be a boolean"):
-        template.file(source, tmp_path / "rendered.conf", sudo="yes")
+        files.template(source, tmp_path / "rendered.conf", sudo="yes")
 
 
-def test_file_resolves_sources_relative_to_the_bundle(tmp_path):
+def test_template_resolves_sources_relative_to_the_bundle(tmp_path):
     _ctx, bundle_dir = bundle_context(tmp_path)
     write_source(bundle_dir / "files" / "bare.j2", "bare\n")
     write_source(bundle_dir / "nested" / "relative.j2", "relative\n")
 
-    template.file("bare.j2", tmp_path / "bare.out")
-    template.file("nested/relative.j2", tmp_path / "relative.out")
-    template.file(
+    files.template("bare.j2", tmp_path / "bare.out")
+    files.template("nested/relative.j2", tmp_path / "relative.out")
+    files.template(
         bundle_dir / "nested" / "relative.j2",
         tmp_path / "absolute.out",
     )
@@ -186,7 +171,7 @@ def test_file_resolves_sources_relative_to_the_bundle(tmp_path):
     assert (tmp_path / "absolute.out").read_text() == "relative\n"
 
 
-def test_file_allows_bundle_context(tmp_path):
+def test_template_allows_bundle_context(tmp_path):
     _ctx, bundle_dir = bundle_context(
         tmp_path,
         vars=SimpleNamespace(NAME="kitup"),
@@ -194,66 +179,66 @@ def test_file_allows_bundle_context(tmp_path):
     )
     write_source(bundle_dir / "files" / "template.j2", "{{ vars.NAME }}@{{ facts.hostname }}\n")
 
-    template.file("template.j2", tmp_path / "out")
+    files.template("template.j2", tmp_path / "out")
 
     assert (tmp_path / "out").read_text() == "kitup@example\n"
 
 
-def test_file_requires_regular_source(tmp_path):
+def test_template_requires_regular_source(tmp_path):
     context(tmp_path)
     dest = tmp_path / "rendered.conf"
 
     with pytest.raises(TaskFailed, match="does not exist"):
-        template.file(tmp_path / "missing.j2", dest)
+        files.template(tmp_path / "missing.j2", dest)
 
     directory = tmp_path / "source-dir"
     directory.mkdir()
     with pytest.raises(TaskFailed, match="directory"):
-        template.file(directory, dest)
+        files.template(directory, dest)
 
     source = tmp_path / "source.j2"
     source.write_text("value\n")
     link = tmp_path / "link.j2"
     link.symlink_to(source)
     with pytest.raises(TaskFailed, match="symlink"):
-        template.file(link, dest)
+        files.template(link, dest)
 
     assert not dest.exists()
 
 
-def test_file_rejects_non_utf8_source(tmp_path):
+def test_template_rejects_non_utf8_source(tmp_path):
     source = tmp_path / "template.j2"
     source.write_bytes(b"\xff\xfe")
     context(tmp_path)
 
     with pytest.raises(TaskFailed, match="UTF-8"):
-        template.file(source, tmp_path / "rendered.conf")
+        files.template(source, tmp_path / "rendered.conf")
 
 
-def test_file_requires_parent_directory(tmp_path):
+def test_template_requires_parent_directory(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "value\n")
     context(tmp_path)
 
     with pytest.raises(TaskFailed, match="parent directory does not exist"):
-        template.file(source, tmp_path / "missing" / "rendered.conf")
+        files.template(source, tmp_path / "missing" / "rendered.conf")
 
 
-def test_file_defers_parent_directory_check_in_dry_run(tmp_path):
+def test_template_defers_parent_directory_check_in_dry_run(tmp_path):
     # An earlier task may create the parent in a real run, so a dry run reports
     # the render without requiring the parent to exist yet.
     source = tmp_path / "template.j2"
     write_source(source, "value\n")
     ctx = context(tmp_path, dry_run=True)
 
-    template.file(source, tmp_path / "missing" / "rendered.conf")
+    files.template(source, tmp_path / "missing" / "rendered.conf")
 
     assert not (tmp_path / "missing").exists()
     assert len(ctx.changes) == 1
     assert ctx.changes[0].changed
 
 
-def test_file_refuses_directory_destination(tmp_path):
+def test_template_refuses_directory_destination(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "value\n")
     context(tmp_path)
@@ -261,10 +246,10 @@ def test_file_refuses_directory_destination(tmp_path):
     dest.mkdir()
 
     with pytest.raises(TaskFailed, match="directory"):
-        template.file(source, dest)
+        files.template(source, dest)
 
 
-def test_file_replaces_destination_symlink_without_following_it(tmp_path):
+def test_template_replaces_destination_symlink_without_following_it(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "managed\n")
     target = tmp_path / "target"
@@ -273,14 +258,14 @@ def test_file_replaces_destination_symlink_without_following_it(tmp_path):
     link.symlink_to(target)
     context(tmp_path)
 
-    template.file(source, link)
+    files.template(source, link)
 
     assert not link.is_symlink()
     assert link.read_text() == "managed\n"
     assert target.read_text() == "target content\n"
 
 
-def test_file_preserves_existing_mode_and_applies_explicit_mode(tmp_path):
+def test_template_preserves_existing_mode_and_applies_explicit_mode(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "value\n")
     dest = tmp_path / "rendered.conf"
@@ -288,28 +273,28 @@ def test_file_preserves_existing_mode_and_applies_explicit_mode(tmp_path):
     dest.chmod(0o600)
     ctx = context(tmp_path)
 
-    template.file(source, dest)
+    files.template(source, dest)
     assert len(ctx.changes) == 0
     assert stat.S_IMODE(dest.stat().st_mode) == 0o600
 
-    template.file(source, dest, mode=0o640)
+    files.template(source, dest, mode=0o640)
     assert len(ctx.changes) == 1
-    assert ctx.changes[0].action == "template.file"
+    assert ctx.changes[0].action == "files.template"
     assert stat.S_IMODE(dest.stat().st_mode) == 0o640
 
 
-def test_file_accepts_octal_string_mode(tmp_path):
+def test_template_accepts_octal_string_mode(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "value\n")
     dest = tmp_path / "rendered.conf"
     context(tmp_path)
 
-    template.file(source, dest, mode="0640")
+    files.template(source, dest, mode="0640")
 
     assert stat.S_IMODE(dest.stat().st_mode) == 0o640
 
 
-def test_file_reports_metadata_only_change(tmp_path):
+def test_template_reports_metadata_only_change(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "same\n")
     dest = tmp_path / "rendered.conf"
@@ -317,7 +302,7 @@ def test_file_reports_metadata_only_change(tmp_path):
     dest.chmod(0o644)
     ctx = context(tmp_path)
 
-    template.file(source, dest, mode=0o600)
+    files.template(source, dest, mode=0o600)
 
     assert dest.read_text() == "same\n"
     assert stat.S_IMODE(dest.stat().st_mode) == 0o600
@@ -330,7 +315,7 @@ def test_dry_run_reports_without_writing(tmp_path):
     dest = tmp_path / "rendered.conf"
     ctx = context(tmp_path, vars=SimpleNamespace(VALUE=1), dry_run=True)
 
-    template.file(source, dest)
+    files.template(source, dest)
 
     assert not dest.exists()
     assert len(ctx.changes) == 1
@@ -342,7 +327,7 @@ def test_dry_run_still_reports_template_errors(tmp_path):
     context(tmp_path, dry_run=True)
 
     with pytest.raises(TaskFailed, match="undefined variable"):
-        template.file(source, tmp_path / "rendered.conf")
+        files.template(source, tmp_path / "rendered.conf")
 
 
 def test_dry_run_validates_metadata_identities(tmp_path):
@@ -351,10 +336,10 @@ def test_dry_run_validates_metadata_identities(tmp_path):
     context(tmp_path, dry_run=True)
 
     with pytest.raises(TaskFailed, match="unknown user"):
-        template.file(source, tmp_path / "out", owner="kitup-missing-user")
+        files.template(source, tmp_path / "out", owner="kitup-missing-user")
 
     with pytest.raises(TaskFailed, match="unknown group"):
-        template.file(source, tmp_path / "out", group="kitup-missing-group")
+        files.template(source, tmp_path / "out", group="kitup-missing-group")
 
 
 def test_diff_prints_unified_diff(tmp_path):
@@ -364,7 +349,7 @@ def test_diff_prints_unified_diff(tmp_path):
     dest.write_text("old\n")
     ctx = context(tmp_path, diff=True)
 
-    template.file(source, dest)
+    files.template(source, dest)
 
     stream = ctx.output.stream
     output = stream.getvalue()
@@ -381,7 +366,7 @@ def test_privileged_write_uses_worker(tmp_path):
     ctx.vars = SimpleNamespace(VALUE=1)
 
     try:
-        template.file(source, dest, mode=0o600, sudo=True)
+        files.template(source, dest, mode=0o600, sudo=True)
 
         assert ctx.sudo.refresh_count > 0
         assert dest.read_text() == "value=1\n"
@@ -390,20 +375,12 @@ def test_privileged_write_uses_worker(tmp_path):
         ctx.close()
 
 
-def test_file_accepts_path_objects_and_numeric_metadata(tmp_path):
+def test_template_accepts_path_objects_and_numeric_metadata(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "value\n")
     dest = tmp_path / "rendered.conf"
     context(tmp_path)
 
-    template.file(source, dest, owner=os.getuid(), group=os.getgid())
+    files.template(source, dest, owner=os.getuid(), group=os.getgid())
 
     assert dest.read_text() == "value\n"
-
-
-def test_jinja_environment_is_cached():
-    template._jinja_environment.cache_clear()
-    try:
-        assert template._jinja_environment() is template._jinja_environment()
-    finally:
-        template._jinja_environment.cache_clear()

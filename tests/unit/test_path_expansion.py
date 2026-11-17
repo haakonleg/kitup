@@ -10,7 +10,7 @@ import zipfile
 import pytest
 
 from kitup.commands import CommandRunner
-from kitup.modules import command, decompress, dnf, download, files, git, pip, podman, sysctl, template, users, uv
+from kitup.modules import command, decompress, dnf, download, files, git, pip, podman, sysctl, users, uv
 from kitup.privileges import PrivilegeManager
 
 from .helpers import FakeCommandRunner, FakeSudo, argvs, make_context, plain_output, response, serve_http
@@ -86,7 +86,7 @@ def test_template_destination_expands_home(tmp_path, home):
     source.write_text("rendered\n", encoding="utf-8")
     context(tmp_path)
 
-    template.file(source, "~/rendered")
+    files.template(source, "~/rendered")
 
     assert (home / "rendered").read_text(encoding="utf-8") == "rendered\n"
 

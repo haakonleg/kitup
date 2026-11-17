@@ -9,10 +9,10 @@ description = "The simple python-driven system configuration tool"
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
-dependencies = ["Jinja2>=3.1,<4"]
+dependencies = ["Jinja2>=3.1,<4", "PyYAML>=6,<7"]
 
 [dependency-groups]
-dev = ["pytest", "pytest-randomly", "ruff", "mypy"]
+dev = ["pytest", "pytest-randomly", "ruff", "mypy", "types-PyYAML"]
 
 [project.scripts]
 kitup = "kitup.cli:main"
