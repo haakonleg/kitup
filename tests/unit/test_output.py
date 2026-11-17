@@ -23,6 +23,12 @@ class TtyStream(StringIO):
         return 1
 
 
+def make_bundle(*, bundle_id: str = "base", name: str = "Base system", description: str = "Core packages") -> Bundle:
+    bundle = Bundle(name, description)
+    bundle._finalize(id=bundle_id, name=name, var_paths=())
+    return bundle
+
+
 def make_task(name: str = "Task"):
     bundle = Bundle("base")
     add_task(bundle, lambda: None, name=name)
@@ -266,6 +272,33 @@ def test_bundle_header_is_bold():
     output.bundle_header("Base system (base)")
 
     assert "\033[1mbundle: Base system (base)\033[0m" in stream.getvalue()
+
+
+def test_bundle_plan_header_dims_description_in_non_verbose():
+    stream = TtyStream()
+    output = Output(stream)
+    bundle = make_bundle()
+
+    output.bundle_plan_header(bundle, verbose=False)
+
+    text = stream.getvalue()
+    assert "\033[1mbundle: Base system (base)\033[0m" in text
+    assert "\033[2m  Core packages\033[0m" in text
+
+
+def test_bundle_plan_header_lists_id_name_and_description_when_verbose():
+    stream = StringIO()
+    output = Output(stream, no_color=True)
+    bundle = make_bundle()
+
+    output.bundle_plan_header(bundle, verbose=True)
+
+    assert stream.getvalue().splitlines() == [
+        "",
+        "bundle: base",
+        "  name: Base system",
+        "  description: Core packages",
+    ]
 
 
 def test_bundle_rollup_lists_changed_ok_and_skipped():

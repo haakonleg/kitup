@@ -156,6 +156,19 @@ class Output:
         self.write()
         self.write(self._paint(f"bundle: {name}", _BOLD))
 
+    def bundle_plan_header(self, bundle: Bundle, *, verbose: bool) -> None:
+        """Print a bundle header and metadata for a plan listing."""
+        description = bundle.description.replace("\n", "\n  ")
+        if verbose:
+            self.bundle_header(bundle.id)
+            self.write(f"  name: {bundle.name or bundle.id}")
+            suffix = f" {description}" if description else ""
+            self.write(f"  description:{suffix}")
+            return
+        self.bundle_header(bundle_label(bundle))
+        if description:
+            self.write(self._paint(f"  {description}", _DIM))
+
     def bundle_rollup(self, bundle_id: str, counts: Mapping[Status, int], duration: float) -> None:
         """Print a dim per-bundle summary line."""
         changed = counts.get(Status.CHANGED, 0)

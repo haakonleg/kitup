@@ -202,7 +202,7 @@ def test_list_shows_ids_and_display_names(tmp_path, capsys):
     assert "bundle: Base system (base)" in capsys.readouterr().out
 
 
-def test_list_non_verbose_shows_only_task_names(tmp_path, capsys):
+def test_list_non_verbose_shows_bundle_description(tmp_path, capsys):
     make_project(
         tmp_path,
         bundles={
@@ -225,10 +225,31 @@ def test_list_non_verbose_shows_only_task_names(tmp_path, capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "bundle: Base system (base)" in out
+    assert "Core packages" in out
     assert "- Install packages" in out
-    assert "Core packages" not in out
     assert "tags:" not in out
     assert "id:" not in out
+
+
+def test_list_verbose_shows_bundle_id_name_and_description(tmp_path, capsys):
+    make_project(
+        tmp_path,
+        bundles={
+            "base": {
+                "__init__.py": "from kitup import bundle\n\nbundle('Base system', 'Core packages')\n",
+                "tasks.py": task_source("install"),
+            }
+        },
+    )
+
+    code = cli.main(["list", str(tmp_path), "--no-color", "-v"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "bundle: base" in out
+    assert "name: Base system" in out
+    assert "description: Core packages" in out
+    assert "bundle: Base system (base)" not in out
 
 
 def test_list_verbose_shows_task_details(tmp_path, capsys):
@@ -284,7 +305,8 @@ def test_verbose_output_indents_multiline_descriptions(tmp_path, capsys):
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "  Bundle first." in out
+    assert "  name: Base" in out
+    assert "  description: Bundle first." in out
     assert "\n  Bundle second." in out
     assert "      description: First line." in out
     assert "\n      Second paragraph." in out

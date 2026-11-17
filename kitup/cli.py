@@ -19,7 +19,7 @@ from .context import TaskContext
 from .errors import KitupError, PrivilegeError, ProjectError, UsageError
 from .host_facts import collect_facts
 from .modules import discover_builtin_modules
-from .output import Output, bundle_label
+from .output import Output
 from .presets import parse_with_presets
 from .privileges import PrivilegeManager
 from .project import (
@@ -458,11 +458,8 @@ def _write_paths(output: Output, label: str, paths: Sequence[Path], *, verbose: 
 
 def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
     for bundle in plan.bundles:
-        output.bundle_header(bundle_label(bundle))
+        output.bundle_plan_header(bundle, verbose=verbose)
         if verbose:
-            if bundle.description:
-                description = bundle.description.replace("\n", "\n  ")
-                output.write(f"  {description}")
             dependencies = ", ".join(_dependency_id(dependency) for dependency in bundle.depends_on)
             output.write(f"  depends:{f' {dependencies}' if dependencies else ''}")
             if bundle.var_paths:
@@ -470,16 +467,15 @@ def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
                 output.write(f"  vars: {var_labels}")
             output.write("  tasks:")
         for task in bundle.tasks:
-            if verbose:
-                tags = ", ".join(sorted(map(str, task.tags)))
-                output.write(f"    - {task.name}")
-                output.write(f"      id: {task.id}")
-                output.write(f"      tags:{f' {tags}' if tags else ''}")
-                if task.description:
-                    description = task.description.replace("\n", "\n      ")
-                    output.write(f"      description: {description}")
-            else:
-                output.write(f"    - {task.name}")
+            output.write(f"    - {task.name}")
+            if not verbose:
+                continue
+            tags = ", ".join(sorted(map(str, task.tags)))
+            output.write(f"      id: {task.id}")
+            output.write(f"      tags:{f' {tags}' if tags else ''}")
+            if task.description:
+                description = task.description.replace("\n", "\n      ")
+                output.write(f"      description: {description}")
 
     bundles = len(plan.bundles)
     tasks = sum(len(bundle.tasks) for bundle in plan.bundles)
