@@ -342,7 +342,7 @@ def test_dry_run_validates_metadata_identities(tmp_path):
         files.template(source, tmp_path / "out", group="kitup-missing-group")
 
 
-def test_diff_prints_unified_diff(tmp_path):
+def test_diff_buffers_unified_diff(tmp_path):
     source = tmp_path / "template.j2"
     write_source(source, "new\n")
     dest = tmp_path / "rendered.conf"
@@ -351,11 +351,9 @@ def test_diff_prints_unified_diff(tmp_path):
 
     files.template(source, dest)
 
-    stream = ctx.output.stream
-    output = stream.getvalue()
-    assert "---" in output
-    assert "-old" in output
-    assert "+new" in output
+    assert any(line.startswith("---") for line in ctx.diffs)
+    assert "-old" in ctx.diffs
+    assert "+new" in ctx.diffs
 
 
 def test_privileged_write_uses_worker(tmp_path):

@@ -45,18 +45,22 @@ class Runner:
             for bundle, tasks in selected:
                 if not tasks:
                     continue
+                bundle_start = time.monotonic()
+                bundle_summary = RunSummary()
                 self.output.bundle_header(bundle_label(bundle))
                 state = self.context.run_state.for_bundle(bundle)
 
                 for task in tasks:
-                    self.output.task_start(task.name)
+                    progress = (completed + 1, total)
+                    self.output.task_start(task.name, progress=progress)
                     try:
                         result = self._run_task(task)
                     finally:
                         self.output.task_stop()
                     completed += 1
                     self._summary.add(result.status)
-                    self.output.task(result)
+                    bundle_summary.add(result.status)
+                    self.output.task(result, progress=progress)
 
                     pending = self.context.take_side_effects()
                     if result.status is Status.CHANGED:
@@ -68,6 +72,7 @@ class Runner:
                                 start=start,
                                 total=total,
                                 completed=completed,
+                                bundle_summary=bundle_summary,
                             )
                             if code:
                                 return code
@@ -84,10 +89,12 @@ class Runner:
                         start=start,
                         total=total,
                         completed=completed,
+                        bundle_summary=bundle_summary,
                     )
                     if code:
                         return code
                     state.deferred_effects.clear()
+                self.output.bundle_rollup(bundle.id, bundle_summary.counts, time.monotonic() - bundle_start)
         except KeyboardInterrupt:
             not_run = total - completed
             self._finish(start, not_run)
@@ -121,9 +128,17 @@ class Runner:
         return selected
 
     def _run_side_effects(
-        self, state: BundleState, side_effects: list[SideEffect], *, start: float, total: int, completed: int
+        self,
+        state: BundleState,
+        side_effects: list[SideEffect],
+        *,
+        start: float,
+        total: int,
+        completed: int,
+        bundle_summary: RunSummary,
     ) -> int:
         self.output.fit_task_names(side_effect.name for side_effect in side_effects)
+        progress = (completed, total)
 
         for side_effect in side_effects:
             if side_effect.one_shot and side_effect in state.executed_effects:
@@ -131,14 +146,15 @@ class Runner:
 
             task = _side_effect_task(state.bundle, side_effect)
 
-            self.output.task_start(side_effect.name, side_effect=True)
+            self.output.task_start(side_effect.name, side_effect=True, progress=progress)
             try:
                 result = self._run_task(task, is_side_effect=True)
             finally:
                 self.output.task_stop()
 
             self._summary.add(result.status)
-            self.output.task(result, side_effect=True)
+            bundle_summary.add(result.status)
+            self.output.task(result, side_effect=True, progress=progress)
 
             if result.status is Status.FAILED:
                 self.output.failure(result)
@@ -186,6 +202,7 @@ class Runner:
             status=status,
             calls=calls,
             notes=notes,
+            diffs=self.context.diffs,
             detail=detail,
             duration=self.output.task_elapsed,
             error=error,

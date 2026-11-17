@@ -69,9 +69,10 @@ def test_status_inference_and_summary(tmp_path):
 
     assert code == 0
     assert "ok" in text
-    assert "changed  +x" in text
-    assert "skipped  not needed" in text
-    assert "Summary: 1 changed, 1 ok, 1 skipped, 0 failed, 0 not run" in text
+    assert "changed" in text
+    assert "+ task.<lambda>: +x" in text
+    assert "not needed" in text
+    assert "Summary: 1 changed, 1 ok, 1 skipped" in text
 
 
 def test_no_change_call_is_recorded_but_keeps_the_task_ok(tmp_path):
@@ -293,7 +294,7 @@ def test_fail_fast_and_remaining_count(tmp_path):
     assert code == 1
     assert "Second" in text and "failed" in text
     assert "error: boom" in text
-    assert "Summary: 0 changed, 1 ok, 1 failed, 1 not run" in text
+    assert "Summary: 1 ok, 1 failed, 1 not run" in text
     assert 'Aborted after failure in "Second". 1 task(s) not run.' in text
 
 
@@ -358,7 +359,7 @@ def test_keyboard_interrupt_returns_130(tmp_path):
     code, text, _ = run_plan(tmp_path, [bundle])
 
     assert code == 130
-    assert "Summary: 0 changed, 1 ok, 0 failed, 1 not run" in text
+    assert "Summary: 1 ok, 1 not run" in text
     assert "Interrupted. 1 task(s) not run." in text
 
 
@@ -383,7 +384,7 @@ def test_tag_filtering_and_skip_tags(tmp_path):
 
     assert code == 0
     assert calls == ["packages"]
-    assert "Summary: 0 changed, 1 ok, 0 failed, 0 not run" in text
+    assert "Summary: 1 ok, nothing changed" in text
 
 
 def test_sudo_is_requested_at_first_sudo_operation(tmp_path):
@@ -430,7 +431,8 @@ def test_deferred_side_effect_runs_at_end_of_bundle_and_before_next_bundle(tmp_p
     code, text, _ = run_plan(tmp_path, [bundle])
     assert code == 0
     assert calls == ["install", "last", "refresh"]
-    assert "↳ Refresh" in text
+    assert "Refresh" in text
+    assert "↳" in text
 
     calls.clear()
     base = Bundle("base")
@@ -453,7 +455,7 @@ def test_deferred_side_effect_runs_at_end_of_bundle_and_before_next_bundle(tmp_p
     code, text, _ = run_plan(tmp_path, [other])
     assert code == 0
     assert calls == ["install", "refresh", "other"]
-    assert text.index("↳ Refresh") < text.index("bundle: other")
+    assert text.index("Refresh") < text.index("bundle: other")
 
 
 def test_immediate_side_effect_runs_before_and_affects_next_task(tmp_path):
@@ -954,6 +956,59 @@ def test_nested_side_effect_registration_fails(tmp_path):
 
     assert code == 1
     assert "side effects cannot register other side effects" in text
+
+
+def test_runner_renders_progress_and_bundle_rollups(tmp_path):
+    base = Bundle("base")
+    other = Bundle("other", depends_on=[base])
+    add_task(base, lambda: None, name="First")
+    add_task(other, lambda: None, name="Second")
+
+    code, text, _ = run_plan(tmp_path, [other])
+
+    assert code == 0
+    assert "  [1/2] First" in text
+    assert "  [2/2] Second" in text
+    assert "↳ base: 0 changed, 1 ok" in text
+    assert "↳ other: 0 changed, 1 ok" in text
+
+
+def test_runner_rollup_counts_side_effects(tmp_path):
+    bundle = Bundle("base")
+
+    def refresh():
+        current_context().changed(summary="+refreshed")
+
+    effect = side_effect("Refresh")(refresh)
+
+    def install():
+        ctx = current_context()
+        ctx.changed(summary="+pkg")
+        ctx.side_effect(effect)
+
+    add_task(bundle, install, name="Install")
+
+    code, text, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 0
+    assert "↳ base: 2 changed, 0 ok" in text
+
+
+def test_runner_attaches_buffered_diffs_to_results(tmp_path):
+    bundle = Bundle("base")
+
+    def first():
+        current_context().add_diff("+new")
+
+    add_task(bundle, first, name="First")
+    add_task(bundle, lambda: None, name="Second")
+
+    code, text, context = run_plan(tmp_path, [bundle])
+
+    assert code == 0
+    assert "      +new" in text
+    assert stored_result(context, bundle.tasks[0]).diffs == ["+new"]
+    assert stored_result(context, bundle.tasks[1]).diffs == []
 
 
 def test_current_context_is_the_runner_context(tmp_path):

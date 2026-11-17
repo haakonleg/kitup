@@ -56,6 +56,27 @@ def test_apply_uses_discovered_vars(tmp_path, capsys):
     assert "value=work" in capsys.readouterr().out
 
 
+def test_apply_dry_run_prints_banner_and_would_change(tmp_path, capsys):
+    make_project(tmp_path, bundles={"base": task_source("run")})
+
+    code = cli.main(["apply", str(tmp_path), "-n", "--no-color"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "dry run: no changes will be applied" in out
+    assert "would" in out
+    assert "Summary: 1 would change" in out
+
+
+def test_list_prints_plan_recap(tmp_path, capsys):
+    make_project(tmp_path, bundles={"base": task_source("run")})
+
+    code = cli.main(["list", str(tmp_path), "--no-color"])
+
+    assert code == 0
+    assert "1 bundle, 1 task" in capsys.readouterr().out
+
+
 def test_default_project_is_the_current_directory(tmp_path, monkeypatch, capsys):
     make_project(tmp_path, bundles={"base": task_source("run")})
     monkeypatch.chdir(tmp_path)
@@ -831,10 +852,10 @@ def test_apply_shows_and_prefixes_side_effect_lines(tmp_path, capsys):
     out = capsys.readouterr().out
     lines = out.splitlines()
     assert code == 0
-    assert any(line.startswith("    Configure nginx") for line in lines)
-    assert any(line.startswith("  ↳ Reload nginx") for line in lines)
-    assert any(line.startswith("  ↳ Refresh package metadata") for line in lines)
-    assert not any(line.startswith("  ↳ Configure nginx") for line in lines)
+    assert any(line.startswith("  [1/1] Configure nginx") for line in lines)
+    assert any(line.startswith("  ↳") and "Reload nginx" in line for line in lines)
+    assert any(line.startswith("  ↳") and "Refresh package metadata" in line for line in lines)
+    assert not any(line.startswith("  ↳") and "Configure nginx" in line for line in lines)
 
 
 def test_version_matches_pyproject():
@@ -1429,7 +1450,7 @@ def test_list_modules_shows_descriptions_in_both_modes(tmp_path, capsys):
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "  - mytool: Install mytool." in out
+    assert "  - mytool:  Install mytool." in out
 
     code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
 
@@ -1449,7 +1470,7 @@ def test_list_modules_indents_multiline_descriptions(tmp_path, capsys):
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "  - mytool: First line.\n      Second line." in out
+    assert "  - mytool:  First line.\n      Second line." in out
 
 
 def test_list_modules_works_without_bundles(tmp_path, capsys):

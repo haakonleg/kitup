@@ -755,6 +755,7 @@ def _write_bytes(
 
 
 def emit_diff(ctx: TaskContext, path: Path, old: bytes | None, new: bytes) -> None:
+    """Buffer a unified diff for the current task when ``--diff`` is active."""
     if not ctx.diff or ctx.output is None:
         return
     try:
@@ -770,4 +771,4 @@ def emit_diff(ctx: TaskContext, path: Path, old: bytes | None, new: bytes) -> No
         lineterm="",
     )
     for item in diff:
-        ctx.output.write(item)
+        ctx.add_diff(item)

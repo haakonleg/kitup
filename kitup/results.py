@@ -65,6 +65,7 @@ class TaskResult:
     status: Status
     calls: list[CallResult] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    diffs: list[str] = field(default_factory=list)
     detail: str = ""
     duration: float = 0.0
     error: BaseException | None = None

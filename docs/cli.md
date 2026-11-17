@@ -113,8 +113,26 @@ in the plan but runs nothing.
 - `-c`, `--no-color` — disable colors.
 - `-V`, `--version` — print the version.
 
-Option names must be written exactly as shown. Abbreviated long options such as
-`--include-bundl` and combined short options such as `-nm` are rejected.
+`apply` prints one line per task, with changes as indented sub-lines:
+
+```text
+bundle: Base system (base)
+  [1/2] Install packages                            ▲ changed ×3    (1.24 s)
+    + dnf.packages: +neovim +htop
+    + systemd.unit: enable nginx.service
+    + systemd.unit: start nginx.service
+  ↳     systemctl reload                            ▲ changed       (0.30 s)
+      + systemd.daemon_reload: reload systemd
+  [2/2] Configure sshd                              ✓ ok            (0.03 s)
+    › probed sshd config
+↳ base: 2 changed, 1 ok — 1.6 s
+```
+
+Statuses are colored and glyph-marked on a terminal; `×N` counts changes.
+`--verbose` also shows unchanged calls, `ctx.note()` adds `›` notes, side
+effects use `↳`, and each bundle ends with a dim summary line. In a dry run,
+changed statuses read `would`; `--diff` prints diffs under each task. Colors
+are disabled when stdout is not a terminal or with `--no-color` / `NO_COLOR`.
 
 ### Bytecode cache
 

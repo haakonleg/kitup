@@ -282,21 +282,17 @@ def _examples(*lines: str) -> str:
     return "examples:\n" + "\n".join(f"  {line}" for line in lines)
 
 
-def _print_preset_warning(message: str) -> None:
-    """Write a preset warning to stderr."""
-    print(f"warning: {message}", file=sys.stderr)
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface and return an exit code."""
     disable_same_uid_ptrace()
+    output = Output()
     arguments = list(sys.argv[1:] if argv is None else argv)
 
     try:
-        args, preset_paths = parse_with_presets(build_parser(), arguments, on_warning=_print_preset_warning)
+        args, preset_paths = parse_with_presets(build_parser(), arguments, on_warning=output.warning)
         _apply_defaults(args)
         configure_pycache(disabled=args.no_pycache)
-        output = Output(no_color=args.no_color, verbose=args.verbose)
+        output = Output(no_color=args.no_color, verbose=args.verbose, dry_run=args.dry_run)
         if args.command == "init":
             return _init(args, output)
         if args.command == "list-modules":
@@ -313,10 +309,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         with on_project_path(project.root):
             return _run_project(args, project, output)
     except KitupError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        output.error(str(exc))
         return 2 if isinstance(exc, (UsageError, PrivilegeError)) else 1
     except KeyboardInterrupt:
-        print("Interrupted.", file=sys.stderr)
+        output.error("Interrupted.", prefix=False)
         return 130
 
 
@@ -421,6 +417,8 @@ def _apply(
             tags=_value_filter(args.tags),
             skip_tags=_value_filter(args.skip_tags),
         )
+        if args.dry_run:
+            output.dry_run_banner()
         return runner.run()
     finally:
         context.close()
@@ -460,8 +458,7 @@ def _write_paths(output: Output, label: str, paths: Sequence[Path], *, verbose: 
 
 def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
     for bundle in plan.bundles:
-        output.write()
-        output.write(f"bundle: {bundle_label(bundle)}")
+        output.bundle_header(bundle_label(bundle))
         if verbose:
             if bundle.description:
                 description = bundle.description.replace("\n", "\n  ")
@@ -484,6 +481,16 @@ def _print_plan(plan: BundlePlan, output: Output, *, verbose: bool) -> None:
             else:
                 output.write(f"    - {task.name}")
 
+    bundles = len(plan.bundles)
+    tasks = sum(len(bundle.tasks) for bundle in plan.bundles)
+    output.write()
+    output.write(f"{bundles} {_plural(bundles, 'bundle')}, {tasks} {_plural(tasks, 'task')}")
+
+
+def _plural(count: int, noun: str) -> str:
+    """Return ``noun`` with a plural suffix unless ``count`` is one."""
+    return noun if count == 1 else f"{noun}s"
+
 
 def _dependency_id(dependency: str | Bundle) -> str:
     if isinstance(dependency, str):
@@ -499,6 +506,7 @@ def _print_module_group(
     if not modules:
         output.write("  (none)")
         return
+    label_width = max(len(entry.name) for entry in modules) + 1
     for index, entry in enumerate(modules):
         if verbose and index:
             output.write()
@@ -507,7 +515,8 @@ def _print_module_group(
             _print_module_details(entry, output, show_path=show_path)
         elif entry.description:
             description = entry.description.replace("\n", "\n      ")
-            output.write(f"  - {entry.name}: {description}")
+            label_text = f"{entry.name}:"
+            output.write(f"  - {label_text:<{label_width}}  {output.dim(description)}")
         else:
             output.write(f"  - {entry.name}")
 
@@ -566,7 +575,7 @@ def _warn_empty_bundles(plan: BundlePlan, output: Output) -> None:
         return
     output.write()
     for bundle_id in empty:
-        output.write(f"warning: bundle {bundle_id!r} has no tasks")
+        output.warning(f"bundle {bundle_id!r} has no tasks", to_stderr=False)
 
 
 def _value_filter(values: Sequence[str]) -> frozenset[str] | None:
@@ -596,7 +605,7 @@ def _init(args: Args, output: Output) -> int:
             raise ProjectError(f"cannot create {path}: {exc}") from exc
 
     output.write(f"Initialized kitup project in {root}")
-    output.write("Next steps:")
+    output.write(output.dim("Next steps:"))
     output.write("  kitup check")
     output.write("  kitup apply -n")
     return 0

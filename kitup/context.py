@@ -65,6 +65,7 @@ class TaskContext:
 
         self._calls: list[CallResult] = []
         self._notes: list[str] = []
+        self._diffs: list[str] = []
         self._memo: dict[str, Any] = {}
         self._run_state = RunState()
         self._task_name = ""
@@ -88,6 +89,11 @@ class TaskContext:
     def notes(self) -> list[str]:
         """Return the notes recorded for the current task."""
         return list(self._notes)
+
+    @property
+    def diffs(self) -> list[str]:
+        """Return the diff lines buffered for the current task."""
+        return list(self._diffs)
 
     @property
     def run_state(self) -> RunState:
@@ -173,6 +179,7 @@ class TaskContext:
         """Reset task-scoped state and enter the task's bundle."""
         self._calls.clear()
         self._notes.clear()
+        self._diffs.clear()
         self._task_name = task.name
         self._bundle = task.bundle
         self._bundle_path = task.bundle_path
@@ -331,6 +338,10 @@ class TaskContext:
     def note(self, detail: str) -> None:
         """Attach an informational note to the current task line."""
         self._notes.append(detail)
+
+    def add_diff(self, line: str) -> None:
+        """Buffer one diff line for rendering under the current task."""
+        self._diffs.append(line)
 
     def memo[T](self, key: str, loader: Callable[[], T]) -> T:
         """Compute a value once per run and return the cached result."""
