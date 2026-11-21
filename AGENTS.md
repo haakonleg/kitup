@@ -172,8 +172,9 @@ When changing packaging or the zipapp builder:
 - Request privilege with `sudo=True` on `ctx.run` or the module helper. Never
   embed `sudo` in the command list.
 - Expensive per-run work belongs in `ctx.memo(key, loader)` or behind the
-  `@memo` decorator. Use `ctx.skip()` and `ctx.fail()` for control flow, and
-  `ctx.note()` for extra context.
+  `@memo` decorator. Both cache skipped and failed outcomes for repeat calls.
+  Use `ctx.skip()` and `ctx.fail()` for control flow, and `ctx.note()` for
+  extra context.
 
 ### Test conventions
 

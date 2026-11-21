@@ -26,19 +26,32 @@ from .variables import Vars
 
 _MISSING: Final = object()
 
+_CACHED_OUTCOMES: Final = (SkipTask, TaskFailed)
+
 
 def _memoized[K, T](store: dict[K, Any], key: K, loader: Callable[[], T]) -> T:
-    """Return the cached value for ``key``, computing it with ``loader`` once."""
+    """Return the cached value for ``key``, computing it with ``loader`` once.
+
+    ``SkipTask`` and ``TaskFailed`` raised by ``loader`` are cached and
+    re-raised on later calls; any other exception propagates uncached.
+    """
     if key not in store:
-        store[key] = loader()
-    return cast(T, store[key])
+        try:
+            store[key] = loader()
+        except _CACHED_OUTCOMES as exc:
+            store[key] = exc
+    cached = store[key]
+    if isinstance(cached, _CACHED_OUTCOMES):
+        raise cached
+    return cast(T, cached)
 
 
 def memo[**P, T](func: Callable[P, T]) -> Callable[P, T]:
     """Cache the result of ``func`` once per run, keyed by its arguments.
 
-    Arguments and keyword arguments must be hashable; otherwise ``TaskFailed``
-    is raised.
+    A ``SkipTask`` or ``TaskFailed`` raised by ``func`` is cached and re-raised
+    on later calls with the same arguments. Arguments and keyword arguments
+    must be hashable; otherwise ``TaskFailed`` is raised.
     """
 
     @wraps(func)
@@ -391,7 +404,11 @@ class TaskContext:
         self._diffs.append(line)
 
     def memo[T](self, key: str, loader: Callable[[], T]) -> T:
-        """Compute a value once per run and return the cached result."""
+        """Compute a value once per run and return the cached result.
+
+        A ``SkipTask`` or ``TaskFailed`` raised by ``loader`` is cached and
+        re-raised on later calls with the same key.
+        """
         require_text(key, "memo key")
         return _memoized(self._memo, key, loader)
 

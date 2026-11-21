@@ -8,7 +8,7 @@ from kitup import facts as ambient_facts
 from kitup import memo
 from kitup import vars as ambient_vars
 from kitup.context import current_context, set_current_context
-from kitup.errors import TaskFailed, VarsError
+from kitup.errors import SkipTask, TaskFailed, VarsError
 from kitup.modules import files
 from kitup.project import Project
 from kitup.registry import Bundle, side_effect
@@ -169,7 +169,7 @@ def test_memo_decorator_distinguishes_functions(tmp_path):
     assert calls == ["first", "second"]
 
 
-def test_memo_decorator_does_not_cache_failures(tmp_path):
+def test_memo_decorator_caches_failures(tmp_path):
     make_context(tmp_path)
     attempts = []
 
@@ -182,7 +182,74 @@ def test_memo_decorator_does_not_cache_failures(tmp_path):
         load()
     with pytest.raises(TaskFailed, match="boom"):
         load()
-    assert attempts == [1, 1]
+    assert attempts == [1]
+
+
+def test_memo_decorator_caches_skips_across_tasks(tmp_path):
+    context = make_context(tmp_path)
+    calls = []
+
+    @memo
+    def load(name):
+        calls.append(name)
+        context.skip(f"missing {name}")
+
+    with pytest.raises(SkipTask, match="missing a"):
+        load("a")
+    context.begin_task(task_for())
+    with pytest.raises(SkipTask, match="missing a"):
+        load("a")
+    assert calls == ["a"]
+
+
+def test_memo_decorator_caches_outcomes_per_arguments(tmp_path):
+    context = make_context(tmp_path)
+    calls = []
+
+    @memo
+    def load(name):
+        calls.append(name)
+        if name == "skip":
+            context.skip("skip it")
+        if name == "fail":
+            context.fail("fail it")
+        return f"value {name}"
+
+    assert load("ok") == "value ok"
+    with pytest.raises(SkipTask, match="skip it"):
+        load("skip")
+    with pytest.raises(TaskFailed, match="fail it"):
+        load("fail")
+
+    assert load("ok") == "value ok"
+    with pytest.raises(SkipTask, match="skip it"):
+        load("skip")
+    with pytest.raises(TaskFailed, match="fail it"):
+        load("fail")
+    assert calls == ["ok", "skip", "fail"]
+
+
+def test_memo_method_caches_skip_and_failure_outcomes(tmp_path):
+    context = make_context(tmp_path)
+    attempts = {"skip": 0, "fail": 0}
+
+    def skip_loader():
+        attempts["skip"] += 1
+        context.skip("skip it")
+
+    def fail_loader():
+        attempts["fail"] += 1
+        raise TaskFailed("fail it")
+
+    with pytest.raises(SkipTask, match="skip it"):
+        context.memo("skip", skip_loader)
+    with pytest.raises(TaskFailed, match="fail it"):
+        context.memo("fail", fail_loader)
+    with pytest.raises(SkipTask, match="skip it"):
+        context.memo("skip", skip_loader)
+    with pytest.raises(TaskFailed, match="fail it"):
+        context.memo("fail", fail_loader)
+    assert attempts == {"skip": 1, "fail": 1}
 
 
 def test_memo_decorator_rejects_unhashable_arguments(tmp_path):
@@ -196,15 +263,20 @@ def test_memo_decorator_rejects_unhashable_arguments(tmp_path):
         load([1, 2])
 
 
-def test_memo_decorator_propagates_type_errors_from_the_function(tmp_path):
+def test_memo_decorator_does_not_cache_unexpected_errors(tmp_path):
     make_context(tmp_path)
+    attempts = []
 
     @memo
     def load():
+        attempts.append(1)
         raise TypeError("inner failure")
 
     with pytest.raises(TypeError, match="inner failure"):
         load()
+    with pytest.raises(TypeError, match="inner failure"):
+        load()
+    assert attempts == [1, 1]
 
 
 def test_memo_decorator_requires_an_active_context():

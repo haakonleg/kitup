@@ -392,9 +392,11 @@ root:
 - `ctx.bundle` — the bundle that owns the current task and its resources.
 - `ctx.run()` and `ctx.probe()` — command helpers.
 - `ctx.changed()`, `ctx.note()`, `ctx.memo()`, `ctx.skip()`, and `ctx.fail()` —
-  run controls. `ctx.memo(key, loader)` caches a value under a string key.
+  run controls. `ctx.memo(key, loader)` caches a value under a string key;
+  skipped and failed outcomes are cached too.
 - `@memo` — decorator from `kitup` (`from kitup import memo`) that caches a
   function's result once per run, keyed by the function and its arguments.
+  Skipped and failed outcomes are cached and re-raised on repeat calls.
 
 ## Task results
 
