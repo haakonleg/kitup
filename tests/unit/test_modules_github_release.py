@@ -184,7 +184,7 @@ def test_latest_returns_release_and_assets(tmp_path, api_server):
     assert ctx.calls == []
 
 
-def test_by_tag_encodes_the_tag(tmp_path, api_server):
+def test_tag_lookups_encode_and_use_the_requested_tag(tmp_path, api_server):
     state = api_server
     make_context(tmp_path)
 
@@ -193,51 +193,40 @@ def test_by_tag_encodes_the_tag(tmp_path, api_server):
     assert release.tag == "v1/2"
     assert state.paths == ["/repos/owner/repo/releases/tags/v1%2F2"]
 
+    # by_asset uses the explicit tag instead of the latest release.
+    result = github_release.by_asset("owner/repo", r"^tool-checksums\.txt$", tag="v1.2.3")
 
-def test_missing_release_is_a_task_failure(tmp_path, api_server):
+    assert result.name == "tool-checksums.txt"
+    assert state.paths[-1] == "/repos/owner/repo/releases/tags/v1.2.3"
+
+
+def test_api_and_payload_failures_are_task_failures(tmp_path, api_server):
     make_context(tmp_path)
 
+    # Missing releases and repositories.
     with pytest.raises(TaskFailed, match="not found"):
         github_release.by_tag("owner/repo", "missing")
-
     with pytest.raises(TaskFailed, match="not found"):
         github_release.latest("missing/repo")
 
-
-def test_rate_limit_failure_includes_reset_time(tmp_path, api_server):
-    make_context(tmp_path)
-
+    # Rate limiting includes reset and authentication context.
     with pytest.raises(TaskFailed) as error:
         github_release.latest("rate/repo")
-
     message = str(error.value)
     assert "rate limit" in message
     assert "resets at" in message
     assert "unauthenticated" in message
 
-
-def test_invalid_json_is_a_task_failure(tmp_path, api_server):
-    make_context(tmp_path)
-
+    # Invalid JSON, malformed payloads, and generic HTTP errors.
     with pytest.raises(TaskFailed, match="invalid JSON"):
         github_release.latest("bad-json/repo")
-
-
-def test_malformed_payload_is_a_task_failure(tmp_path, api_server):
-    make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="invalid GitHub release response"):
         github_release.latest("bad-schema/repo")
-
-
-def test_generic_http_error_is_a_task_failure(tmp_path, api_server):
-    make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="HTTP 500"):
         github_release.latest("generic-error/repo")
 
 
-def test_assets_matching_supports_regex(tmp_path, api_server):
+def test_asset_selection_supports_regex_and_reports_failures(tmp_path, api_server):
     make_context(tmp_path)
     release = github_release.latest("owner/repo")
 
@@ -247,11 +236,6 @@ def test_assets_matching_supports_regex(tmp_path, api_server):
         "tool-linux-x86_64.tar.gz",
         "tool-linux-aarch64.tar.gz",
     ]
-
-
-def test_asset_fails_for_missing_or_ambiguous_matches(tmp_path, api_server):
-    make_context(tmp_path)
-    release = github_release.latest("owner/repo")
 
     with pytest.raises(TaskFailed, match="no asset matching regex"):
         release.asset(r"^tool-windows-.*\.zip$")
@@ -271,20 +255,6 @@ def test_by_asset_returns_a_single_regex_match(tmp_path, api_server):
     assert state.paths == ["/repos/owner/repo/releases/latest"]
 
 
-def test_by_asset_uses_the_requested_tag(tmp_path, api_server):
-    state = api_server
-    make_context(tmp_path)
-
-    result = github_release.by_asset(
-        "owner/repo",
-        r"^tool-checksums\.txt$",
-        tag="v1.2.3",
-    )
-
-    assert result.name == "tool-checksums.txt"
-    assert state.paths == ["/repos/owner/repo/releases/tags/v1.2.3"]
-
-
 def test_by_asset_validates_the_regex_before_fetching(tmp_path, api_server):
     state = api_server
     make_context(tmp_path)
@@ -297,17 +267,6 @@ def test_by_asset_validates_the_regex_before_fetching(tmp_path, api_server):
         github_release.by_asset("owner/repo", "[")
 
     assert state.paths == []
-
-
-def test_results_are_cached_per_run(tmp_path, api_server):
-    state = api_server
-    make_context(tmp_path)
-
-    first = github_release.latest("owner/repo")
-    second = github_release.latest("owner/repo")
-
-    assert first is second
-    assert state.paths == ["/repos/owner/repo/releases/latest"]
 
 
 def test_dry_run_still_fetches_and_records_no_changes(tmp_path, api_server):

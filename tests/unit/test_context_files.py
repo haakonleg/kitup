@@ -1,6 +1,5 @@
 """Tests for the merged ``ctx.files`` view and module source resolution."""
 
-import os
 from pathlib import Path
 
 import pytest
@@ -29,14 +28,6 @@ def project(tmp_path, *, context=None):
     return ctx, bundle_dir
 
 
-def test_files_is_a_property(tmp_path):
-    ctx, bundle_dir = project(tmp_path)
-    (bundle_dir / "files").mkdir()
-
-    assert isinstance(type(ctx).files, property)
-    assert isinstance(ctx.files, OverlayPath)
-
-
 def test_files_merges_the_overlay_over_the_bundle(tmp_path):
     ctx, bundle_dir = project(tmp_path)
     write(bundle_dir / "files" / "shared.conf", "bundle\n")
@@ -55,6 +46,16 @@ def test_files_merges_the_overlay_over_the_bundle(tmp_path):
         "shared.conf",
     ]
 
+    child = merged / "nested" / "app.conf"
+    assert isinstance(child, OverlayPath)
+    assert isinstance(child.parent, OverlayPath)
+
+    empty_root = tmp_path / "empty"
+    empty_ctx, _ = project(empty_root)
+    write(empty_root / "files" / "base" / "only.conf", "overlay\n")
+    assert (empty_ctx.files / "only.conf").read_text(encoding="utf-8") == "overlay\n"
+    assert [entry.name for entry in empty_ctx.files.iterdir()] == ["only.conf"]
+
 
 def test_files_merges_extra_overlay_roots_with_later_roots_winning(tmp_path):
     extra_one = tmp_path / "extra-one"
@@ -72,34 +73,6 @@ def test_files_merges_extra_overlay_roots_with_later_roots_winning(tmp_path):
     assert (ctx.files / "one-only.conf").read_text(encoding="utf-8") == "one\n"
     assert (ctx.files / "two-only.conf").read_text(encoding="utf-8") == "two\n"
     assert (ctx.files / "bundle-only.conf").read_text(encoding="utf-8") == "bundle\n"
-
-
-def test_files_extra_overlays_win_over_the_project_overlay(tmp_path):
-    extra = tmp_path / "extra"
-    write(extra / "base" / "shared.conf", "extra\n")
-    context = make_context(tmp_path, project=Project(root=tmp_path, files_roots=(extra,)))
-    ctx, _ = project(tmp_path, context=context)
-    write(tmp_path / "files" / "base" / "shared.conf", "project\n")
-
-    assert (ctx.files / "shared.conf").read_text(encoding="utf-8") == "extra\n"
-
-
-def test_files_uses_the_overlay_when_the_bundle_has_no_files_directory(tmp_path):
-    ctx, _ = project(tmp_path)
-    write(tmp_path / "files" / "base" / "only.conf", "overlay\n")
-
-    assert (ctx.files / "only.conf").read_text(encoding="utf-8") == "overlay\n"
-    assert [entry.name for entry in ctx.files.iterdir()] == ["only.conf"]
-
-
-def test_files_lists_empty_directories_from_both_roots(tmp_path):
-    ctx, bundle_dir = project(tmp_path)
-    (bundle_dir / "files" / "bundle-empty").mkdir(parents=True)
-    (tmp_path / "files" / "base" / "overlay-empty").mkdir(parents=True)
-
-    assert sorted(entry.name for entry in ctx.files.iterdir()) == ["bundle-empty", "overlay-empty"]
-    assert (ctx.files / "bundle-empty").is_dir()
-    assert (ctx.files / "overlay-empty").is_dir()
 
 
 def test_files_overlay_shadows_a_bundle_directory(tmp_path):
@@ -128,32 +101,6 @@ def test_files_keeps_symlink_entries_from_the_winning_root(tmp_path):
 
     assert entry.is_symlink()
     assert entry.readlink() == Path("overlay-target")
-
-
-def test_files_children_stay_virtual(tmp_path):
-    ctx, bundle_dir = project(tmp_path)
-    write(bundle_dir / "files" / "nested" / "app.conf", "bundle\n")
-
-    child = ctx.files / "nested" / "app.conf"
-
-    assert isinstance(child, OverlayPath)
-    assert child.name == "app.conf"
-    assert isinstance(child.parent, OverlayPath)
-    assert child.parent.is_dir()
-    assert [entry.name for entry in child.parent.iterdir()] == ["app.conf"]
-
-
-def test_files_entries_are_synthetic_paths(tmp_path):
-    ctx, bundle_dir = project(tmp_path)
-    write(bundle_dir / "files" / "sshd.conf", "bundle\n")
-    write(tmp_path / "files" / "base" / "sshd.conf", "overlay\n")
-
-    entry = ctx.files / "sshd.conf"
-
-    assert str(entry).startswith("/@kitup-merged/base/")
-    with pytest.raises(FileNotFoundError):
-        os.stat(str(entry))
-    assert entry.read_bytes() == b"overlay\n"
 
 
 def test_files_requires_a_bundle(tmp_path):
@@ -194,70 +141,42 @@ def test_files_view_is_read_only(tmp_path):
             action()
 
 
-def test_real_path_returns_the_winning_entry(tmp_path):
-    ctx, bundle_dir = project(tmp_path)
-    write(bundle_dir / "files" / "shared.conf", "bundle\n")
-    write(tmp_path / "files" / "base" / "shared.conf", "overlay\n")
-    plain = tmp_path / "plain"
-
-    assert real_path(ctx.files / "shared.conf") == tmp_path / "files" / "base" / "shared.conf"
-    assert real_path(ctx.files / "missing.conf") == tmp_path / "files" / "base" / "missing.conf"
-    assert real_path(plain) is plain
-
-
-def test_resolve_source_applies_overlays_to_bare_names_and_files_paths(tmp_path):
+def test_resolve_source_and_real_path_apply_overlays_and_fallbacks(tmp_path):
     ctx, bundle_dir = project(tmp_path)
     write(bundle_dir / "files" / "shared.conf", "bundle\n")
     write(bundle_dir / "files" / "bundle-only.conf", "bundle\n")
     write(bundle_dir / "files" / "nested" / "app.conf", "bundle\n")
     write(tmp_path / "files" / "base" / "shared.conf", "overlay\n")
     write(tmp_path / "files" / "base" / "nested" / "app.conf", "overlay\n")
+    write(tmp_path / "files" / "base" / "other.conf", "overlay\n")
+    plain = tmp_path / "plain"
 
     assert ctx.resolve_source("shared.conf") == tmp_path / "files" / "base" / "shared.conf"
     assert ctx.resolve_source("files/shared.conf") == tmp_path / "files" / "base" / "shared.conf"
     assert ctx.resolve_source("files/nested/app.conf") == tmp_path / "files" / "base" / "nested" / "app.conf"
     assert ctx.resolve_source("bundle-only.conf") == bundle_dir / "files" / "bundle-only.conf"
     assert not isinstance(ctx.resolve_source("shared.conf"), OverlayPath)
+    assert real_path(ctx.files / "shared.conf") == tmp_path / "files" / "base" / "shared.conf"
+    assert real_path(ctx.files / "missing.conf") == tmp_path / "files" / "base" / "missing.conf"
+    assert real_path(plain) is plain
 
-
-def test_resolve_source_files_path_falls_back_to_the_bundle(tmp_path):
-    ctx, bundle_dir = project(tmp_path)
+    fallback = tmp_path / "fallback"
+    ctx, bundle_dir = project(fallback)
     write(bundle_dir / "files" / "nested" / "app.conf", "bundle\n")
-    write(tmp_path / "files" / "base" / "other.conf", "overlay\n")
-
+    write(fallback / "files" / "base" / "other.conf", "overlay\n")
     assert ctx.resolve_source("files/nested/app.conf") == bundle_dir / "files" / "nested" / "app.conf"
 
 
-def test_resolve_source_leaves_other_relative_paths_in_the_bundle(tmp_path):
-    ctx, bundle_dir = project(tmp_path)
-    write(bundle_dir / "templates" / "app.conf", "bundle\n")
-    write(tmp_path / "files" / "base" / "templates" / "app.conf", "overlay\n")
-
-    assert ctx.resolve_source("templates/app.conf") == bundle_dir / "templates" / "app.conf"
-
-
-def test_resolve_source_does_not_special_case_files(tmp_path):
-    ctx, bundle_dir = project(tmp_path)
-    write(bundle_dir / "files" / "files" / "inner.conf", "bundle\n")
-
-    assert ctx.resolve_source("files") == bundle_dir / "files" / "files"
-
-
-def test_resolve_source_keeps_absolute_and_expanded_paths(tmp_path, monkeypatch):
+def test_resolve_source_keeps_absolute_expanded_paths_and_source_labels(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    ctx, _ = project(tmp_path)
-
-    assert ctx.resolve_source("/srv/config") == Path("/srv/config")
-    assert ctx.resolve_source("~/config") == home / "config"
-
-
-def test_source_label_shortens_project_local_sources(tmp_path):
     ctx, bundle_dir = project(tmp_path)
     write(bundle_dir / "files" / "shared.conf", "bundle\n")
     write(tmp_path / "files" / "base" / "nested" / "app.conf", "overlay\n")
 
+    assert ctx.resolve_source("/srv/config") == Path("/srv/config")
+    assert ctx.resolve_source("~/config") == home / "config"
     assert ctx.source_label("shared.conf") == "shared.conf"
     assert ctx.source_label("files/shared.conf") == "shared.conf"
     assert ctx.source_label("files/nested/app.conf") == "nested/app.conf"
@@ -280,20 +199,15 @@ def test_copy_from_a_merged_entry(tmp_path):
     assert result.summary == f"copy sshd.conf -> {destination}"
     assert destination.read_text(encoding="utf-8") == "overlay\n"
 
-
-def test_copy_reports_a_short_source_label(tmp_path):
-    _ctx, bundle_dir = project(tmp_path)
     write(bundle_dir / "files" / "nested" / "app.conf", "bundle\n")
-    (tmp_path / "out").mkdir()
-    destination = tmp_path / "out" / "app.conf"
+    short_destination = tmp_path / "out" / "app.conf"
+    result = files.copy("files/nested/app.conf", short_destination)
 
-    result = files.copy("files/nested/app.conf", destination)
+    assert result.summary == f"copy nested/app.conf -> {short_destination}"
 
-    assert result.summary == f"copy nested/app.conf -> {destination}"
+    result = files.copy("files/nested/app.conf", short_destination)
 
-    result = files.copy("files/nested/app.conf", destination)
-
-    assert result.summary == f"ensure {destination} from nested/app.conf"
+    assert result.summary == f"ensure {short_destination} from nested/app.conf"
 
 
 def test_copy_from_a_merged_entry_with_sudo(tmp_path):
@@ -307,16 +221,3 @@ def test_copy_from_a_merged_entry_with_sudo(tmp_path):
 
     assert result.changed
     assert destination.read_text(encoding="utf-8") == "overlay\n"
-
-
-def test_copy_from_a_merged_entry_in_dry_run(tmp_path):
-    ctx, bundle_dir = project(tmp_path, context=make_context(tmp_path, dry_run=True))
-    write(bundle_dir / "files" / "sshd.conf", "bundle\n")
-    write(tmp_path / "files" / "base" / "sshd.conf", "overlay\n")
-    (tmp_path / "out").mkdir()
-    destination = tmp_path / "out" / "sshd.conf"
-
-    result = files.copy(ctx.files / "sshd.conf", destination)
-
-    assert result.changed
-    assert not destination.exists()

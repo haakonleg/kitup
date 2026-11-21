@@ -6,12 +6,21 @@ from kitup.errors import PrivilegeError
 from kitup.privileges import PrivilegeManager
 
 
-def test_root_runs_without_sudo(monkeypatch):
+def test_root_runs_without_sudo_while_users_get_noninteractive_wrapping(monkeypatch):
     monkeypatch.setattr("os.geteuid", lambda: 0)
     manager = PrivilegeManager()
 
     manager.validate()
     assert manager.wrap(["dnf5"]) == ["dnf5"]
+
+    monkeypatch.setattr("os.geteuid", lambda: 1000)
+    assert PrivilegeManager().wrap(["dnf5", "install"]) == [
+        "sudo",
+        "-n",
+        "--",
+        "dnf5",
+        "install",
+    ]
 
 
 def test_cached_credentials_are_used_without_output(monkeypatch, capsys):
@@ -30,10 +39,6 @@ def test_cached_credentials_are_used_without_output(monkeypatch, capsys):
     assert calls == [["sudo", "-n", "-v"]]
     assert capsys.readouterr().err == ""
 
-
-def test_credentials_valid_reports_an_expired_cache(monkeypatch):
-    monkeypatch.setattr("os.geteuid", lambda: 1000)
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sudo")
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -98,19 +103,7 @@ def test_failed_prompt_is_an_error(monkeypatch):
         PrivilegeManager().validate()
 
 
-def test_wrap_uses_non_interactive_sudo(monkeypatch):
-    monkeypatch.setattr("os.geteuid", lambda: 1000)
-
-    assert PrivilegeManager().wrap(["dnf5", "install"]) == [
-        "sudo",
-        "-n",
-        "--",
-        "dnf5",
-        "install",
-    ]
-
-
-def test_sudo_lookup_is_cached(monkeypatch):
+def test_sudo_lookup_and_root_check_are_cached(monkeypatch):
     monkeypatch.setattr("os.geteuid", lambda: 1000)
     lookups = []
 
@@ -130,8 +123,6 @@ def test_sudo_lookup_is_cached(monkeypatch):
     assert manager.credentials_valid() is True
     assert lookups == ["sudo"]
 
-
-def test_is_root_caches_the_effective_uid(monkeypatch):
     calls = []
 
     def fake_geteuid():

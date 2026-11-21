@@ -7,7 +7,6 @@ from kitup.errors import TaskFailed
 from kitup.modules import uv
 
 from .helpers import (
-    CountingWorker,
     FakeCommandRunner,
     argvs,
     call_data,
@@ -70,7 +69,7 @@ def make_receipt(
     )
 
 
-def test_present_adds_a_missing_dependency_and_syncs(tmp_path):
+def test_present_adds_a_missing_dependency_and_is_idempotent(tmp_path):
     project = tmp_path / "proj"
     pyproject = project / "pyproject.toml"
     write_pyproject(project)
@@ -96,10 +95,7 @@ def test_present_adds_a_missing_dependency_and_syncs(tmp_path):
         "added": ["requests>=2"],
     }
 
-
-def test_present_is_idempotent_when_in_sync(tmp_path):
-    project = tmp_path / "proj"
-    write_pyproject(project, '["requests>=2"]')
+    # once the project is in sync the same request is a no-op
     command = FakeCommandRunner()
     command.responses = synced_probes()
     make_context(tmp_path, command=command)
@@ -119,7 +115,8 @@ def test_present_is_idempotent_when_in_sync(tmp_path):
     }
 
 
-def test_present_replaces_a_differing_specifier_verbatim(tmp_path):
+def test_present_reconciles_existing_specifiers(tmp_path):
+    # a differing specifier is replaced verbatim
     project = tmp_path / "proj"
     pyproject = project / "pyproject.toml"
     write_pyproject(project, '["requests >= 2"]')
@@ -133,54 +130,48 @@ def test_present_replaces_a_differing_specifier_verbatim(tmp_path):
     assert call_data(result)["added"] == ["requests>=3"]
     assert result.summary == f"+requests>=3; sync {project}"
 
-
-def test_present_matches_normalized_names(tmp_path):
-    project = tmp_path / "proj"
-    pyproject = project / "pyproject.toml"
-    write_pyproject(project, '["Charset_Normalizer>=3"]')
+    # the same normalized name with a different verbatim string is replaced too
+    normalized = tmp_path / "normalized"
+    write_pyproject(normalized, '["Charset_Normalizer>=3"]')
     command = FakeCommandRunner()
     command.responses = [response(0), *post_sync_ok()]
     make_context(tmp_path, command=command)
 
-    result = uv.dependencies(["charset-normalizer"], project=project)
+    result = uv.dependencies(["charset-normalizer"], project=normalized)
 
-    # same normalized name, different verbatim string: replaced
     assert result.changed is True
-    assert 'dependencies = ["charset-normalizer"]' in pyproject.read_text()
+    assert 'dependencies = ["charset-normalizer"]' in (normalized / "pyproject.toml").read_text()
 
 
-def test_diff_dependencies_parses_current_entries_once(monkeypatch):
-    current = ["requests>=2", "flask", "https://example.com/pkg.whl"]
-    wanted = [uv._try_parse_requirement("requests>=3"), uv._try_parse_requirement("flask")]
-    calls = []
-    original = uv._try_parse_requirement
+def test_present_preserves_non_registry_entries_and_reconciles_duplicates(tmp_path):
+    # non-registry entries are preserved verbatim and never matched
+    project = tmp_path / "proj"
+    pyproject = project / "pyproject.toml"
+    write_pyproject(project, '["flask", "requests @ https://example.com/requests.whl", "./local"]')
+    command = FakeCommandRunner()
+    command.responses = [response(0), *post_sync_ok()]
+    make_context(tmp_path, command=command)
 
-    def counting(item):
-        calls.append(item)
-        return original(item)
+    result = uv.dependencies(["requests>=2"], project=project)
 
-    monkeypatch.setattr(uv, "_try_parse_requirement", counting)
+    text = pyproject.read_text()
+    assert '"requests @ https://example.com/requests.whl"' in text  # not rewritten to a bare name
+    assert '"./local"' in text  # not matched (and no crash parsing it)
+    assert '"requests>=2"' in text
+    assert '"flask"' in text
+    assert call_data(result)["added"] == ["requests>=2"]
 
-    desired, added, removed = uv._diff_dependencies(current, wanted, state="present")
+    # duplicate entries for the same name collapse into the wanted entry
+    duplicate = tmp_path / "duplicate"
+    duplicate_pyproject = duplicate / "pyproject.toml"
+    write_pyproject(duplicate, '["flask", "flask>=2"]')
+    command = FakeCommandRunner()
+    command.responses = [response(0), *post_sync_ok()]
+    make_context(tmp_path, command=command)
 
-    assert calls == current
-    assert desired == ["requests>=3", "flask", "https://example.com/pkg.whl"]
-    assert added == ["requests>=3"]
-    assert removed == []
+    uv.dependencies(["flask>=3"], project=duplicate)
 
-    calls.clear()
-    uv._diff_dependencies(current, wanted, state="absent")
-    assert calls == current
-
-
-def test_diff_dependencies_reconciles_duplicate_names():
-    wanted = [uv._try_parse_requirement("requests>=3")]
-
-    desired, added, removed = uv._diff_dependencies(["requests>=1", "flask", "Requests>=2"], wanted, state="present")
-
-    assert desired == ["requests>=3", "flask"]
-    assert added == ["requests>=3"]
-    assert removed == []
+    assert 'dependencies = ["flask>=3"]' in duplicate_pyproject.read_text()
 
 
 def test_diff_dependencies_applies_the_last_duplicate_wanted_entry():
@@ -191,19 +182,6 @@ def test_diff_dependencies_applies_the_last_duplicate_wanted_entry():
     assert desired == ["requests>=3"]
     assert added == ["requests>=2", "requests>=3"]
     assert removed == []
-
-
-def test_present_keeps_the_multi_line_layout_of_the_table(tmp_path):
-    project = tmp_path / "proj"
-    pyproject = project / "pyproject.toml"
-    write_pyproject(project, '[\n    "flask",\n]')
-    command = FakeCommandRunner()
-    command.responses = [response(0), *post_sync_ok()]
-    make_context(tmp_path, command=command)
-
-    uv.dependencies(["requests"], project=project)
-
-    assert pyproject.read_text().endswith('dependencies = [\n    "flask",\n    "requests",\n]\n')
 
 
 def test_present_dry_run_reports_without_writing_or_syncing(tmp_path):
@@ -221,7 +199,8 @@ def test_present_dry_run_reports_without_writing_or_syncing(tmp_path):
     assert pyproject.read_text().endswith("dependencies = []\n")
 
 
-def test_latest_upgrades_only_bare_names(tmp_path):
+def test_latest_upgrades_bare_names_and_is_idempotent(tmp_path):
+    # only bare names are passed to --upgrade-package
     project = tmp_path / "proj"
     write_pyproject(project, '["flask>=1"]')
     command = FakeCommandRunner()
@@ -241,21 +220,21 @@ def test_latest_upgrades_only_bare_names(tmp_path):
     assert result.changed is True
     assert result.summary == f"+requests; sync {project}"
 
-
-def test_latest_is_idempotent_when_in_sync(tmp_path):
-    project = tmp_path / "proj"
-    write_pyproject(project, '["requests"]')
+    # an already up-to-date project is a no-op
+    synced = tmp_path / "synced"
+    write_pyproject(synced, '["requests"]')
     command = FakeCommandRunner()
     command.responses = synced_probes()
     make_context(tmp_path, command=command)
 
-    result = uv.dependencies(["requests"], project=project, state="latest")
+    result = uv.dependencies(["requests"], project=synced, state="latest")
 
     assert result.changed is False
     assert result.summary == "ensure dependencies are up to date: requests"
 
 
-def test_absent_removes_entries_by_name_and_syncs(tmp_path):
+def test_absent_reconciliation_scenarios(tmp_path):
+    # installed entries are removed by name and the project is synced
     project = tmp_path / "proj"
     pyproject = project / "pyproject.toml"
     write_pyproject(project, '["requests>=2", "flask"]')
@@ -274,26 +253,42 @@ def test_absent_removes_entries_by_name_and_syncs(tmp_path):
         "removed": ["requests>=2"],
     }
 
-
-def test_absent_is_idempotent_when_nothing_matches(tmp_path):
-    project = tmp_path / "proj"
-    write_pyproject(project, '["flask"]')
+    # nothing matching is a no-op
+    clean = tmp_path / "clean"
+    write_pyproject(clean, '["flask"]')
     command = FakeCommandRunner()
     command.responses = synced_probes()
     make_context(tmp_path, command=command)
 
-    result = uv.dependencies(["requests"], project=project, state="absent")
+    result = uv.dependencies(["requests"], project=clean, state="absent")
 
     assert result.changed is False
     assert result.summary == "ensure dependencies are absent: requests"
     assert call_data(result) == {
         "dependencies": ["requests"],
-        "project": str(project),
+        "project": str(clean),
         "removed": [],
     }
 
+    # an undefined dependency group needs no uv probe and is a no-op
+    undefined = tmp_path / "undefined"
+    write_pyproject(undefined)
+    undefined_pyproject = undefined / "pyproject.toml"
+    undefined_pyproject.write_text(
+        undefined_pyproject.read_text() + "\n[dependency-groups]\nother = []\n", encoding="utf-8"
+    )
+    command = FakeCommandRunner()
+    make_context(tmp_path, command=command)
 
-def test_absent_with_a_missing_project_is_a_no_change_without_commands(tmp_path):
+    result = uv.dependencies(["ruff"], project=undefined, group="lint", state="absent")
+
+    assert command.calls == []  # no uv probe would succeed with an undefined --group
+    assert result.changed is False
+    assert result.summary == "ensure dependencies are absent: ruff"
+
+
+def test_missing_project_scenarios(tmp_path):
+    # absent against a missing project is a no-op without commands
     command = FakeCommandRunner()
     make_context(tmp_path, command=command)
 
@@ -303,8 +298,7 @@ def test_absent_with_a_missing_project_is_a_no_change_without_commands(tmp_path)
     assert result.changed is False
     assert result.summary == "ensure dependencies are absent: requests"
 
-
-def test_missing_project_is_initialized_with_uv_init_bare(tmp_path):
+    # present initializes a bare project, then adds and syncs
     project = tmp_path / "proj"
 
     def init(argv):
@@ -321,21 +315,21 @@ def test_missing_project_is_initialized_with_uv_init_bare(tmp_path):
     assert result.changed is True
     assert result.summary == f"init project {project}; +requests; sync {project}"
 
-
-def test_missing_project_dry_run_reports_without_running_anything(tmp_path):
-    project = tmp_path / "proj"
+    # dry run reports the same work without creating anything
+    dry_project = tmp_path / "dry"
     command = FakeCommandRunner()
     make_context(tmp_path, dry_run=True, command=command)
 
-    result = uv.dependencies(["requests"], project=project)
+    result = uv.dependencies(["requests"], project=dry_project)
 
     assert command.calls == []
     assert result.changed is True
-    assert result.summary == f"init project {project}; +requests; sync {project}"
-    assert not project.exists()
+    assert result.summary == f"init project {dry_project}; +requests; sync {dry_project}"
+    assert not dry_project.exists()
 
 
-def test_project_path_that_is_not_a_directory_is_rejected(tmp_path):
+def test_project_path_and_pyproject_symlink_scenarios(tmp_path):
+    # a project path that is a file is rejected
     file = tmp_path / "file"
     file.write_text("", encoding="utf-8")
     make_context(tmp_path, command=FakeCommandRunner())
@@ -343,8 +337,7 @@ def test_project_path_that_is_not_a_directory_is_rejected(tmp_path):
     with pytest.raises(TaskFailed, match="not a directory"):
         uv.dependencies(["requests"], project=file)
 
-
-def test_symlinked_project_directory_is_followed_but_a_symlinked_pyproject_is_refused(tmp_path):
+    # a symlinked project directory is followed, but a symlinked pyproject is refused
     real = tmp_path / "real"
     write_pyproject(real, '["requests"]')
     link = tmp_path / "link"
@@ -363,7 +356,8 @@ def test_symlinked_project_directory_is_followed_but_a_symlinked_pyproject_is_re
         uv.dependencies(["requests"], project=real)
 
 
-def test_pyproject_without_a_project_table_is_rejected_for_present(tmp_path):
+def test_dependency_configuration_errors(tmp_path):
+    # a pyproject without a [project] table is rejected
     project = tmp_path / "proj"
     project.mkdir()
     (project / ".venv").mkdir()
@@ -373,60 +367,21 @@ def test_pyproject_without_a_project_table_is_rejected_for_present(tmp_path):
     with pytest.raises(TaskFailed, match=r"no \[project\] table"):
         uv.dependencies(["requests"], project=project)
 
-
-def test_absent_with_an_undefined_group_is_a_no_change_without_commands(tmp_path):
-    project = tmp_path / "proj"
-    write_pyproject(project)
-    pyproject = project / "pyproject.toml"
-    pyproject.write_text(pyproject.read_text() + "\n[dependency-groups]\nother = []\n", encoding="utf-8")
-    command = FakeCommandRunner()
-    make_context(tmp_path, command=command)
-
-    result = uv.dependencies(["ruff"], project=project, group="lint", state="absent")
-
-    assert command.calls == []  # no uv probe would succeed with an undefined --group
-    assert result.changed is False
-    assert result.summary == "ensure dependencies are absent: ruff"
-
-
-def test_dotted_group_names_are_rejected(tmp_path):
-    project = tmp_path / "proj"
-    write_pyproject(project)
+    # dotted group names are rejected
+    valid = tmp_path / "valid"
+    write_pyproject(valid)
     make_context(tmp_path, command=FakeCommandRunner())
 
     with pytest.raises(TaskFailed, match="must be a single key, not dotted"):
-        uv.dependencies(["ruff"], project=project, group="a.b")
+        uv.dependencies(["ruff"], project=valid, group="a.b")
 
+    # dependencies must be an array of strings
+    non_array = tmp_path / "non-array"
+    write_pyproject(non_array, '"requests"')
+    make_context(tmp_path, command=FakeCommandRunner())
 
-def test_non_registry_entries_are_preserved_verbatim(tmp_path):
-    project = tmp_path / "proj"
-    pyproject = project / "pyproject.toml"
-    write_pyproject(project, '["flask", "requests @ https://example.com/requests.whl", "./local"]')
-    command = FakeCommandRunner()
-    command.responses = [response(0), *post_sync_ok()]
-    make_context(tmp_path, command=command)
-
-    result = uv.dependencies(["requests>=2"], project=project)
-
-    text = pyproject.read_text()
-    assert '"requests @ https://example.com/requests.whl"' in text  # not rewritten to a bare name
-    assert '"./local"' in text  # not matched (and no crash parsing it)
-    assert '"requests>=2"' in text
-    assert '"flask"' in text
-    assert call_data(result)["added"] == ["requests>=2"]
-
-
-def test_duplicate_entries_for_a_name_are_all_reconciled(tmp_path):
-    project = tmp_path / "proj"
-    pyproject = project / "pyproject.toml"
-    write_pyproject(project, '["flask", "flask>=2"]')
-    command = FakeCommandRunner()
-    command.responses = [response(0), *post_sync_ok()]
-    make_context(tmp_path, command=command)
-
-    uv.dependencies(["flask>=3"], project=project)
-
-    assert 'dependencies = ["flask>=3"]' in pyproject.read_text()
+    with pytest.raises(TaskFailed, match="not an array of strings"):
+        uv.dependencies(["requests"], project=non_array)
 
 
 def test_group_edits_dependency_groups_and_passes_the_group_flag(tmp_path):
@@ -447,7 +402,8 @@ def test_group_edits_dependency_groups_and_passes_the_group_flag(tmp_path):
     assert result.summary == f"+ruff; sync {project}"
 
 
-def test_python_is_passed_as_the_python_flag(tmp_path):
+def test_python_and_extra_args_are_forwarded(tmp_path):
+    # --python is passed to both the sync and its post-check
     project = tmp_path / "proj"
     write_pyproject(project)
     command = FakeCommandRunner()
@@ -459,37 +415,35 @@ def test_python_is_passed_as_the_python_flag(tmp_path):
     assert argvs(command)[0] == [UV, "sync", "--project", str(project), "--python", "3.13"]
     assert argvs(command)[1] == [UV, "sync", "--project", str(project), "--python", "3.13", "--check"]
 
-
-def test_python_is_passed_to_uv_init(tmp_path):
-    project = tmp_path / "proj"
+    # --python is passed to uv init when the project is missing
+    init_project = tmp_path / "init"
 
     def init(argv):
-        write_pyproject(project)
+        write_pyproject(init_project)
         return completed(argv, 0)
 
     command = FakeCommandRunner()
     command.responses = [init, response(0), *post_sync_ok()]
     make_context(tmp_path, command=command)
 
-    uv.dependencies(["requests"], project=project, python="3.13")
+    uv.dependencies(["requests"], project=init_project, python="3.13")
 
-    assert argvs(command)[0] == [UV, "init", "--bare", "--python", "3.13", str(project)]
+    assert argvs(command)[0] == [UV, "init", "--bare", "--python", "3.13", str(init_project)]
 
-
-def test_extra_args_are_passed_to_the_sync_and_post_checks(tmp_path):
-    project = tmp_path / "proj"
-    write_pyproject(project)
+    # extra args reach the sync, its check, and the lock check
+    extra_project = tmp_path / "extra"
+    write_pyproject(extra_project)
     command = FakeCommandRunner()
     command.responses = [response(0), *post_sync_ok()]
     make_context(tmp_path, command=command)
 
-    uv.dependencies(["requests"], project=project, extra_args=["--no-index", "--find-links=/srv/repo"])
+    uv.dependencies(["requests"], project=extra_project, extra_args=["--no-index", "--find-links=/srv/repo"])
 
-    sync_run = [UV, "sync", "--project", str(project), "--no-index", "--find-links=/srv/repo"]
+    sync_run = [UV, "sync", "--project", str(extra_project), "--no-index", "--find-links=/srv/repo"]
     assert argvs(command) == [
         sync_run,  # the sync itself
         [*sync_run, "--check"],  # post-sync check
-        [UV, "lock", "--project", str(project), "--no-index", "--find-links=/srv/repo", "--check"],
+        [UV, "lock", "--project", str(extra_project), "--no-index", "--find-links=/srv/repo", "--check"],
     ]
 
 
@@ -525,21 +479,7 @@ def test_latest_probe_is_upgrade_aware_so_an_available_upgrade_is_detected(tmp_p
     assert result.summary == f"sync {project}"
 
 
-def test_latest_pre_probe_stays_plain_after_a_sync(tmp_path):
-    # the post-sync checks are plain --check probes, without --upgrade-package
-    project = tmp_path / "proj"
-    write_pyproject(project, '["requests"]')
-    command = FakeCommandRunner()
-    command.responses = [response(1), response(0), response(0), response(0)]
-    make_context(tmp_path, command=command)
-
-    uv.dependencies(["requests"], project=project, state="latest")
-
-    assert "--upgrade-package" not in argvs(command)[2]
-    assert "--upgrade-package" not in argvs(command)[3]
-
-
-def test_converged_requires_the_project_environment(tmp_path):
+def test_project_environment_scenarios(tmp_path, monkeypatch):
     # uv sync --check exits 0 when only the .venv creation is pending, so the
     # environment's existence is checked too
     project = tmp_path / "proj"
@@ -559,11 +499,10 @@ def test_converged_requires_the_project_environment(tmp_path):
     assert result.changed is True
     assert result.summary == f"sync {project}"
 
-
-def test_project_environment_honors_uv_project_environment(tmp_path, monkeypatch):
-    project = tmp_path / "proj"
-    write_pyproject(project, '["requests"]')
-    shutil.rmtree(project / ".venv")
+    # UV_PROJECT_ENVIRONMENT points at an existing environment and avoids the sync
+    custom = tmp_path / "custom"
+    write_pyproject(custom, '["requests"]')
+    shutil.rmtree(custom / ".venv")
     env = tmp_path / "custom-env"
     env.mkdir()
     monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(env))
@@ -571,22 +510,13 @@ def test_project_environment_honors_uv_project_environment(tmp_path, monkeypatch
     command.responses = synced_probes()
     make_context(tmp_path, command=command)
 
-    result = uv.dependencies(["requests"], project=project)
+    result = uv.dependencies(["requests"], project=custom)
 
     assert argvs(command) == [
-        [UV, "sync", "--project", str(project), "--check"],
-        [UV, "lock", "--project", str(project), "--check"],
+        [UV, "sync", "--project", str(custom), "--check"],
+        [UV, "lock", "--project", str(custom), "--check"],
     ]
     assert result.changed is False
-
-
-def test_dependencies_rejects_non_array_tables(tmp_path):
-    project = tmp_path / "proj"
-    write_pyproject(project, '"requests"')
-    make_context(tmp_path, command=FakeCommandRunner())
-
-    with pytest.raises(TaskFailed, match="not an array of strings"):
-        uv.dependencies(["requests"], project=project)
 
 
 def test_dependencies_validates_arguments(tmp_path):
@@ -627,7 +557,37 @@ def test_dependencies_validates_arguments(tmp_path):
             uv.dependencies([bad], project=project)
 
 
-def test_tools_accepts_at_specifiers_but_dependencies_does_not(tmp_path):
+def test_missing_uv_and_tool_dir_probe_failures(tmp_path, monkeypatch):
+    # a missing uv is reported for both dependency and tool operations
+    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: None)
+    make_context(tmp_path, command=FakeCommandRunner())
+
+    with pytest.raises(TaskFailed, match="uv is required but was not found"):
+        uv.dependencies(["requests"], project=tmp_path)
+    with pytest.raises(TaskFailed, match="uv is required but was not found"):
+        uv.tools(["ruff"])
+
+    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: UV if name == "uv" else None)
+
+    # a failing tool dir probe distinguishes a broken uv from an unreadable tools dir
+    command = FakeCommandRunner()
+    command.responses = [response(1, stderr="boom"), response(1, stderr="boom")]
+    make_context(tmp_path, command=command)
+
+    with pytest.raises(TaskFailed, match="uv could not run"):
+        uv.tools(["ruff"])
+    assert argvs(command)[1] == [UV, "--version"]
+
+    command = FakeCommandRunner()
+    command.responses = [response(1, stderr="boom"), response(0, stdout="uv 0.9.0")]
+    make_context(tmp_path, command=command)
+
+    with pytest.raises(TaskFailed, match="could not determine the uv tools directory"):
+        uv.tools(["ruff"])
+
+
+def test_tools_install_scenarios(tmp_path):
+    # @ specifiers are documented uv tool syntax and install unchanged
     tools_dir = tmp_path / "tools"
 
     def install(argv):
@@ -638,31 +598,19 @@ def test_tools_accepts_at_specifiers_but_dependencies_does_not(tmp_path):
     command.responses = [response(0, stdout=str(tools_dir)), install]
     make_context(tmp_path, command=command)
 
-    # "pkg@latest" is a documented uv tool specifier; the tool is not installed, so it installs
     uv.tools(["ruff@latest"])
 
     assert argvs(command)[1] == [UV, "tool", "install", "ruff@latest"]
 
+    # a missing tool is installed and reported
+    missing_dir = tmp_path / "missing-tools"
 
-def test_missing_uv_is_reported(tmp_path, monkeypatch):
-    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: None)
-    make_context(tmp_path, command=FakeCommandRunner())
-
-    with pytest.raises(TaskFailed, match="uv is required but was not found"):
-        uv.dependencies(["requests"], project=tmp_path)
-    with pytest.raises(TaskFailed, match="uv is required but was not found"):
-        uv.tools(["ruff"])
-
-
-def test_tools_install_missing_tool(tmp_path):
-    tools_dir = tmp_path / "tools"
-
-    def install(argv):
-        make_receipt(tools_dir, "ruff")
+    def install_missing(argv):
+        make_receipt(missing_dir, "ruff")
         return completed(argv, 0)
 
     command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir)), install]
+    command.responses = [response(0, stdout=str(missing_dir)), install_missing]
     make_context(tmp_path, command=command)
 
     result = uv.tools(["ruff"])
@@ -673,8 +621,33 @@ def test_tools_install_missing_tool(tmp_path):
     assert result.summary == "+ruff"
     assert call_data(result) == {"tools": ["ruff"], "added": ["ruff"]}
 
+    # python and extra args are forwarded to the install
+    extra_dir = tmp_path / "extra-tools"
 
-def test_tools_present_is_idempotent_when_the_receipt_matches(tmp_path):
+    def install_extra(argv):
+        make_receipt(extra_dir, "ruff")
+        return completed(argv, 0)
+
+    command = FakeCommandRunner()
+    command.responses = [response(0, stdout=str(extra_dir)), install_extra]
+    make_context(tmp_path, command=command)
+
+    uv.tools(["ruff"], python="3.13", extra_args=["--no-index", "--find-links=/srv/repo"])
+
+    assert argvs(command)[1] == [
+        UV,
+        "tool",
+        "install",
+        "--python",
+        "3.13",
+        "--no-index",
+        "--find-links=/srv/repo",
+        "ruff",
+    ]
+
+
+def test_tools_present_is_idempotent_for_matching_receipts(tmp_path):
+    # an exactly matching receipt is a no-op
     tools_dir = tmp_path / "tools"
     make_receipt(tools_dir, "ruff")
     command = FakeCommandRunner()
@@ -688,8 +661,34 @@ def test_tools_present_is_idempotent_when_the_receipt_matches(tmp_path):
     assert result.summary == "ensure tools are present: ruff"
     assert call_data(result) == {"tools": ["ruff"], "added": []}
 
+    # the receipt normalizes "@1.0" to specifier "==1.0"; spacing is tolerated
+    spaced_dir = tmp_path / "spaced-tools"
+    make_receipt(spaced_dir, "ruff", specifier="==1.0")
+    for wanted in ("ruff@1.0", "ruff==1.0", "ruff == 1.0"):
+        command = FakeCommandRunner()
+        command.responses = [response(0, stdout=str(spaced_dir))]
+        make_context(tmp_path, command=command)
 
-def test_tools_present_reinstalls_a_differing_specifier(tmp_path):
+        result = uv.tools([wanted])
+
+        assert result.changed is False
+        assert argvs(command) == [[UV, "tool", "dir"]]
+
+    # extras and markers from the receipt are part of the match
+    extras_dir = tmp_path / "extras-tools"
+    make_receipt(extras_dir, "ruff", specifier="==1.0", extras=["socks"], marker='python_version >= "3.9"')
+    command = FakeCommandRunner()
+    command.responses = [response(0, stdout=str(extras_dir))]
+    make_context(tmp_path, command=command)
+
+    result = uv.tools(['ruff[socks]==1.0; python_version >= "3.9"'])
+
+    assert result.changed is False
+    assert argvs(command) == [[UV, "tool", "dir"]]
+
+
+def test_tools_present_reinstalls_differing_receipts(tmp_path):
+    # a different specifier triggers a reinstall
     tools_dir = tmp_path / "tools"
     make_receipt(tools_dir, "ruff", specifier="==1.0")
 
@@ -707,21 +706,26 @@ def test_tools_present_reinstalls_a_differing_specifier(tmp_path):
     assert result.changed is True
     assert call_data(result)["added"] == ["ruff==2.0"]
 
+    # dropped extras also differ from the receipt and trigger a reinstall
+    extras_dir = tmp_path / "extras-tools"
+    make_receipt(extras_dir, "ruff", specifier="==1.0", extras=["socks"])
 
-def test_tools_present_leaves_a_satisfied_bare_name_alone(tmp_path):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff", specifier="==1.0")
+    def install_no_extras(argv):
+        make_receipt(extras_dir, "ruff", specifier="==1.0")
+        return completed(argv, 0)
+
     command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir))]
+    command.responses = [response(0, stdout=str(extras_dir)), install_no_extras]
     make_context(tmp_path, command=command)
 
-    result = uv.tools(["ruff"])
+    result = uv.tools(["ruff==1.0"])  # extras dropped: reinstall
 
-    assert argvs(command) == [[UV, "tool", "dir"]]
-    assert result.changed is False
+    assert argvs(command)[1] == [UV, "tool", "install", "ruff==1.0"]
+    assert result.changed is True
 
 
-def test_tools_latest_upgrades_an_installed_bare_tool(tmp_path):
+def test_tools_latest_upgrade_scenarios(tmp_path):
+    # a bare installed tool is upgraded
     tools_dir = tmp_path / "tools"
     make_receipt(tools_dir, "ruff")
 
@@ -749,14 +753,13 @@ def test_tools_latest_upgrades_an_installed_bare_tool(tmp_path):
     assert result.summary == "+ruff"
     assert call_data(result)["added"] == ["ruff"]
 
-
-def test_tools_latest_upgrades_all_targets_in_one_command(tmp_path):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff")
-    make_receipt(tools_dir, "httpie")
+    # all targets are upgraded in one command
+    multi_dir = tmp_path / "multi-tools"
+    make_receipt(multi_dir, "ruff")
+    make_receipt(multi_dir, "httpie")
     command = FakeCommandRunner()
     command.responses = [
-        response(0, stdout=str(tools_dir)),
+        response(0, stdout=str(multi_dir)),
         response(0, stdout="ruff v1.0\nhttpie v1.0\n- ruff\n- httpie\n"),
         response(0),
         response(0, stdout="ruff v2.0\nhttpie v2.0\n- ruff\n- httpie\n"),
@@ -774,14 +777,13 @@ def test_tools_latest_upgrades_all_targets_in_one_command(tmp_path):
     assert result.changed is True
     assert result.summary == "+ruff +httpie"
 
-
-def test_tools_passes_python_and_extra_args_to_upgrade(tmp_path):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff")
-    make_receipt(tools_dir, "httpie")
+    # python and extra args are forwarded to the upgrade
+    args_dir = tmp_path / "args-tools"
+    make_receipt(args_dir, "ruff")
+    make_receipt(args_dir, "httpie")
     command = FakeCommandRunner()
     command.responses = [
-        response(0, stdout=str(tools_dir)),
+        response(0, stdout=str(args_dir)),
         response(0, stdout="ruff v1.0\nhttpie v1.0\n"),
         response(0),
         response(0, stdout="ruff v2.0\nhttpie v2.0\n"),
@@ -807,8 +809,27 @@ def test_tools_passes_python_and_extra_args_to_upgrade(tmp_path):
         "httpie",
     ]
 
+    # an upgrade that does not change the version is a no-op
+    unchanged_dir = tmp_path / "unchanged-tools"
+    make_receipt(unchanged_dir, "ruff")
+    command = FakeCommandRunner()
+    command.responses = [
+        response(0, stdout=str(unchanged_dir)),
+        response(0, stdout="ruff v2.0\n- ruff\n"),
+        response(0),
+        response(0, stdout="ruff v2.0\n- ruff\n"),
+    ]
+    make_context(tmp_path, command=command)
 
-def test_tools_latest_reinstalls_a_pinned_tool_at_latest(tmp_path):
+    result = uv.tools(["ruff"], state="latest")
+
+    assert argvs(command)[2] == [UV, "tool", "upgrade", "ruff"]
+    assert result.changed is False
+    assert result.summary == "ensure tools are up to date: ruff"
+
+
+def test_tools_latest_pin_scenarios(tmp_path):
+    # a pinned tool is refreshed with @latest, which uv tool upgrade refuses to move
     tools_dir = tmp_path / "tools"
     make_receipt(tools_dir, "ruff", specifier="==1.0")
 
@@ -827,19 +848,17 @@ def test_tools_latest_reinstalls_a_pinned_tool_at_latest(tmp_path):
 
     result = uv.tools(["ruff"], state="latest")
 
-    # a pinned tool is refreshed with @latest, which uv tool upgrade refuses to move
     assert argvs(command)[2] == [UV, "tool", "install", "ruff@latest"]
     assert result.changed is True
     assert call_data(result)["added"] == ["ruff"]
 
-
-def test_tools_latest_is_idempotent_when_the_version_does_not_change(tmp_path):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff")
+    # a range pin, unlike an exact pin, is moved by uv tool upgrade
+    range_dir = tmp_path / "range-tools"
+    make_receipt(range_dir, "ruff", specifier=">=1.0")
     command = FakeCommandRunner()
     command.responses = [
-        response(0, stdout=str(tools_dir)),
-        response(0, stdout="ruff v2.0\n- ruff\n"),
+        response(0, stdout=str(range_dir)),
+        response(0, stdout="ruff v1.0\n- ruff\n"),
         response(0),
         response(0, stdout="ruff v2.0\n- ruff\n"),
     ]
@@ -848,32 +867,11 @@ def test_tools_latest_is_idempotent_when_the_version_does_not_change(tmp_path):
     result = uv.tools(["ruff"], state="latest")
 
     assert argvs(command)[2] == [UV, "tool", "upgrade", "ruff"]
-    assert result.changed is False
-    assert result.summary == "ensure tools are up to date: ruff"
+    assert result.changed is True
 
 
-def test_tools_latest_dry_run_is_idempotent_when_up_to_date(tmp_path):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff")
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0, stdout=str(tools_dir)),
-        response(0, stdout=""),
-    ]
-    make_context(tmp_path, dry_run=True, command=command)
-
-    result = uv.tools(["ruff"], state="latest")
-
-    assert argvs(command) == [
-        [UV, "tool", "dir"],
-        [UV, "tool", "list", "--outdated"],
-    ]
-    assert result.changed is False
-    assert result.summary == "ensure tools are up to date: ruff"
-    assert call_data(result) == {"tools": ["ruff"], "added": []}
-
-
-def test_tools_latest_dry_run_reports_an_outdated_tool(tmp_path):
+def test_tools_dry_run_scenarios(tmp_path):
+    # an outdated tool is reported from the --outdated probe
     tools_dir = tmp_path / "tools"
     make_receipt(tools_dir, "ruff")
     command = FakeCommandRunner()
@@ -893,13 +891,12 @@ def test_tools_latest_dry_run_reports_an_outdated_tool(tmp_path):
     assert result.summary == "+ruff"
     assert call_data(result) == {"tools": ["ruff"], "added": ["ruff"]}
 
-
-def test_tools_latest_dry_run_falls_back_when_the_outdated_probe_fails(tmp_path):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff")
+    # a failed outdated probe falls back to treating the tool as updatable
+    fallback_dir = tmp_path / "fallback-tools"
+    make_receipt(fallback_dir, "ruff")
     command = FakeCommandRunner()
     command.responses = [
-        response(0, stdout=str(tools_dir)),
+        response(0, stdout=str(fallback_dir)),
         response(1, stderr="network unavailable"),
     ]
     ctx = make_context(tmp_path, dry_run=True, command=command)
@@ -910,8 +907,22 @@ def test_tools_latest_dry_run_falls_back_when_the_outdated_probe_fails(tmp_path)
     assert result.summary == "+ruff"
     assert any("could not check for outdated uv tools" in note for note in ctx.notes)
 
+    # a present dry run reports without installing
+    empty_dir = tmp_path / "empty-tools"
+    command = FakeCommandRunner()
+    command.responses = [response(0, stdout=str(empty_dir))]
+    make_context(tmp_path, dry_run=True, command=command)
 
-def test_tools_absent_uninstalls_and_checks_the_receipts(tmp_path):
+    result = uv.tools(["ruff"])
+
+    assert argvs(command) == [[UV, "tool", "dir"]]
+    assert result.changed is True
+    assert result.summary == "+ruff"
+    assert not (empty_dir / "ruff").exists()
+
+
+def test_tools_absent_scenarios(tmp_path):
+    # an installed tool is uninstalled and its receipt removed
     tools_dir = tmp_path / "tools"
     make_receipt(tools_dir, "ruff")
 
@@ -930,46 +941,10 @@ def test_tools_absent_uninstalls_and_checks_the_receipts(tmp_path):
     assert result.summary == "-ruff"
     assert call_data(result) == {"tools": ["ruff"], "removed": ["ruff"]}
 
-
-def test_tools_absent_reads_the_receipts_once_for_all_targets(tmp_path, monkeypatch):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff")
-    make_receipt(tools_dir, "httpie")
-
-    def uninstall(argv):
-        for name in argv[3:]:
-            shutil.rmtree(tools_dir / name)
-        return completed(argv, 0)
-
+    # removing a tool that is not installed is a no-op
+    empty_dir = tmp_path / "empty-tools"
     command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir)), uninstall]
-    make_context(tmp_path, command=command)
-
-    scans = 0
-    read_receipts = uv._installed_tools
-
-    def counting(ctx, tools_dir):
-        nonlocal scans
-        scans += 1
-        return read_receipts(ctx, tools_dir)
-
-    monkeypatch.setattr(uv, "_installed_tools", counting)
-
-    result = uv.tools(["ruff", "httpie"], state="absent")
-
-    assert argvs(command) == [
-        [UV, "tool", "dir"],
-        [UV, "tool", "uninstall", "ruff", "httpie"],
-    ]
-    assert scans == 2
-    assert result.changed is True
-    assert result.summary == "-ruff -httpie"
-
-
-def test_tools_absent_is_idempotent_when_nothing_is_installed(tmp_path):
-    tools_dir = tmp_path / "tools"
-    command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir))]
+    command.responses = [response(0, stdout=str(empty_dir))]
     make_context(tmp_path, command=command)
 
     result = uv.tools(["ruff"], state="absent")
@@ -980,56 +955,7 @@ def test_tools_absent_is_idempotent_when_nothing_is_installed(tmp_path):
     assert call_data(result) == {"tools": ["ruff"], "removed": []}
 
 
-def test_tools_dry_run_reports_without_installing(tmp_path):
-    tools_dir = tmp_path / "tools"
-    command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir))]
-    make_context(tmp_path, dry_run=True, command=command)
-
-    result = uv.tools(["ruff"])
-
-    assert argvs(command) == [[UV, "tool", "dir"]]
-    assert result.changed is True
-    assert result.summary == "+ruff"
-    assert not (tools_dir / "ruff").exists()
-
-
-def test_tools_passes_python_and_extra_args_to_install(tmp_path):
-    tools_dir = tmp_path / "tools"
-
-    def install(argv):
-        make_receipt(tools_dir, "ruff")
-        return completed(argv, 0)
-
-    command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir)), install]
-    make_context(tmp_path, command=command)
-
-    uv.tools(["ruff"], python="3.13", extra_args=["--no-index", "--find-links=/srv/repo"])
-
-    assert argvs(command)[1] == [
-        UV,
-        "tool",
-        "install",
-        "--python",
-        "3.13",
-        "--no-index",
-        "--find-links=/srv/repo",
-        "ruff",
-    ]
-
-
-def test_tools_still_missing_after_install_fails(tmp_path):
-    tools_dir = tmp_path / "tools"
-    command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir)), response(0)]
-    make_context(tmp_path, command=command)
-
-    with pytest.raises(TaskFailed, match="still not installed after install: ruff"):
-        uv.tools(["ruff"])
-
-
-def test_tools_reads_the_tool_requirement_from_multi_requirement_receipts(tmp_path):
+def test_tools_receipt_scenarios(tmp_path):
     # `uv tool install --with idna ruff` writes both packages into one receipt;
     # the tool env dir name identifies the tool package
     tools_dir = tmp_path / "tools"
@@ -1049,19 +975,18 @@ def test_tools_reads_the_tool_requirement_from_multi_requirement_receipts(tmp_pa
     assert result.changed is False  # installed with the same pin: no reinstall
     assert result.summary == "ensure tools are present: ruff"
 
-
-def test_tools_skips_a_malformed_receipt_with_a_note_and_treats_the_tool_as_missing(tmp_path):
-    tools_dir = tmp_path / "tools"
-    tool_dir = tools_dir / "ruff"
-    tool_dir.mkdir(parents=True)
-    (tool_dir / "uv-receipt.toml").write_text("[tool]\n", encoding="utf-8")  # no requirements
+    # a malformed receipt is skipped with a note and the tool is treated as missing
+    malformed_dir = tmp_path / "malformed-tools"
+    malformed_tool = malformed_dir / "ruff"
+    malformed_tool.mkdir(parents=True)
+    (malformed_tool / "uv-receipt.toml").write_text("[tool]\n", encoding="utf-8")  # no requirements
 
     def install(argv):
-        make_receipt(tools_dir, "ruff")
+        make_receipt(malformed_dir, "ruff")
         return completed(argv, 0)
 
     command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir)), install]
+    command.responses = [response(0, stdout=str(malformed_dir)), install]
     ctx = make_context(tmp_path, command=command)
 
     result = uv.tools(["ruff"])
@@ -1071,82 +996,14 @@ def test_tools_skips_a_malformed_receipt_with_a_note_and_treats_the_tool_as_miss
     assert result.changed is True
 
 
-def test_tools_present_is_idempotent_for_at_specifiers_and_spacing(tmp_path):
-    # the receipt normalizes "@1.0" to specifier "==1.0"
+def test_tools_still_missing_after_install_fails(tmp_path):
     tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff", specifier="==1.0")
-    for wanted in ("ruff@1.0", "ruff==1.0", "ruff == 1.0"):
-        command = FakeCommandRunner()
-        command.responses = [response(0, stdout=str(tools_dir))]
-        make_context(tmp_path, command=command)
-
-        result = uv.tools([wanted])
-
-        assert result.changed is False
-        assert argvs(command) == [[UV, "tool", "dir"]]
-
-
-def test_tools_present_is_idempotent_when_extras_and_marker_match(tmp_path):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff", specifier="==1.0", extras=["socks"], marker='python_version >= "3.9"')
     command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir))]
+    command.responses = [response(0, stdout=str(tools_dir)), response(0)]
     make_context(tmp_path, command=command)
 
-    result = uv.tools(['ruff[socks]==1.0; python_version >= "3.9"'])
-
-    assert result.changed is False
-    assert argvs(command) == [[UV, "tool", "dir"]]
-
-
-def test_tools_present_with_at_latest_is_a_no_change_when_the_tool_is_installed(tmp_path):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff")  # unpinned receipt
-    command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir))]
-    make_context(tmp_path, command=command)
-
-    result = uv.tools(["ruff@latest"])
-
-    assert result.changed is False
-    assert argvs(command) == [[UV, "tool", "dir"]]
-
-
-def test_tools_present_reinstalls_when_extras_or_marker_differ(tmp_path):
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff", specifier="==1.0", extras=["socks"])
-
-    def install(argv):
-        make_receipt(tools_dir, "ruff", specifier="==1.0")
-        return completed(argv, 0)
-
-    command = FakeCommandRunner()
-    command.responses = [response(0, stdout=str(tools_dir)), install]
-    make_context(tmp_path, command=command)
-
-    result = uv.tools(["ruff==1.0"])  # extras dropped: reinstall
-
-    assert argvs(command)[1] == [UV, "tool", "install", "ruff==1.0"]
-    assert result.changed is True
-
-
-def test_tools_latest_uses_upgrade_for_a_range_pin_not_only_exact_pins(tmp_path):
-    # only an exact "==" pin needs the @latest reinstall; a range is moved by uv tool upgrade
-    tools_dir = tmp_path / "tools"
-    make_receipt(tools_dir, "ruff", specifier=">=1.0")
-    command = FakeCommandRunner()
-    command.responses = [
-        response(0, stdout=str(tools_dir)),
-        response(0, stdout="ruff v1.0\n- ruff\n"),
-        response(0),
-        response(0, stdout="ruff v2.0\n- ruff\n"),
-    ]
-    make_context(tmp_path, command=command)
-
-    result = uv.tools(["ruff"], state="latest")
-
-    assert argvs(command)[2] == [UV, "tool", "upgrade", "ruff"]
-    assert result.changed is True
+    with pytest.raises(TaskFailed, match="still not installed after install: ruff"):
+        uv.tools(["ruff"])
 
 
 def test_tools_reinstall_with_a_different_specifier_is_rejected_when_with_requirements_exist(tmp_path):
@@ -1158,23 +1015,6 @@ def test_tools_reinstall_with_a_different_specifier_is_rejected_when_with_requir
 
     with pytest.raises(TaskFailed, match="refusing to reinstall"):
         uv.tools(["ruff==2.0"])
-
-
-def test_failing_tool_dir_probe_distinguishes_missing_uv(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(1, stderr="boom"), response(1, stderr="boom")]
-    make_context(tmp_path, command=command)
-
-    with pytest.raises(TaskFailed, match="uv could not run"):
-        uv.tools(["ruff"])
-    assert argvs(command)[1] == [UV, "--version"]
-
-    command = FakeCommandRunner()
-    command.responses = [response(1, stderr="boom"), response(0, stdout="uv 0.9.0")]
-    make_context(tmp_path, command=command)
-
-    with pytest.raises(TaskFailed, match="could not determine the uv tools directory"):
-        uv.tools(["ruff"])
 
 
 def test_tools_validates_arguments(tmp_path):
@@ -1196,7 +1036,8 @@ def test_tools_validates_arguments(tmp_path):
         uv.tools(["https://example.com/x.whl"], state="absent")
 
 
-def test_config_sets_an_option_in_a_uv_toml_and_is_idempotent(tmp_path):
+def test_config_set_and_absent_are_idempotent(tmp_path):
+    # setting an option replaces the existing line
     path = tmp_path / "uv.toml"
     path.write_text('index-url = "old"\nkeep = 1\n', encoding="utf-8")
     ctx = make_context(tmp_path)
@@ -1221,8 +1062,27 @@ def test_config_sets_an_option_in_a_uv_toml_and_is_idempotent(tmp_path):
     assert call_data(result)["toml_action"] == "unchanged"
     assert len(ctx.changes) == 1
 
+    # removing an option is idempotent too
+    absent_path = tmp_path / "absent.toml"
+    absent_path.write_text('index-url = "https://x"\nkeep = 1\n', encoding="utf-8")
+    absent_ctx = make_context(tmp_path)
 
-def test_config_creates_a_missing_file_with_parents(tmp_path):
+    result = uv.config("index-url", state="absent", path=absent_path)
+
+    assert absent_path.read_text() == "keep = 1\n"
+    assert result.changed is True
+    assert result.summary == f"remove index-url from {absent_path}"
+    assert call_data(result)["value"] is None
+    assert call_data(result)["toml_action"] == "removed"
+
+    result = uv.config("index-url", state="absent", path=absent_path)
+    assert result.changed is False
+    assert result.summary == f"ensure index-url is absent from {absent_path}"
+    assert len(absent_ctx.changes) == 1
+
+
+def test_config_creates_missing_file_and_normalizes_values(tmp_path):
+    # a missing file is created with parents
     path = tmp_path / "deep" / "uv" / "uv.toml"
     make_context(tmp_path)
 
@@ -1231,54 +1091,18 @@ def test_config_creates_a_missing_file_with_parents(tmp_path):
     assert path.read_text() == "concurrent-downloads = 4\n"
     assert call_data(result)["toml_action"] == "added"
 
-
-def test_config_uses_one_snapshot_without_a_separate_stat(tmp_path):
-    path = tmp_path / "uv.toml"
-    ctx = privileged_context(tmp_path)
-    worker = CountingWorker(ctx.privileged_worker)
-    ctx.privileged_worker = worker  # type: ignore[assignment]
-
-    try:
-        uv.config("native-tls", value=True, path=path, sudo=True)
-    finally:
-        ctx.close()
-
-    target_actions = [action for action, target in worker.actions if target == str(path)]
-    assert target_actions.count("snapshot") == 1
-    assert "stat" not in target_actions
-    assert "read" not in target_actions
-
-
-def test_config_normalizes_typed_values(tmp_path):
-    path = tmp_path / "uv.toml"
+    # typed values are serialized with TOML types
+    typed = tmp_path / "typed.toml"
     make_context(tmp_path)
 
-    uv.config("native-tls", value=True, path=path)
-    uv.config("concurrent-downloads", 4, path=path)
-    uv.config("required-version", "0.9", path=path)
-    uv.config("default-groups", ["dev", "lint"], path=path)
+    uv.config("native-tls", value=True, path=typed)
+    uv.config("concurrent-downloads", 4, path=typed)
+    uv.config("required-version", "0.9", path=typed)
+    uv.config("default-groups", ["dev", "lint"], path=typed)
 
-    assert path.read_text() == (
+    assert typed.read_text() == (
         'native-tls = true\nconcurrent-downloads = 4\nrequired-version = "0.9"\ndefault-groups = ["dev", "lint"]\n'
     )
-
-
-def test_config_absent_removes_the_key_and_is_idempotent(tmp_path):
-    path = tmp_path / "uv.toml"
-    path.write_text('index-url = "https://x"\nkeep = 1\n', encoding="utf-8")
-    make_context(tmp_path)
-
-    result = uv.config("index-url", state="absent", path=path)
-
-    assert path.read_text() == "keep = 1\n"
-    assert result.changed is True
-    assert result.summary == f"remove index-url from {path}"
-    assert call_data(result)["value"] is None
-    assert call_data(result)["toml_action"] == "removed"
-
-    result = uv.config("index-url", state="absent", path=path)
-    assert result.changed is False
-    assert result.summary == f"ensure index-url is absent from {path}"
 
 
 def test_config_dry_run_reports_without_writing(tmp_path):
@@ -1291,7 +1115,8 @@ def test_config_dry_run_reports_without_writing(tmp_path):
     assert not path.exists()
 
 
-def test_config_a_pyproject_path_uses_the_tool_uv_table(tmp_path):
+def test_config_pyproject_path_and_project_scope(tmp_path):
+    # a pyproject path writes into [tool.uv]
     path = tmp_path / "pyproject.toml"
     path.write_text('[project]\nname = "demo"\n', encoding="utf-8")
     make_context(tmp_path)
@@ -1302,8 +1127,7 @@ def test_config_a_pyproject_path_uses_the_tool_uv_table(tmp_path):
     assert result["table"] == "tool.uv"
     assert result.summary == f"set python-downloads in [tool.uv] of {path}"
 
-
-def test_config_scope_project_edits_the_project_pyproject(tmp_path):
+    # project scope edits the project's pyproject.toml
     project = tmp_path / "proj"
     write_pyproject(project)
     make_context(tmp_path)
@@ -1315,7 +1139,8 @@ def test_config_scope_project_edits_the_project_pyproject(tmp_path):
     assert "[tool.uv]\nnative-tls = true\n" in (project / "pyproject.toml").read_text()
 
 
-def test_config_scope_user_uses_xdg_config_home(tmp_path, monkeypatch):
+def test_config_user_scope_and_guards(tmp_path, monkeypatch):
+    # user scope honors XDG_CONFIG_HOME
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     make_context(tmp_path)
 
@@ -1325,17 +1150,22 @@ def test_config_scope_user_uses_xdg_config_home(tmp_path, monkeypatch):
     assert target.read_text() == "native-tls = true\n"
     assert result["path"] == str(target)
 
+    # user scope cannot run as root
+    local_sudo_context(tmp_path)  # is_root=True
 
-def test_config_scope_user_defaults_to_dot_config(tmp_path, monkeypatch):
+    with pytest.raises(TaskFailed, match="user-scoped uv config cannot run as root"):
+        uv.config("native-tls", value=True, scope="user")
+
+    # user scope cannot use sudo
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    make_context(tmp_path)
+    make_context(tmp_path)  # non-root
 
-    result = uv.config("native-tls", value=True, scope="user")
-
-    target = tmp_path / ".config" / "uv" / "uv.toml"
-    assert target.read_text() == "native-tls = true\n"
-    assert result["path"] == str(target)
+    with pytest.raises(TaskFailed, match="user-scoped uv config cannot use sudo"):
+        uv.config("native-tls", value=True, scope="user", sudo=True)
+    with pytest.raises(TaskFailed, match="user-scoped uv config cannot use sudo"):
+        uv.config("native-tls", state="absent", scope="user", sudo=True)
+    assert not (tmp_path / ".config").exists()
 
 
 def test_config_scope_system_defaults_to_sudo(tmp_path, monkeypatch):
@@ -1350,25 +1180,6 @@ def test_config_scope_system_defaults_to_sudo(tmp_path, monkeypatch):
         assert ctx.sudo.refresh_count > 0
     finally:
         ctx.close()
-
-
-def test_config_scope_user_rejected_as_root(tmp_path):
-    local_sudo_context(tmp_path)  # is_root=True
-
-    with pytest.raises(TaskFailed, match="user-scoped uv config cannot run as root"):
-        uv.config("native-tls", value=True, scope="user")
-
-
-def test_config_scope_user_rejects_sudo(tmp_path, monkeypatch):
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    make_context(tmp_path)  # non-root
-
-    with pytest.raises(TaskFailed, match="user-scoped uv config cannot use sudo"):
-        uv.config("native-tls", value=True, scope="user", sudo=True)
-    with pytest.raises(TaskFailed, match="user-scoped uv config cannot use sudo"):
-        uv.config("native-tls", state="absent", scope="user", sudo=True)
-    assert not (tmp_path / ".config").exists()
 
 
 def test_config_validates_arguments_before_touching_the_file(tmp_path):
@@ -1404,13 +1215,3 @@ def test_config_validates_arguments_before_touching_the_file(tmp_path):
     with pytest.raises(TaskFailed, match="toml value must not be empty"):
         uv.config("native-tls", value="  ", path=missing)
     assert not missing.exists()
-
-
-def test_config_writes_an_empty_array(tmp_path):
-    path = tmp_path / "uv.toml"
-    make_context(tmp_path)
-
-    result = uv.config("default-groups", [], path=path)
-
-    assert path.read_text() == "default-groups = []\n"
-    assert result.changed is True

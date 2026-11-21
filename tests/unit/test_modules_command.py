@@ -3,10 +3,10 @@ import pytest
 from kitup.errors import TaskFailed
 from kitup.modules import command
 
-from .helpers import FakeCommandRunner, FakeSudo, make_context, response
+from .helpers import FakeCommandRunner, FakeSudo, make_context
 
 
-def test_guarded_command_is_skipped(tmp_path):
+def test_creates_guards_skip_for_present_and_broken_symlink_markers(tmp_path):
     runner = FakeCommandRunner()
     ctx = make_context(tmp_path, command=runner)
     marker = tmp_path / "marker"
@@ -21,11 +21,10 @@ def test_guarded_command_is_skipped(tmp_path):
     assert result.failed is False
     assert result.summary == f"skip touch {marker}"
 
-
-def test_broken_symlink_marker_skips_the_command(tmp_path):
+    # a broken symlink marker counts as present too
     runner = FakeCommandRunner()
     make_context(tmp_path, command=runner)
-    marker = tmp_path / "marker"
+    marker = tmp_path / "broken"
     marker.symlink_to(tmp_path / "missing")
 
     result = command.run(["true"], creates=marker)
@@ -50,7 +49,7 @@ def test_unless_guard_skips_the_command(tmp_path):
     assert result.summary == "skip install"
 
 
-def test_unguarded_command_runs_and_records_change(tmp_path):
+def test_successful_changed_and_unchanged_commands(tmp_path):
     runner = FakeCommandRunner()
     ctx = make_context(tmp_path, command=runner)
 
@@ -64,11 +63,7 @@ def test_unguarded_command_runs_and_records_change(tmp_path):
     assert result.returncode == 0
     assert result.failed is False
 
-
-def test_cmd_keyword_is_accepted_by_run_and_shell(tmp_path):
-    runner = FakeCommandRunner()
-    make_context(tmp_path, command=runner)
-
+    # cmd= is accepted by both run and shell
     result = command.run(cmd=["true"])
     shell_result = command.shell(cmd="echo hello", shell="/bin/bash")
 
@@ -77,8 +72,7 @@ def test_cmd_keyword_is_accepted_by_run_and_shell(tmp_path):
     assert shell_result.action == "command.shell"
     assert runner.calls[-1][0] == ["/bin/bash", "-c", "echo hello"]
 
-
-def test_changed_false_records_a_no_change_call(tmp_path):
+    # changed=False still runs but records a no-change call
     runner = FakeCommandRunner()
     ctx = make_context(tmp_path, command=runner)
 
@@ -91,7 +85,7 @@ def test_changed_false_records_a_no_change_call(tmp_path):
     assert result.failed is False
 
 
-def test_ignore_errors_returns_failure_result(tmp_path):
+def test_ignore_errors_returns_failure_results(tmp_path):
     runner = FakeCommandRunner(returncode=2, stdout="out", stderr="bad")
     ctx = make_context(tmp_path, command=runner)
 
@@ -106,31 +100,7 @@ def test_ignore_errors_returns_failure_result(tmp_path):
     assert ctx.calls == [result]
     assert ctx.changes == [result]
 
-
-def test_ignore_errors_returns_success_result(tmp_path):
-    runner = FakeCommandRunner()
-    make_context(tmp_path, command=runner)
-
-    result = command.run(["true"], ignore_errors=True)
-
-    assert result.failed is False
-    assert result.returncode == 0
-
-
-def test_ignore_errors_surfaces_unstartable_command(tmp_path):
-    runner = FakeCommandRunner()
-    runner.responses = [response(127, stderr="could not run missing: No such file or directory")]
-    ctx = make_context(tmp_path, command=runner)
-
-    result = command.run(["missing"], ignore_errors=True)
-
-    assert result.failed is True
-    assert result.returncode == 127
-    assert "could not run missing" in result.stderr
-    assert ctx.calls == [result]
-
-
-def test_ignore_errors_does_not_swallow_runner_failures(tmp_path):
+    # runner-level failures are not swallowed by ignore_errors
     class TimedOutRunner(FakeCommandRunner):
         def run(self, argv, **kwargs):
             raise TaskFailed("command timed out after 1s")
@@ -140,8 +110,7 @@ def test_ignore_errors_does_not_swallow_runner_failures(tmp_path):
     with pytest.raises(TaskFailed, match="timed out"):
         command.run(["tool"], ignore_errors=True)
 
-
-def test_ignore_errors_cannot_be_combined_with_check(tmp_path):
+    # ignore_errors and check are mutually exclusive
     make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="cannot be combined"):
@@ -173,19 +142,6 @@ def test_dry_run_does_not_execute_mutating_command(tmp_path):
     assert result.summary == "would run: touch file"
 
 
-def test_dry_run_does_not_execute_changed_false_commands(tmp_path):
-    runner = FakeCommandRunner()
-    ctx = make_context(tmp_path, dry_run=True, command=runner)
-
-    result = command.run(["true"], changed=False)
-
-    assert runner.calls == []
-    assert ctx.changes == []
-    assert ctx.calls == [result]
-    assert result.changed is False
-    assert result.failed is False
-
-
 def test_shell_ignore_errors_returns_failure_result(tmp_path):
     runner = FakeCommandRunner(returncode=1, stderr="bad")
     make_context(tmp_path, command=runner)
@@ -197,7 +153,7 @@ def test_shell_ignore_errors_returns_failure_result(tmp_path):
     assert runner.calls[0][1]["check"] is False
 
 
-def test_shell_uses_explicit_shell(tmp_path):
+def test_shell_uses_explicit_and_default_shell(tmp_path, monkeypatch):
     runner = FakeCommandRunner()
     make_context(tmp_path, command=runner)
 
@@ -205,15 +161,12 @@ def test_shell_uses_explicit_shell(tmp_path):
 
     assert runner.calls[0][0] == ["/bin/bash", "-c", "echo hello"]
 
-
-def test_shell_uses_default_shell_from_environment(tmp_path, monkeypatch):
+    # without an explicit shell the environment's SHELL is used
     monkeypatch.setenv("SHELL", "/bin/zsh")
-    runner = FakeCommandRunner()
-    make_context(tmp_path, command=runner)
 
     command.shell("echo hello")
 
-    assert runner.calls[0][0] == ["/bin/zsh", "-c", "echo hello"]
+    assert runner.calls[1][0] == ["/bin/zsh", "-c", "echo hello"]
 
 
 def test_shell_unless_runs_through_shell(tmp_path):

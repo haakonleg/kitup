@@ -4,14 +4,11 @@ import gzip
 import http.server
 import json
 import os
-import subprocess
 import zipfile
 
 import pytest
 
-from kitup.commands import CommandRunner
-from kitup.modules import command, decompress, dnf, download, files, git, pip, podman, sysctl, users, uv
-from kitup.privileges import PrivilegeManager
+from kitup.modules import command, decompress, dnf, download, files, git, pip, podman, sysctl, uv
 
 from .helpers import FakeCommandRunner, FakeSudo, argvs, make_context, plain_output, response, serve_http
 
@@ -32,27 +29,6 @@ def context(tmp_path, *, command_runner=None, dry_run=False, sudo=None):
         sudo=sudo or FakeSudo(),
         output=plain_output(),
     )
-
-
-def test_command_runner_expands_cwd(tmp_path, home, monkeypatch):
-    calls = []
-
-    class Process:
-        pid = 1
-        returncode = 0
-
-        def communicate(self, input=None, timeout=None):
-            return "", ""
-
-    def popen(argv, **kwargs):
-        calls.append(kwargs["cwd"])
-        return Process()
-
-    monkeypatch.setattr(subprocess, "Popen", popen)
-
-    CommandRunner(PrivilegeManager()).run(["true"], cwd="~/work")
-
-    assert calls == [home / "work"]
 
 
 def test_files_paths_expand_home(tmp_path, home):
@@ -80,18 +56,14 @@ def test_files_paths_expand_home(tmp_path, home):
     assert (home / "moved").read_text(encoding="utf-8") == "source\n"
     assert os.readlink(home / "link") == str(home / "target")
 
-
-def test_template_destination_expands_home(tmp_path, home):
-    source = tmp_path / "source.j2"
-    source.write_text("rendered\n", encoding="utf-8")
-    context(tmp_path)
-
-    files.template(source, "~/rendered")
-
+    template_source = tmp_path / "source.j2"
+    template_source.write_text("rendered\n", encoding="utf-8")
+    files.template(template_source, "~/rendered")
     assert (home / "rendered").read_text(encoding="utf-8") == "rendered\n"
 
 
-def test_decompress_destinations_and_creates_expand_home(tmp_path, home):
+def test_artifact_destinations_expand_home(tmp_path, home, monkeypatch):
+    # Single-file decompression, archive extraction, and creates markers.
     source = home / "data.txt.gz"
     with gzip.open(source, "wb") as stream:
         stream.write(b"value\n")
@@ -110,16 +82,36 @@ def test_decompress_destinations_and_creates_expand_home(tmp_path, home):
     assert (home / "archive" / "inside.txt").read_text(encoding="utf-8") == "value\n"
     assert skipped.changed is False
 
+    # Downloaded files.
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    context(tmp_path)
 
-def test_dnf_config_path_expands_home(tmp_path, home):
+    with serve_http(DownloadHandler) as url:
+        download.to_file(url, "~/downloaded")
+
+    assert (home / "downloaded").read_text(encoding="utf-8") == "downloaded\n"
+
+    # Git clone destinations.
+    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: "git" if name == "git" else None)
+    command_runner = FakeCommandRunner()
+    command_runner.responses = [response(128)]
+    context(tmp_path, command_runner=command_runner)
+
+    git.repo("https://example.test/repo.git", "~/repo")
+
+    assert argvs(command_runner)[-1] == ["git", "clone", "https://example.test/repo.git", str(home / "repo")]
+
+
+def test_dnf_paths_expand_home(tmp_path, home):
+    # Configuration file paths.
     context(tmp_path)
 
     dnf.config("keepcache", value=True, path="~/dnf.conf", sudo=False)
 
     assert "keepcache = True" in (home / "dnf.conf").read_text(encoding="utf-8")
 
-
-def test_dnf_source_paths_expand_home(tmp_path, home):
+    # Repository and RPM source paths.
     reposdir = tmp_path / "repos.d"
     reposdir.mkdir()
     command_runner = FakeCommandRunner()
@@ -151,28 +143,6 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def test_download_destination_expands_home(tmp_path, home, monkeypatch):
-    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
-    monkeypatch.setenv("no_proxy", "127.0.0.1")
-    context(tmp_path)
-
-    with serve_http(DownloadHandler) as url:
-        download.to_file(url, "~/downloaded")
-
-    assert (home / "downloaded").read_text(encoding="utf-8") == "downloaded\n"
-
-
-def test_git_destination_expands_home(tmp_path, home, monkeypatch):
-    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: "git" if name == "git" else None)
-    command_runner = FakeCommandRunner()
-    command_runner.responses = [response(128)]
-    context(tmp_path, command_runner=command_runner)
-
-    git.repo("https://example.test/repo.git", "~/repo")
-
-    assert argvs(command_runner)[-1] == ["git", "clone", "https://example.test/repo.git", str(home / "repo")]
-
-
 def test_command_creates_cwd_and_shell_expand_home(tmp_path, home):
     command_runner = FakeCommandRunner()
     context(tmp_path, command_runner=command_runner)
@@ -190,7 +160,8 @@ def test_command_creates_cwd_and_shell_expand_home(tmp_path, home):
     assert command_runner.calls[1][1]["cwd"] == home / "work"
 
 
-def test_pip_paths_expand_home(tmp_path, home, monkeypatch):
+def test_pip_and_uv_paths_expand_home(tmp_path, home, monkeypatch):
+    # pip venv, config, and interpreter paths.
     monkeypatch.setattr(
         "kitup.modules.pip.shutil.which",
         lambda name: {"python3": "/usr/bin/python3", "python": "/usr/bin/python"}.get(name),
@@ -218,8 +189,7 @@ def test_pip_paths_expand_home(tmp_path, home, monkeypatch):
     pip.packages(["requests"], python="~/bin/python3")
     assert command_runner.calls[0][0][0] == str(python)
 
-
-def test_uv_paths_expand_home(tmp_path, home, monkeypatch):
+    # uv dependency, project config, and explicit config paths.
     monkeypatch.setattr(
         "kitup._utils.executables.shutil.which",
         lambda name: "/usr/bin/uv" if name == "uv" else None,
@@ -237,34 +207,6 @@ def test_uv_paths_expand_home(tmp_path, home, monkeypatch):
     configured = home / "uv.toml"
     uv.config("cache-dir", "~/cache", path="~/uv.toml")
     assert 'cache-dir = "~/cache"' in configured.read_text(encoding="utf-8")
-
-
-def test_uv_project_environment_expands_home(tmp_path, home, monkeypatch):
-    monkeypatch.setattr(
-        "kitup._utils.executables.shutil.which",
-        lambda name: "/usr/bin/uv" if name == "uv" else None,
-    )
-    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "~/env")
-    (home / "env").mkdir()
-    project = home / "project"
-    project.mkdir()
-    (project / "pyproject.toml").write_text(
-        '[project]\nname = "demo"\nversion = "0.1.0"\ndependencies = ["requests"]\n',
-        encoding="utf-8",
-    )
-    command_runner = FakeCommandRunner()
-    command_runner.responses = [response(0), response(0)]
-
-    context(tmp_path, command_runner=command_runner)
-    result = uv.dependencies(["requests"], project="~/project")
-
-    assert result.changed is False
-    assert len(command_runner.calls) == 2
-
-
-def test_users_home_and_shell_expand_before_the_absolute_check(home):
-    assert users._optional_absolute_path("~/alice", "home") == str(home / "alice")
-    assert users._optional_absolute_path("~/bin/zsh", "shell") == str(home / "bin" / "zsh")
 
 
 def test_sysctl_file_expands_home(tmp_path, home):

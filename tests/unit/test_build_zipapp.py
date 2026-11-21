@@ -93,8 +93,7 @@ def test_zipapp_bundles_runtime_dependencies_and_licenses(tmp_path):
     assert "kitup " in result.stdout
 
 
-def test_zipapp_lists_builtin_modules(tmp_path):
-    """Built-in discovery must work from the archive, not just a source tree."""
+def test_zipapp_lists_builtin_modules_and_renders_yaml_helpers(tmp_path):
     target = build_zipapp(tmp_path)
 
     result = run_zipapp(target, "list-modules", str(tmp_path), "--no-color")
@@ -102,10 +101,6 @@ def test_zipapp_lists_builtin_modules(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "built-in modules:" in result.stdout
     assert "  - files" in result.stdout
-
-
-def test_zipapp_renders_yaml_helpers(tmp_path):
-    target = build_zipapp(tmp_path)
 
     root = tmp_path / "project"
     bundle = root / "bundles" / "demo"

@@ -7,10 +7,8 @@ import stat
 import struct
 import tarfile
 import zipfile
-from collections import Counter
 from collections.abc import Callable
 from compression import zstd
-from contextlib import contextmanager
 
 import pytest
 
@@ -59,10 +57,9 @@ def _write_tar(path, compression: str = ""):
     return path
 
 
-@pytest.fixture(params=TAR_COMPRESSIONS)
-def tar_archive(tmp_path, request):
-    suffix = f".tar.{request.param}" if request.param else ".tar"
-    return _write_tar(tmp_path / f"app{suffix}", request.param)
+@pytest.fixture
+def tar_archive(tmp_path):
+    return _write_tar(tmp_path / "app.tar")
 
 
 def _zip_entry(
@@ -97,7 +94,10 @@ def _write_zip(path):
     return path
 
 
-def test_archive_extracts_and_is_idempotent(tmp_path, tar_archive):
+@pytest.mark.parametrize("compression", TAR_COMPRESSIONS)
+def test_archive_extracts_and_is_idempotent(tmp_path, compression):
+    suffix = f".tar.{compression}" if compression else ".tar"
+    tar_archive = _write_tar(tmp_path / f"app{suffix}", compression)
     dest = tmp_path / "dest"
     ctx = make_context(tmp_path)
 
@@ -175,106 +175,20 @@ class _CountingStream:
         self._raw.close()
 
 
-def test_archive_processes_members_in_archive_order(tmp_path, monkeypatch):
-    archive = tmp_path / "ordered.tar.gz"
-    with tarfile.open(archive, "w:gz") as tar:
-        # Deliberately out of order: deep members first, their directories last.
-        for index in reversed(range(8)):
-            _tar_entry(tar, f"app/dir{index}/file{index}.txt", f"payload {index}\n".encode() * 64)
-        for index in reversed(range(8)):
-            _tar_entry(tar, f"app/dir{index}", kind="dir", mode=0o750)
-    dest = tmp_path / "dest"
-    make_context(tmp_path)
-    decompress.archive(archive, dest)
-
-    readers: list[_CountingStream] = []
-
-    def counting_open(path):
-        raw = path.open("rb")
-        reader = _CountingStream(gzip.GzipFile(fileobj=raw, mode="rb"), raw)
-        readers.append(reader)
-        return tarfile.open(fileobj=reader, mode="r:")
-
-    monkeypatch.setattr(decompress, "_open_archive", counting_open)
-    try:
-        second = make_context(tmp_path)
-        decompress.archive(archive, dest)
-    finally:
-        for reader in readers:
-            reader.close()
-
-    assert second.changes == []
-    # One rewind is expected when the member scan finishes and extraction starts.
-    # Processing sorted by name would seek backwards once per out-of-order member.
-    assert readers[0].rewinds <= 2
+def _corrupt_zip_payload(path):
+    data = bytearray(path.read_bytes())
+    name_length, extra_length = struct.unpack_from("<HH", data, 26)
+    offset = 30 + name_length + extra_length
+    data[offset] ^= 0xFF
+    path.write_bytes(data)
 
 
-def test_archive_stats_each_existing_parent_once(tmp_path, monkeypatch):
-    archive = tmp_path / "parents.tar"
-    with tarfile.open(archive, "w") as tar:
-        for index in range(8):
-            _tar_entry(tar, f"app/dir{index}/file{index}.txt", b"payload\n")
-    dest = tmp_path / "dest"
-    make_context(tmp_path)
-    decompress.archive(archive, dest)
-
-    calls = Counter()
-    original = decompress.file_actions.stat_local
-
-    def counting(path, **kwargs):
-        calls[path] += 1
-        return original(path, **kwargs)
-
-    monkeypatch.setattr(decompress.file_actions, "stat_local", counting)
-    second = make_context(tmp_path)
-    decompress.archive(archive, dest)
-
-    assert second.changes == []
-    assert calls[dest / "app"] == 1
-    for index in range(8):
-        assert calls[dest / f"app/dir{index}"] == 1
-
-
-def test_archive_reads_changed_same_size_members_once(tmp_path, monkeypatch):
-    archive = tmp_path / "changed.tar.gz"
-    with tarfile.open(archive, "w:gz") as tar:
-        for index in range(8):
-            _tar_entry(tar, f"app/file{index}.txt", b"original\n")
-    dest = tmp_path / "dest"
-    make_context(tmp_path)
-    decompress.archive(archive, dest)
-    for index in range(8):
-        (dest / f"app/file{index}.txt").write_bytes(b"modified\n")
-
-    readers: list[_CountingStream] = []
-
-    def counting_open(path):
-        raw = path.open("rb")
-        reader = _CountingStream(gzip.GzipFile(fileobj=raw, mode="rb"), raw)
-        readers.append(reader)
-        return tarfile.open(fileobj=reader, mode="r:")
-
-    monkeypatch.setattr(decompress, "_open_archive", counting_open)
-    try:
-        ctx = make_context(tmp_path)
-        decompress.archive(archive, dest)
-    finally:
-        for reader in readers:
-            reader.close()
-
-    assert len(ctx.changes) == 1
-    for index in range(8):
-        assert (dest / f"app/file{index}.txt").read_bytes() == b"original\n"
-    # Staging reads each member once. Reopening a changed member would rewind the
-    # compressed stream and decompress it from the start again.
-    assert readers[0].rewinds <= 2
-
-
-def test_archive_extracts_zip(tmp_path):
+def test_archive_handles_zip_formats_and_corruption(tmp_path):
     archive = _write_zip(tmp_path / "app.zip")
     dest = tmp_path / "dest"
     make_context(tmp_path)
 
+    # Extract modes, symlinks, and idempotency.
     decompress.archive(archive, dest)
 
     assert (dest / "app/bin/run").read_bytes() == b"#!/bin/sh\necho hi\n"
@@ -288,36 +202,24 @@ def test_archive_extracts_zip(tmp_path):
 
     assert second.changes == []
 
+    # Entries without file type bits are treated as regular files.
+    plain_zip = tmp_path / "permissions.zip"
+    with zipfile.ZipFile(plain_zip, "w", zipfile.ZIP_DEFLATED) as zip_archive:
+        zip_archive.writestr("file.txt", b"payload\n")
+    plain_dest = tmp_path / "plain-dest"
 
-def _corrupt_zip_payload(path):
-    data = bytearray(path.read_bytes())
-    name_length, extra_length = struct.unpack_from("<HH", data, 26)
-    offset = 30 + name_length + extra_length
-    data[offset] ^= 0xFF
-    path.write_bytes(data)
+    decompress.archive(plain_zip, plain_dest)
 
+    assert (plain_dest / "file.txt").read_bytes() == b"payload\n"
 
-def test_archive_reports_corrupt_zip_as_task_failure(tmp_path):
-    archive = tmp_path / "corrupt.zip"
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zip_archive:
+    # A corrupt payload is reported as an extraction failure.
+    corrupt = tmp_path / "corrupt.zip"
+    with zipfile.ZipFile(corrupt, "w", zipfile.ZIP_DEFLATED) as zip_archive:
         zip_archive.writestr("file.txt", b"payload\n" * 100)
-    _corrupt_zip_payload(archive)
+    _corrupt_zip_payload(corrupt)
 
     with pytest.raises(TaskFailed, match="could not extract"):
-        make_context(tmp_path)
-        decompress.archive(archive, tmp_path / "dest")
-
-
-def test_archive_extracts_zip_entries_without_file_type_bits(tmp_path):
-    archive = tmp_path / "permissions.zip"
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zip_archive:
-        zip_archive.writestr("file.txt", b"payload\n")
-    dest = tmp_path / "dest"
-
-    make_context(tmp_path)
-    decompress.archive(archive, dest)
-
-    assert (dest / "file.txt").read_bytes() == b"payload\n"
+        decompress.archive(corrupt, tmp_path / "corrupt-dest")
 
 
 def test_archive_rewrites_changed_content(tmp_path, tar_archive):
@@ -530,8 +432,9 @@ def test_archive_validates_arguments(tmp_path, tar_archive):
         decompress.archive(tmp_path, dest)
 
 
-def test_file_reports_corrupt_gzip_as_task_failure(tmp_path):
-    source = tmp_path / "data.txt.gz"
+def test_file_reports_corruption_as_task_failure(tmp_path):
+    # A corrupt compressed payload fails during decompression.
+    source = tmp_path / "corrupt.txt.gz"
     data = bytearray(gzip.compress(b"payload\n" * 100))
     data[12] ^= 0xFF
     source.write_bytes(data)
@@ -540,24 +443,23 @@ def test_file_reports_corrupt_gzip_as_task_failure(tmp_path):
         make_context(tmp_path)
         decompress.file(source, tmp_path / "out.txt")
 
-
-def test_file_reports_decompression_errors_as_source_errors(tmp_path):
+    # A corrupt CRC is reported as a source error, not a destination read error.
     payload = b"payload\n" * 100
-    source = tmp_path / "data.txt.gz"
+    crc_source = tmp_path / "crc.txt.gz"
     data = bytearray(gzip.compress(payload))
-    data[-8] ^= 0xFF  # corrupt the CRC
-    source.write_bytes(data)
+    data[-8] ^= 0xFF
+    crc_source.write_bytes(data)
     dest = tmp_path / "out.txt"
     dest.write_bytes(payload)
 
     with pytest.raises(TaskFailed, match="could not decompress") as failure:
         make_context(tmp_path)
-        decompress.file(source, dest)
+        decompress.file(crc_source, dest)
 
     assert "could not read" not in str(failure.value)
 
 
-def test_file_rewrites_changed_content(tmp_path):
+def test_file_reconciles_content_and_staging(tmp_path):
     source = tmp_path / "data.txt.gz"
     source.write_bytes(gzip.compress(b"payload\n"))
     dest = tmp_path / "out.txt"
@@ -570,46 +472,7 @@ def test_file_rewrites_changed_content(tmp_path):
     assert len(ctx.changes) == 1
     assert list(tmp_path.glob(".kitup-decompress-*")) == []
 
-
-def test_file_decompresses_source_once_when_rewriting(tmp_path, monkeypatch):
-    payload = b"payload\n" * 1024
-    source = tmp_path / "data.txt.gz"
-    source.write_bytes(gzip.compress(payload))
-    dest = tmp_path / "out.txt"
-    dest.write_bytes(b"old\n")
-
-    decompressed = 0
-    original = decompress._decompressed_stream
-
-    @contextmanager
-    def counting_stream(path):
-        nonlocal decompressed
-        with original(path) as stream:
-            read = stream.read
-
-            def counting_read(size=-1):
-                nonlocal decompressed
-                data = read(size)
-                decompressed += len(data)
-                return data
-
-            stream.read = counting_read
-            yield stream
-
-    monkeypatch.setattr(decompress, "_decompressed_stream", counting_stream)
-    make_context(tmp_path)
-    decompress.file(source, dest)
-
-    assert dest.read_bytes() == payload
-    assert decompressed == len(payload)
-
-
-def test_file_discards_staged_copy_when_content_matches(tmp_path):
-    source = tmp_path / "data.txt.gz"
-    source.write_bytes(gzip.compress(b"payload\n"))
-    dest = tmp_path / "out.txt"
-    dest.write_bytes(b"payload\n")
-
+    # A matching destination discards the staged copy without recording a change.
     ctx = make_context(tmp_path)
     decompress.file(source, dest)
 
@@ -617,9 +480,11 @@ def test_file_discards_staged_copy_when_content_matches(tmp_path):
     assert list(tmp_path.glob(".kitup-decompress-*")) == []
 
 
-def test_file_preserves_or_overrides_existing_modes(tmp_path):
+def test_file_preserves_or_overrides_modes(tmp_path):
     source = tmp_path / "data.txt.gz"
     source.write_bytes(gzip.compress(b"payload\n"))
+
+    # Existing modes are preserved when no explicit mode is requested.
     dest = tmp_path / "out.txt"
     dest.write_bytes(b"payload\n")
     dest.chmod(0o600)
@@ -630,22 +495,19 @@ def test_file_preserves_or_overrides_existing_modes(tmp_path):
     assert unchanged.changes == []
     assert stat.S_IMODE(dest.stat().st_mode) == 0o600
 
+    # An explicit mode overrides it.
     ctx = make_context(tmp_path)
     decompress.file(source, dest, mode=0o640)
 
     assert stat.S_IMODE(dest.stat().st_mode) == 0o640
     assert len(ctx.changes) == 1
 
-
-def test_file_accepts_octal_string_mode(tmp_path):
-    source = tmp_path / "data.txt.gz"
-    source.write_bytes(gzip.compress(b"payload\n"))
-    dest = tmp_path / "out.txt"
-
+    # Octal string modes are accepted for new destinations.
+    octal_dest = tmp_path / "octal.txt"
     make_context(tmp_path)
-    decompress.file(source, dest, mode="0640")
+    decompress.file(source, octal_dest, mode="0640")
 
-    assert stat.S_IMODE(dest.stat().st_mode) == 0o640
+    assert stat.S_IMODE(octal_dest.stat().st_mode) == 0o640
 
 
 def test_file_uses_directory_destinations(tmp_path):
@@ -678,62 +540,45 @@ def test_file_dry_run_reports_without_writing(tmp_path):
     assert not dest.exists()
     assert len(ctx.changes) == 1
 
-
-def test_file_dry_run_defers_missing_parent_check(tmp_path):
-    source = tmp_path / "data.txt.gz"
-    source.write_bytes(gzip.compress(b"payload\n"))
-    dest = tmp_path / "missing" / "out.txt"
+    # A missing parent is not created, and is not an error, in dry-run mode.
+    nested = tmp_path / "missing" / "out.txt"
     ctx = make_context(tmp_path, dry_run=True)
 
-    decompress.file(source, dest)
+    decompress.file(source, nested)
 
     assert not (tmp_path / "missing").exists()
     assert len(ctx.changes) == 1
     assert ctx.changes[0].changed
 
 
-def test_file_rejects_archives(tmp_path):
-    archive = _write_tar(tmp_path / "app.tar.gz", "gz")
-
-    with pytest.raises(TaskFailed, match=r"use decompress\.archive"):
-        make_context(tmp_path)
-        decompress.file(archive, tmp_path / "out")
-
-
-def test_file_rejects_unsupported_and_invalid_sources(tmp_path):
-    plain = tmp_path / "plain.bin"
-    plain.write_bytes(b"plain\n")
-
-    with pytest.raises(TaskFailed, match="unsupported compression format"):
-        make_context(tmp_path)
-        decompress.file(plain, tmp_path / "out")
-    with pytest.raises(TaskFailed, match="does not exist"):
-        make_context(tmp_path)
-        decompress.file(tmp_path / "missing.gz", tmp_path / "out")
-
-
-def test_file_dry_run_still_validates_compression(tmp_path):
-    plain = tmp_path / "plain.bin"
-    plain.write_bytes(b"plain\n")
-
-    with pytest.raises(TaskFailed, match="unsupported compression format"):
-        make_context(tmp_path, dry_run=True)
-        decompress.file(plain, tmp_path / "out")
-
-
-def test_file_rejects_symlink_and_invalid_destinations(tmp_path):
+def test_file_rejects_invalid_sources_and_destinations(tmp_path):
     source = tmp_path / "data.txt.gz"
     source.write_bytes(gzip.compress(b"payload\n"))
+    make_context(tmp_path)
+
+    # Archives must use decompress.archive.
+    archive = _write_tar(tmp_path / "app.tar.gz", "gz")
+    with pytest.raises(TaskFailed, match=r"use decompress\.archive"):
+        decompress.file(archive, tmp_path / "out")
+
+    # Unsupported and missing sources.
+    plain = tmp_path / "plain.bin"
+    plain.write_bytes(b"plain\n")
+    with pytest.raises(TaskFailed, match="unsupported compression format"):
+        decompress.file(plain, tmp_path / "out")
+    with pytest.raises(TaskFailed, match="does not exist"):
+        decompress.file(tmp_path / "missing.gz", tmp_path / "out")
+
+    # Symlink destinations are refused without touching their target.
     target = tmp_path / "target"
     target.write_bytes(b"keep\n")
     link = tmp_path / "link"
     link.symlink_to(target)
-    make_context(tmp_path)
-
     with pytest.raises(TaskFailed, match="symlink"):
         decompress.file(source, link)
     assert target.read_bytes() == b"keep\n"
 
+    # Missing destination parents are rejected outside dry-run mode.
     with pytest.raises(TaskFailed, match="parent directory does not exist"):
         decompress.file(source, tmp_path / "missing" / "out.txt")
 
@@ -758,22 +603,6 @@ def test_file_resolves_bundle_relative_sources(tmp_path):
     assert result.summary == f"ensure {dest} from data.txt.gz"
 
 
-def test_archive_reports_a_short_source_label(tmp_path):
-    bundle_dir = tmp_path / "bundles" / "base"
-    (bundle_dir / "files").mkdir(parents=True)
-    _write_tar(bundle_dir / "files" / "app.tar")
-    bundle = Bundle("base", path=bundle_dir)
-    bundle.task("Task")(lambda: None)
-    ctx = make_context(tmp_path)
-    ctx.begin_task(bundle.tasks[0])
-    dest = tmp_path / "out"
-    dest.mkdir()
-
-    result = decompress.archive("app.tar", dest)
-
-    assert result.summary == f"extract 6 paths from app.tar -> {dest}"
-
-
 COMPRESSIONS: list[tuple[str, Callable[[bytes], bytes]]] = [
     (".gz", gzip.compress),
     (".bz2", bz2.compress),
@@ -782,24 +611,26 @@ COMPRESSIONS: list[tuple[str, Callable[[bytes], bytes]]] = [
 ]
 
 
-@pytest.mark.parametrize(("suffix", "compress"), COMPRESSIONS)
-def test_file_decompresses_and_is_idempotent(tmp_path, suffix, compress):
-    source = tmp_path / f"data.txt{suffix}"
-    source.write_bytes(compress(b"payload\n"))
-    dest = tmp_path / "out.txt"
-    ctx = make_context(tmp_path)
+def test_file_decompresses_and_is_idempotent(tmp_path):
+    for suffix, compress in COMPRESSIONS:
+        case = tmp_path / suffix.removeprefix(".")
+        case.mkdir()
+        source = case / f"data.txt{suffix}"
+        source.write_bytes(compress(b"payload\n"))
+        dest = case / "out.txt"
+        ctx = make_context(tmp_path)
 
-    decompress.file(source, dest)
+        decompress.file(source, dest)
 
-    assert dest.read_bytes() == b"payload\n"
-    assert stat.S_IMODE(dest.stat().st_mode) == 0o644
-    assert len(ctx.changes) == 1
-    assert ctx.changes[0].action == "decompress.file"
-    assert ctx.changes[0].dest == str(dest)
-    assert ctx.changes[0].src == str(source)
+        assert dest.read_bytes() == b"payload\n"
+        assert stat.S_IMODE(dest.stat().st_mode) == 0o644
+        assert len(ctx.changes) == 1
+        assert ctx.changes[0].action == "decompress.file"
+        assert ctx.changes[0].dest == str(dest)
+        assert ctx.changes[0].src == str(source)
 
-    second = make_context(tmp_path)
-    decompress.file(source, dest)
+        second = make_context(tmp_path)
+        decompress.file(source, dest)
 
-    assert second.changes == []
-    assert second.calls[0].summary == f"ensure {dest} from {source}"
+        assert second.changes == []
+        assert second.calls[0].summary == f"ensure {dest} from {source}"

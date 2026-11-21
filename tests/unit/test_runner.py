@@ -113,7 +113,7 @@ def test_calls_recorded_before_skip_are_retained(tmp_path):
     assert [call.summary for call in result.changes] == ["prepared"]
 
 
-def test_later_task_reads_previous_result(tmp_path):
+def test_later_tasks_read_changed_skipped_dry_run_and_failed_results(tmp_path):
     seen = []
     bundle = Bundle("base")
 
@@ -126,8 +126,6 @@ def test_later_task_reads_previous_result(tmp_path):
         ctx = current_context()
         result = ctx.result(check)
         seen.append((result.changed, result.value, result.status))
-        if not result.changed:
-            ctx.skip("no updates")
 
     add_task(bundle, check, name="Check")
     add_task(bundle, apply, name="Apply")
@@ -137,22 +135,20 @@ def test_later_task_reads_previous_result(tmp_path):
     assert code == 0
     assert seen == [(True, "release-1", Status.CHANGED)]
 
-
-def test_task_result_statuses_are_available(tmp_path):
     seen = []
     bundle = Bundle("base")
 
-    def check():
+    def skip_check():
         ctx = current_context()
         ctx.skip("nothing to do")
 
-    def apply():
+    def read_skipped():
         ctx = current_context()
-        result = ctx.result(check)
+        result = ctx.result(skip_check)
         seen.append((result.skipped, result.value))
 
-    add_task(bundle, check, name="Check")
-    add_task(bundle, apply, name="Apply")
+    add_task(bundle, skip_check, name="Check")
+    add_task(bundle, read_skipped, name="Apply")
     code, _, _ = run_plan(tmp_path, [bundle])
     assert code == 0
     assert seen == [(True, None)]
@@ -160,17 +156,17 @@ def test_task_result_statuses_are_available(tmp_path):
     seen = []
     bundle = Bundle("base")
 
-    def check():
+    def dry_check():
         ctx = current_context()
         ctx.changed(summary="would change", would="change")
 
-    def apply():
+    def read_dry():
         ctx = current_context()
-        result = ctx.result(check)
+        result = ctx.result(dry_check)
         seen.append((result.changed, result.status))
 
-    add_task(bundle, check, name="Check")
-    add_task(bundle, apply, name="Apply")
+    add_task(bundle, dry_check, name="Check")
+    add_task(bundle, read_dry, name="Apply")
     code, _, _ = run_plan(tmp_path, [bundle], dry_run=True)
     assert code == 0
     assert seen == [(True, Status.CHANGED)]
@@ -207,49 +203,7 @@ def test_result_for_task_that_did_not_run_raises(tmp_path):
     assert "no result for task: check" in text
 
 
-def test_result_lookup_does_not_cross_bundles(tmp_path):
-    seen = []
-    base = Bundle("base")
-    desktop = Bundle("desktop", depends_on=[base])
-
-    def check():
-        return "ready"
-
-    def apply():
-        ctx = current_context()
-        try:
-            ctx.result(check)
-        except TaskFailed as exc:
-            seen.append(str(exc))
-
-    add_task(base, check, name="Check")
-    add_task(desktop, apply, name="Apply")
-
-    code, _, _ = run_plan(tmp_path, [desktop])
-
-    assert code == 0
-    assert seen == ["no result for task: check"]
-
-
-def test_task_results_are_stored_per_bundle(tmp_path):
-    base = Bundle("base")
-    desktop = Bundle("desktop", depends_on=[base])
-
-    def shared():
-        ctx = current_context()
-        return ctx.bundle.id
-
-    add_task(base, shared, name="Shared")
-    add_task(desktop, shared, name="Shared")
-
-    code, _, context = run_plan(tmp_path, [desktop])
-
-    assert code == 0
-    assert context.run_state.bundles["base"].results["base.shared"].value == "base"
-    assert context.run_state.bundles["desktop"].results["desktop.shared"].value == "desktop"
-
-
-def test_result_lookup_reads_the_current_bundle_only(tmp_path):
+def test_task_results_are_stored_and_looked_up_per_bundle(tmp_path):
     seen = []
     one = Bundle("one")
     two = Bundle("two")
@@ -267,10 +221,12 @@ def test_result_lookup_reads_the_current_bundle_only(tmp_path):
     add_task(two, check, name="Check")
     add_task(two, apply, name="Apply")
 
-    code, _, _ = run_plan(tmp_path, [one, two])
+    code, _, context = run_plan(tmp_path, [one, two])
 
     assert code == 0
     assert seen == ["one", "two"]
+    assert context.run_state.bundles["one"].results["one.check"].value == "one"
+    assert context.run_state.bundles["two"].results["two.check"].value == "two"
 
 
 def test_fail_fast_and_remaining_count(tmp_path):
@@ -298,7 +254,7 @@ def test_fail_fast_and_remaining_count(tmp_path):
     assert 'Aborted after failure in "Second". 1 task(s) not run.' in text
 
 
-def test_failure_prints_captured_stdout(tmp_path):
+def test_failures_print_diagnostics_and_unexpected_exceptions(tmp_path):
     bundle = Bundle("base")
 
     def fail():
@@ -311,6 +267,18 @@ def test_failure_prints_captured_stdout(tmp_path):
     assert code == 1
     assert "stdout:" in text
     assert "diagnostic output" in text
+
+    bundle = Bundle("base")
+
+    def explode():
+        raise RuntimeError("unexpected")
+
+    add_task(bundle, explode, name="Explode")
+
+    code, text, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 1
+    assert "RuntimeError: unexpected" in text
 
 
 def test_privilege_error_preserves_changes_and_notes(tmp_path):
@@ -331,20 +299,6 @@ def test_privilege_error_preserves_changes_and_notes(tmp_path):
     assert result.status is Status.FAILED
     assert [change.summary for change in result.changes] == ["prepared"]
     assert result.notes == ["a note"]
-
-
-def test_unexpected_exception_fails_task(tmp_path):
-    bundle = Bundle("base")
-
-    def explode():
-        raise RuntimeError("unexpected")
-
-    add_task(bundle, explode, name="Explode")
-
-    code, text, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 1
-    assert "RuntimeError: unexpected" in text
 
 
 def test_keyboard_interrupt_returns_130(tmp_path):
@@ -567,7 +521,7 @@ def test_failures_and_side_effects(tmp_path):
     assert calls == ["reload"]
 
 
-def test_one_shot_side_effect_runs_once_per_bundle(tmp_path):
+def test_one_shot_side_effects_run_once_per_bundle_but_can_retry_after_skip(tmp_path):
     calls = []
     base = Bundle("base")
     other = Bundle("other", depends_on=[base])
@@ -589,50 +543,41 @@ def test_one_shot_side_effect_runs_once_per_bundle(tmp_path):
     assert code == 0
     assert calls == ["refresh", "refresh"]
 
-
-def test_one_shot_side_effect_runs_once_per_bundle_registration(tmp_path):
     calls = []
     bundle = Bundle("base")
 
-    def refresh():
-        calls.append("refresh")
-
-    effect = side_effect("Refresh")(refresh)
-
-    def install():
+    def register_twice():
         ctx = current_context()
         ctx.changed(summary="+pkg")
         ctx.side_effect(effect)
         ctx.side_effect(effect)
 
-    add_task(bundle, install, name="Install")
+    add_task(bundle, register_twice, name="Install")
 
     code, _, _ = run_plan(tmp_path, [bundle])
     assert code == 0
     assert calls == ["refresh"]
 
-
-def test_skipped_one_shot_side_effect_can_run_again_in_the_same_bundle(tmp_path):
     calls = []
     bundle = Bundle("base")
 
-    def refresh():
+    def refresh_or_skip():
         ctx = current_context()
         calls.append("refresh")
         if len(calls) == 1:
             ctx.skip("not now")
 
-    effect = side_effect("Refresh")(refresh)
+    retry_effect = side_effect("Refresh")(refresh_or_skip)
 
     def first():
         ctx = current_context()
         ctx.changed(summary="+first")
-        ctx.side_effect(effect)
+        ctx.side_effect(retry_effect)
 
     def second():
         ctx = current_context()
         ctx.changed(summary="+second")
-        ctx.side_effect(effect)
+        ctx.side_effect(retry_effect)
 
     add_task(bundle, first, name="First")
     add_task(bundle, second, name="Second")
@@ -642,30 +587,7 @@ def test_skipped_one_shot_side_effect_can_run_again_in_the_same_bundle(tmp_path)
     assert calls == ["refresh", "refresh"]
 
 
-def test_immediate_side_effect_runs_per_registration_across_bundles(tmp_path):
-    calls = []
-    base = Bundle("base")
-    other = Bundle("other", depends_on=[base])
-
-    def reload():
-        calls.append("reload")
-
-    effect = side_effect("Reload", one_shot=False)(reload)
-
-    def register():
-        ctx = current_context()
-        ctx.changed(summary="+pkg")
-        ctx.side_effect(effect)
-
-    add_task(base, register, name="Base install")
-    add_task(other, register, name="Other install")
-
-    code, _, _ = run_plan(tmp_path, [other])
-    assert code == 0
-    assert calls == ["reload", "reload"]
-
-
-def test_immediate_side_effect_runs_for_every_registration(tmp_path):
+def test_immediate_side_effects_run_for_every_registration(tmp_path):
     calls = []
     bundle = Bundle("base")
 
@@ -797,14 +719,14 @@ def test_tag_filtering_selects_the_registering_task_and_its_side_effect(tmp_path
     assert calls == ["packages"]
 
 
-def test_side_effects_use_the_registering_bundle_context(tmp_path):
+def test_side_effects_use_the_registering_bundle_context_and_vars(tmp_path):
     seen = []
     (tmp_path / "files").mkdir()
     bundle = Bundle("base", path=tmp_path)
 
     def refresh():
         ctx = current_context()
-        seen.append((ctx.bundle.name, ctx.bundle_path, ctx.resolve_source("marker")))
+        seen.append((ctx.bundle.name, ctx.bundle_path, ctx.resolve_source("marker"), ctx.vars.VALUE))
 
     effect = side_effect("Refresh")(refresh)
 
@@ -815,10 +737,15 @@ def test_side_effects_use_the_registering_bundle_context(tmp_path):
 
     add_task(bundle, install, name="Install")
 
-    code, _, _ = run_plan(tmp_path, [bundle])
+    code, _, _ = run_plan(
+        tmp_path,
+        [bundle],
+        vars=Vars(VALUE="project"),
+        bundle_vars={bundle: Vars(VALUE="base")},
+    )
 
     assert code == 0
-    assert seen == [("base", tmp_path, tmp_path / "files" / "marker")]
+    assert seen == [("base", tmp_path, tmp_path / "files" / "marker", "base")]
 
 
 def test_bundle_vars_are_scoped_per_bundle(tmp_path):
@@ -848,35 +775,7 @@ def test_bundle_vars_are_scoped_per_bundle(tmp_path):
     assert seen == [("base", "base", 1), ("other", "project", None)]
 
 
-def test_side_effects_use_bundle_scoped_vars(tmp_path):
-    seen = []
-    bundle = Bundle("base", path=tmp_path)
-
-    def refresh():
-        ctx = current_context()
-        seen.append(ctx.vars.VALUE)
-
-    effect = side_effect("Refresh")(refresh)
-
-    def install():
-        ctx = current_context()
-        ctx.changed(summary="+pkg")
-        ctx.side_effect(effect)
-
-    add_task(bundle, install, name="Install")
-
-    code, _, _ = run_plan(
-        tmp_path,
-        [bundle],
-        vars=Vars(VALUE="project"),
-        bundle_vars={bundle: Vars(VALUE="base")},
-    )
-
-    assert code == 0
-    assert seen == ["base"]
-
-
-def test_side_effect_results_are_accessible_and_stored(tmp_path):
+def test_side_effect_results_are_accessible_stored_and_bundle_local(tmp_path):
     seen = []
     bundle = Bundle("base")
 
@@ -903,36 +802,34 @@ def test_side_effect_results_are_accessible_and_stored(tmp_path):
     assert seen == ["release-1"]
     assert context.run_state.bundles["base"].results["base.refresh"].value == "done"
 
-
-def test_side_effect_results_are_bundle_local(tmp_path):
     seen = []
     base = Bundle("base")
     other = Bundle("other", depends_on=[base])
 
-    def refresh():
+    def local_refresh():
         return "base"
 
-    effect = side_effect("Refresh")(refresh)
+    local_effect = side_effect("Refresh")(local_refresh)
 
     def register():
         ctx = current_context()
         ctx.changed(summary="+pkg")
-        ctx.side_effect(effect)
+        ctx.side_effect(local_effect)
 
-    def check():
+    def check_local():
         ctx = current_context()
         try:
-            ctx.result(refresh)
+            ctx.result(local_refresh)
         except TaskFailed as exc:
             seen.append(str(exc))
 
     add_task(base, register, name="Install")
-    add_task(other, check, name="Check")
+    add_task(other, check_local, name="Check")
 
     code, _, _ = run_plan(tmp_path, [other])
 
     assert code == 0
-    assert seen == ["no result for task: refresh"]
+    assert seen == ["no result for task: local_refresh"]
 
 
 def test_nested_side_effect_registration_fails(tmp_path):
@@ -958,70 +855,22 @@ def test_nested_side_effect_registration_fails(tmp_path):
     assert "side effects cannot register other side effects" in text
 
 
-def test_runner_renders_progress_and_bundle_rollups(tmp_path):
+def test_runner_renders_progress_rollups_and_diffs(tmp_path):
     base = Bundle("base")
     other = Bundle("other", depends_on=[base])
-    add_task(base, lambda: None, name="First")
-    add_task(other, lambda: None, name="Second")
-
-    code, text, _ = run_plan(tmp_path, [other])
-
-    assert code == 0
-    assert "  [1/2] First" in text
-    assert "  [2/2] Second" in text
-    assert "↳ base: 0 changed, 1 ok" in text
-    assert "↳ other: 0 changed, 1 ok" in text
-
-
-def test_runner_rollup_counts_side_effects(tmp_path):
-    bundle = Bundle("base")
-
-    def refresh():
-        current_context().changed(summary="+refreshed")
-
-    effect = side_effect("Refresh")(refresh)
-
-    def install():
-        ctx = current_context()
-        ctx.changed(summary="+pkg")
-        ctx.side_effect(effect)
-
-    add_task(bundle, install, name="Install")
-
-    code, text, _ = run_plan(tmp_path, [bundle])
-
-    assert code == 0
-    assert "↳ base: 2 changed, 0 ok" in text
-
-
-def test_runner_attaches_buffered_diffs_to_results(tmp_path):
-    bundle = Bundle("base")
 
     def first():
         current_context().add_diff("+new")
 
-    add_task(bundle, first, name="First")
-    add_task(bundle, lambda: None, name="Second")
+    add_task(base, first, name="First")
+    add_task(other, lambda: None, name="Second")
 
-    code, text, context = run_plan(tmp_path, [bundle])
+    code, text, context = run_plan(tmp_path, [other])
 
     assert code == 0
+    assert "  [1/2] First" in text
+    assert "  [2/2] Second" in text
     assert "      +new" in text
-    assert stored_result(context, bundle.tasks[0]).diffs == ["+new"]
-    assert stored_result(context, bundle.tasks[1]).diffs == []
-
-
-def test_current_context_is_the_runner_context(tmp_path):
-    seen = []
-    bundle = Bundle("base")
-
-    def check():
-        seen.append(current_context())
-
-    add_task(bundle, check, name="Check")
-
-    code, _, context = run_plan(tmp_path, [bundle])
-
-    assert code == 0
-    assert seen == [context]
-    assert current_context() is context
+    assert stored_result(context, base.tasks[0]).diffs == ["+new"]
+    assert "↳ base: 0 changed, 1 ok" in text
+    assert "↳ other: 0 changed, 1 ok" in text

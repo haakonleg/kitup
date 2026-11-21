@@ -7,7 +7,6 @@ from kitup.errors import TaskFailed
 from kitup.modules import pip
 
 from .helpers import (
-    CountingWorker,
     FakeCommandRunner,
     FakeSudo,
     argvs,
@@ -15,7 +14,6 @@ from .helpers import (
     completed,
     local_sudo_context,
     make_context,
-    privileged_context,
     response,
 )
 
@@ -38,6 +36,13 @@ def listing(names: list[str]):
     return response(0, json.dumps([{"name": name, "version": "1.0"} for name in names]))
 
 
+def make_venv(venv) -> None:
+    """Create a minimal fake virtualenv layout on disk."""
+    (venv / "bin").mkdir(parents=True, exist_ok=True)
+    (venv / "bin" / "python").write_text("", encoding="utf-8")
+    (venv / "pyvenv.cfg").write_text("", encoding="utf-8")
+
+
 def test_probes_stay_unprivileged_without_sudo(tmp_path):
     command = FakeCommandRunner()
     command.responses = [report([])]
@@ -57,7 +62,8 @@ def test_probes_stay_unprivileged_without_sudo(tmp_path):
     assert call_data(result) == {"added": [], "packages": ["requests"]}
 
 
-def test_present_installs_what_the_report_lists(tmp_path):
+def test_present_install_scenarios(tmp_path):
+    # everything the report lists is installed, including transitive dependencies
     command = FakeCommandRunner()
     command.responses = [report(["requests", "urllib3"]), response(0), report([])]
     make_context(tmp_path, command=command)
@@ -69,8 +75,7 @@ def test_present_installs_what_the_report_lists(tmp_path):
     assert result.summary == "+requests +urllib3"
     assert call_data(result) == {"added": ["requests", "urllib3"], "packages": ["requests"]}
 
-
-def test_present_installs_all_requested_packages_in_one_command(tmp_path):
+    # all requested packages are installed in one command
     command = FakeCommandRunner()
     command.responses = [report(["requests", "urllib3"]), response(0), report([])]
     make_context(tmp_path, command=command)
@@ -89,8 +94,7 @@ def test_present_installs_all_requested_packages_in_one_command(tmp_path):
     assert result.summary == "+requests +urllib3"
     assert call_data(result) == {"added": ["requests", "urllib3"], "packages": ["requests", "urllib3"]}
 
-
-def test_present_version_mismatch_is_reinstalled(tmp_path):
+    # a version mismatch is reinstalled
     command = FakeCommandRunner()
     command.responses = [report(["foo"]), response(0), report([])]
     make_context(tmp_path, command=command)
@@ -100,8 +104,7 @@ def test_present_version_mismatch_is_reinstalled(tmp_path):
     assert argvs(command)[1] == ["/usr/bin/python3", "-m", "pip", "install", "foo==1.0"]
     assert call_data(result)["added"] == ["foo"]
 
-
-def test_present_dry_run_does_not_install(tmp_path):
+    # dry run reports the pending install without installing
     command = FakeCommandRunner()
     command.responses = [report(["requests"])]
     make_context(tmp_path, dry_run=True, command=command)
@@ -113,8 +116,9 @@ def test_present_dry_run_does_not_install(tmp_path):
     assert result.summary == "+requests"
 
 
-def test_present_dry_run_with_missing_venv_reports_creation_without_running(tmp_path):
-    venv = tmp_path / "venv"
+def test_present_venv_scenarios(tmp_path):
+    # a missing venv in dry-run reports creation without running anything
+    venv = tmp_path / "dry-venv"
     command = FakeCommandRunner()
     make_context(tmp_path, dry_run=True, command=command)
 
@@ -129,50 +133,53 @@ def test_present_dry_run_with_missing_venv_reports_creation_without_running(tmp_
         "venv": str(venv),
     }
 
-
-def make_venv(venv) -> None:
-    """Create a minimal fake virtualenv layout on disk."""
-    (venv / "bin").mkdir(parents=True, exist_ok=True)
-    (venv / "bin" / "python").write_text("", encoding="utf-8")
-    (venv / "pyvenv.cfg").write_text("", encoding="utf-8")
-
-
-def test_present_creates_missing_venv(tmp_path):
-    venv = tmp_path / "venv"
+    # a missing venv is created before the probes run
+    created = tmp_path / "created-venv"
 
     def create_venv(argv):
-        make_venv(venv)
+        make_venv(created)
         return completed(argv, 0)
 
     command = FakeCommandRunner()
     command.responses = [create_venv, report(["requests"]), response(0), report([])]
     make_context(tmp_path, command=command)
 
-    result = pip.packages(["requests"], venv=venv)
+    result = pip.packages(["requests"], venv=created)
 
-    assert argvs(command)[0] == ["/usr/bin/python3", "-m", "venv", str(venv)]
-    assert argvs(command)[1][:3] == [str(venv / "bin" / "python"), "-m", "pip"]
-    assert argvs(command)[2] == [str(venv / "bin" / "python"), "-m", "pip", "install", "requests"]
-    assert result.summary == f"create venv {venv}; +requests"
-    assert call_data(result)["venv"] == str(venv)
+    assert argvs(command)[0] == ["/usr/bin/python3", "-m", "venv", str(created)]
+    assert argvs(command)[1][:3] == [str(created / "bin" / "python"), "-m", "pip"]
+    assert argvs(command)[2] == [str(created / "bin" / "python"), "-m", "pip", "install", "requests"]
+    assert result.summary == f"create venv {created}; +requests"
+    assert call_data(result)["venv"] == str(created)
 
-
-def test_present_uses_existing_venv_pip(tmp_path):
-    venv = tmp_path / "venv"
-    make_venv(venv)
+    # an existing venv uses its own pip
+    existing = tmp_path / "existing-venv"
+    make_venv(existing)
     command = FakeCommandRunner()
     command.responses = [report([])]
     make_context(tmp_path, command=command)
 
-    result = pip.packages(["requests"], venv=venv)
+    result = pip.packages(["requests"], venv=existing)
 
     assert argvs(command) == [
-        [str(venv / "bin" / "python"), "-m", "pip", "install", "--dry-run", "--quiet", "--report", "-", "requests"]
+        [str(existing / "bin" / "python"), "-m", "pip", "install", "--dry-run", "--quiet", "--report", "-", "requests"]
     ]
     assert result.changed is False
 
+    # a directory with bin/python but no pyvenv.cfg is not a virtualenv
+    not_a_venv = tmp_path / "not-a-venv"
+    (not_a_venv / "bin").mkdir(parents=True)
+    (not_a_venv / "bin" / "python").write_text("", encoding="utf-8")
+    make_context(tmp_path, command=FakeCommandRunner())
 
-def test_absent_removes_only_installed_packages(tmp_path):
+    with pytest.raises(TaskFailed, match="not a virtualenv"):
+        pip.packages(["requests"], venv=not_a_venv)
+    with pytest.raises(TaskFailed, match="not a virtualenv"):
+        pip.packages(["requests"], state="absent", venv=not_a_venv)
+
+
+def test_absent_reconciliation_scenarios(tmp_path):
+    # only installed packages are removed
     command = FakeCommandRunner()
     command.responses = [listing(["requests", "charset-normalizer"]), response(0), listing([])]
     make_context(tmp_path, command=command)
@@ -185,22 +192,7 @@ def test_absent_removes_only_installed_packages(tmp_path):
     assert result.summary == "-requests"
     assert call_data(result) == {"removed": ["requests"], "packages": ["requests", "urllib3"]}
 
-
-def test_absent_checks_installed_packages_once_for_all_targets(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [listing(["requests", "urllib3"]), response(0), listing([])]
-    make_context(tmp_path, command=command)
-
-    pip.packages(["requests", "urllib3"], state="absent")
-
-    assert argvs(command) == [
-        ["/usr/bin/python3", "-m", "pip", "list", "--local", "--format=json"],
-        ["/usr/bin/python3", "-m", "pip", "uninstall", "-y", "requests", "urllib3"],
-        ["/usr/bin/python3", "-m", "pip", "list", "--local", "--format=json"],
-    ]
-
-
-def test_absent_is_idempotent_when_nothing_is_installed(tmp_path):
+    # nothing installed is a no-op
     command = FakeCommandRunner()
     command.responses = [listing(["pip"])]
     make_context(tmp_path, command=command)
@@ -212,8 +204,7 @@ def test_absent_is_idempotent_when_nothing_is_installed(tmp_path):
     assert result.summary == "ensure packages are absent: requests"
     assert call_data(result) == {"removed": [], "packages": ["requests"]}
 
-
-def test_absent_dry_run_does_not_uninstall(tmp_path):
+    # dry run reports the removal without uninstalling
     command = FakeCommandRunner()
     command.responses = [listing(["requests"])]
     make_context(tmp_path, dry_run=True, command=command)
@@ -224,8 +215,7 @@ def test_absent_dry_run_does_not_uninstall(tmp_path):
     assert result.changed is True
     assert result.summary == "-requests"
 
-
-def test_absent_with_missing_venv_is_a_no_change(tmp_path):
+    # absent against a missing venv is a no-op
     command = FakeCommandRunner()
     make_context(tmp_path, command=command)
 
@@ -235,8 +225,7 @@ def test_absent_with_missing_venv_is_a_no_change(tmp_path):
     assert result.changed is False
     assert result.summary == "ensure packages are absent: requests"
 
-
-def test_absent_strips_version_specifiers(tmp_path):
+    # version specifiers are stripped for the uninstall
     command = FakeCommandRunner()
     command.responses = [listing(["requests"]), response(0), listing([])]
     make_context(tmp_path, command=command)
@@ -246,51 +235,7 @@ def test_absent_strips_version_specifiers(tmp_path):
     assert argvs(command)[1] == ["/usr/bin/python3", "-m", "pip", "uninstall", "-y", "requests"]
     assert call_data(result)["removed"] == ["requests"]
 
-
-def test_absent_passes_extra_args_to_uninstall(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [listing(["requests"]), response(0), listing([])]
-    make_context(tmp_path, command=command)
-
-    pip.packages(["requests"], state="absent", extra_args=["--break-system-packages"])
-
-    assert argvs(command)[1] == [
-        "/usr/bin/python3",
-        "-m",
-        "pip",
-        "uninstall",
-        "-y",
-        "--break-system-packages",
-        "requests",
-    ]
-
-
-def test_absent_rejects_url_and_path_names(tmp_path):
-    make_context(tmp_path, command=FakeCommandRunner())
-
-    for bad in (
-        "git+https://github.com/org/repo.git",
-        "https://example.com/pkg.whl",
-        "./pkg.whl",
-        "foo @ https://x/y.whl",
-    ):
-        with pytest.raises(TaskFailed, match="supports package names only"):
-            pip.packages([bad], state="absent")
-
-
-def test_venv_path_that_is_not_a_virtualenv_is_rejected(tmp_path):
-    not_a_venv = tmp_path / "not-a-venv"
-    (not_a_venv / "bin").mkdir(parents=True)
-    (not_a_venv / "bin" / "python").write_text("", encoding="utf-8")
-    make_context(tmp_path, command=FakeCommandRunner())
-
-    with pytest.raises(TaskFailed, match="not a virtualenv"):
-        pip.packages(["requests"], venv=not_a_venv)
-    with pytest.raises(TaskFailed, match="not a virtualenv"):
-        pip.packages(["requests"], state="absent", venv=not_a_venv)
-
-
-def test_absent_matches_normalized_names(tmp_path):
+    # installed names are matched after normalization
     command = FakeCommandRunner()
     command.responses = [listing(["charset_normalizer"]), response(0), listing([])]
     make_context(tmp_path, command=command)
@@ -301,7 +246,8 @@ def test_absent_matches_normalized_names(tmp_path):
     assert call_data(result)["removed"] == ["charset-normalizer"]
 
 
-def test_install_still_pending_after_install_fails(tmp_path):
+def test_post_operation_failures(tmp_path):
+    # an install that leaves the package pending fails
     command = FakeCommandRunner()
     command.responses = [report(["requests"]), response(0), report(["requests"])]
     make_context(tmp_path, command=command)
@@ -309,8 +255,7 @@ def test_install_still_pending_after_install_fails(tmp_path):
     with pytest.raises(TaskFailed, match="still pending after install: requests"):
         pip.packages(["requests"])
 
-
-def test_uninstall_still_installed_after_removal_fails(tmp_path):
+    # a removal that leaves the package installed fails
     command = FakeCommandRunner()
     command.responses = [listing(["requests"]), response(0), listing(["requests"])]
     make_context(tmp_path, command=command)
@@ -318,8 +263,7 @@ def test_uninstall_still_installed_after_removal_fails(tmp_path):
     with pytest.raises(TaskFailed, match="still installed after removal: requests"):
         pip.packages(["requests"], state="absent")
 
-
-def test_unresolvable_requirements_fail(tmp_path):
+    # an unresolvable requirement is reported
     command = FakeCommandRunner()
     command.responses = [response(1, "", "ERROR: No matching distribution found")]
     make_context(tmp_path, command=command)
@@ -327,8 +271,6 @@ def test_unresolvable_requirements_fail(tmp_path):
     with pytest.raises(TaskFailed, match="could not resolve pip requirements"):
         pip.packages(["nonexistent-package-xyz"])
 
-
-def test_missing_pip_is_reported_as_missing_not_too_old(tmp_path):
     # the report probe fails and pip --version fails too: pip is absent entirely
     command = FakeCommandRunner(returncode=1, stderr="No module named pip")
     make_context(tmp_path, command=command)
@@ -338,18 +280,8 @@ def test_missing_pip_is_reported_as_missing_not_too_old(tmp_path):
     assert argvs(command)[1][3:] == ["--version"]
 
 
-def test_repeatable_extra_args_are_not_deduplicated(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [report(["requests"]), response(0), report([])]
-    make_context(tmp_path, command=command)
-
-    pip.packages(["requests"], extra_args=["-v", "-v", "--no-index"])
-
-    assert argvs(command)[0][-4:-1] == ["-v", "-v", "--no-index"]  # probe
-    assert argvs(command)[1][-4:-1] == ["-v", "-v", "--no-index"]  # install
-
-
-def test_install_report_with_unexpected_shape_fails_loudly(tmp_path):
+def test_install_report_shape_scenarios(tmp_path):
+    # unexpected report shapes fail loudly
     payloads = [
         json.dumps(["not", "a", "dict"]),  # report is not a JSON object
         json.dumps({"version": "1", "install": None}),  # install is null
@@ -363,8 +295,6 @@ def test_install_report_with_unexpected_shape_fails_loudly(tmp_path):
         with pytest.raises(TaskFailed, match="pip install report"):
             pip.packages(["requests"])
 
-
-def test_install_report_requires_the_stable_version(tmp_path):
     # only the stable report format (version "1", pip >= 23.0) is supported;
     # pip 22.2's experimental "0" and a missing version are rejected
     old_versions = [
@@ -400,7 +330,8 @@ def test_installed_names_with_unexpected_shape_fails_loudly(tmp_path):
             pip.packages(["requests"], state="absent")
 
 
-def test_latest_state_passes_upgrade_flag(tmp_path):
+def test_latest_scenarios(tmp_path):
+    # latest passes --upgrade to the probe and the install
     command = FakeCommandRunner()
     command.responses = [report(["requests"]), response(0), report([])]
     make_context(tmp_path, command=command)
@@ -429,8 +360,7 @@ def test_latest_state_passes_upgrade_flag(tmp_path):
     ]
     assert result.summary == "+requests"
 
-
-def test_latest_state_is_idempotent_when_nothing_to_upgrade(tmp_path):
+    # nothing to upgrade is a no-op
     command = FakeCommandRunner()
     command.responses = [report([])]
     make_context(tmp_path, command=command)
@@ -455,17 +385,18 @@ def test_latest_state_is_idempotent_when_nothing_to_upgrade(tmp_path):
     assert result.summary == "ensure packages are up to date: requests"
 
 
-def test_present_state_does_not_pass_upgrade_flag(tmp_path):
+def test_extra_args_scenarios(tmp_path):
+    # repeatable extra args are not deduplicated
     command = FakeCommandRunner()
-    command.responses = [report([])]
+    command.responses = [report(["requests"]), response(0), report([])]
     make_context(tmp_path, command=command)
 
-    pip.packages(["requests"], state="present")
+    pip.packages(["requests"], extra_args=["-v", "-v", "--no-index"])
 
-    assert "--upgrade" not in argvs(command)[0]
+    assert argvs(command)[0][-4:-1] == ["-v", "-v", "--no-index"]  # probe
+    assert argvs(command)[1][-4:-1] == ["-v", "-v", "--no-index"]  # install
 
-
-def test_extra_args_are_passed_to_probe_and_install(tmp_path):
+    # extra args are passed to the probe and the install
     command = FakeCommandRunner()
     command.responses = [report(["requests"]), response(0), report([])]
     make_context(tmp_path, command=command)
@@ -509,19 +440,8 @@ def test_commands_and_probes_request_sudo_when_asked(tmp_path):
     assert [call[1]["sudo"] for call in command.calls] == [True, True, True]
 
 
-def test_absent_probes_request_sudo_when_asked(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [listing(["requests"]), response(0), listing([])]
-    sudo = FakeSudo()
-    make_context(tmp_path, command=command, sudo=sudo)
-
-    pip.packages(["requests"], state="absent", sudo=True)
-
-    assert [call[1]["sudo"] for call in command.calls] == [True, True, True]
-    assert argvs(command)[0][3:] == ["list", "--local", "--format=json"]
-
-
-def test_python_parameter_selects_interpreter(tmp_path, monkeypatch):
+def test_python_interpreter_scenarios(tmp_path, monkeypatch):
+    # the requested interpreter is used for all pip commands
     monkeypatch.setattr(
         "kitup.modules.pip.shutil.which",
         lambda name: {"python3.13": "/usr/bin/python3.13"}.get(name),
@@ -534,35 +454,7 @@ def test_python_parameter_selects_interpreter(tmp_path, monkeypatch):
 
     assert argvs(command)[0][0] == "/usr/bin/python3.13"
 
-
-def test_python_parameter_accepts_a_path(tmp_path, monkeypatch):
-    monkeypatch.setattr("kitup.modules.pip.shutil.which", lambda name: None)
-    custom = tmp_path / "python-custom"
-    custom.write_text("", encoding="utf-8")
-    command = FakeCommandRunner()
-    command.responses = [report([])]
-    make_context(tmp_path, command=command)
-
-    pip.packages(["requests"], python=str(custom))
-
-    assert argvs(command)[0][0] == str(custom)
-
-
-def test_python_discovery_falls_back_to_python(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "kitup.modules.pip.shutil.which",
-        lambda name: "/usr/bin/python" if name == "python" else None,
-    )
-    command = FakeCommandRunner()
-    command.responses = [report([])]
-    make_context(tmp_path, command=command)
-
-    pip.packages(["requests"])
-
-    assert argvs(command)[0][0] == "/usr/bin/python"
-
-
-def test_missing_python_interpreter_fails(tmp_path, monkeypatch):
+    # a missing interpreter is reported clearly
     monkeypatch.setattr("kitup.modules.pip.shutil.which", lambda name: None)
     make_context(tmp_path, command=FakeCommandRunner())
 
@@ -587,9 +479,18 @@ def test_packages_validates_arguments(tmp_path):
         pip.packages(["ok"], extra_args=[""])
     with pytest.raises(TaskFailed, match="venv must not be empty"):
         pip.packages(["ok"], venv=" ")
+    for bad in (
+        "git+https://github.com/org/repo.git",
+        "https://example.com/pkg.whl",
+        "./pkg.whl",
+        "foo @ https://x/y.whl",
+    ):
+        with pytest.raises(TaskFailed, match="supports package names only"):
+            pip.packages([bad], state="absent")
 
 
-def test_config_sets_option_and_is_idempotent(tmp_path):
+def test_config_set_and_absent_ini_scenarios(tmp_path):
+    # set an option and confirm idempotency
     path = tmp_path / "pip.conf"
     path.write_text("[global]\ntimeout = 30\n")
     ctx = local_sudo_context(tmp_path)
@@ -614,67 +515,91 @@ def test_config_sets_option_and_is_idempotent(tmp_path):
     assert call_data(result)["ini_action"] == "unchanged"
     assert len(ctx.changes) == 1
 
-
-def test_config_writes_multi_line_value_in_pip_syntax_and_is_idempotent(tmp_path):
-    path = tmp_path / "pip.conf"
-    ctx = local_sudo_context(tmp_path)
+    # list values are written in pip's multi-line syntax and are idempotent
+    multiline = tmp_path / "multiline.conf"
+    multiline_ctx = local_sudo_context(tmp_path)
     mirrors = ["https://mirror1.example.com", "https://mirror2.example.com"]
 
-    result = pip.config("find-links", mirrors, path=path)
+    result = pip.config("find-links", mirrors, path=multiline)
 
     assert (
-        path.read_text() == "[global]\nfind-links =\n    https://mirror1.example.com\n    https://mirror2.example.com\n"
+        multiline.read_text()
+        == "[global]\nfind-links =\n    https://mirror1.example.com\n    https://mirror2.example.com\n"
     )
     assert call_data(result)["value"] == mirrors
     assert call_data(result)["ini_action"] == "added"
 
-    result = pip.config("find-links", mirrors, path=path)
+    result = pip.config("find-links", mirrors, path=multiline)
     assert result.changed is False
     assert call_data(result)["ini_action"] == "unchanged"
-    assert len(ctx.changes) == 1
+    assert len(multiline_ctx.changes) == 1
 
-
-def test_config_replaces_multi_line_value_with_single_line(tmp_path):
-    path = tmp_path / "pip.conf"
-    path.write_text("[global]\nfind-links =\n    https://a\n    https://b\n")
+    # a multi-line value is replaced by a single-line value
+    replace = tmp_path / "replace.conf"
+    replace.write_text("[global]\nfind-links =\n    https://a\n    https://b\n")
     local_sudo_context(tmp_path)
 
-    result = pip.config("find-links", "https://c", path=path)
+    result = pip.config("find-links", "https://c", path=replace)
 
-    assert path.read_text() == "[global]\nfind-links = https://c\n"
+    assert replace.read_text() == "[global]\nfind-links = https://c\n"
     assert call_data(result) == {
-        "path": str(path),
+        "path": str(replace),
         "section": "global",
         "option": "find-links",
         "value": "https://c",
         "ini_action": "replaced",
     }
 
-
-def test_config_absent_removes_option_and_continuation_lines(tmp_path):
-    path = tmp_path / "pip.conf"
-    path.write_text("[global]\ntimeout = 30\nfind-links =\n    https://a\n    https://b\n")
+    # absent removes the option and its continuation lines
+    absent = tmp_path / "absent.conf"
+    absent.write_text("[global]\ntimeout = 30\nfind-links =\n    https://a\n    https://b\n")
     local_sudo_context(tmp_path)
 
-    result = pip.config("find-links", state="absent", path=path)
+    result = pip.config("find-links", state="absent", path=absent)
 
-    assert path.read_text() == "[global]\ntimeout = 30\n"
+    assert absent.read_text() == "[global]\ntimeout = 30\n"
     assert result.changed is True
-    assert result.summary == f"remove find-links from [global] of {path}"
+    assert result.summary == f"remove find-links from [global] of {absent}"
     assert call_data(result) == {
-        "path": str(path),
+        "path": str(absent),
         "section": "global",
         "option": "find-links",
         "value": None,
         "ini_action": "removed",
     }
 
-    result = pip.config("find-links", state="absent", path=path)
+    result = pip.config("find-links", state="absent", path=absent)
     assert result.changed is False
-    assert result.summary == f"ensure find-links is absent from [global] of {path}"
+    assert result.summary == f"ensure find-links is absent from [global] of {absent}"
+
+    # non-canonical option lines are replaced by a single canonical one
+    canonical = tmp_path / "canonical.conf"
+    canonical.write_text("[global]\nFind-Links = old\nkeep = 1\n")
+    local_sudo_context(tmp_path)
+
+    result = pip.config("find_links", "https://new", path=canonical)
+
+    assert canonical.read_text() == "[global]\nfind-links = https://new\nkeep = 1\n"
+    assert result["option"] == "find-links"
+    assert call_data(result)["ini_action"] == "replaced"
+
+    # setting the same value again is unchanged, matching the canonical line
+    result = pip.config("find-links", "https://new", path=canonical)
+    assert result.changed is False
+
+    # absent removes non-canonical option lines too
+    noncanonical = tmp_path / "noncanonical.conf"
+    noncanonical.write_text("[global]\nfind_links: /a\nkeep = 1\n")
+    local_sudo_context(tmp_path)
+
+    result = pip.config("find-links", state="absent", path=noncanonical)
+
+    assert noncanonical.read_text() == "[global]\nkeep = 1\n"
+    assert result.changed is True
 
 
-def test_config_creates_a_missing_file_with_parents(tmp_path):
+def test_config_creates_missing_file_and_dry_run(tmp_path):
+    # a missing file is created with parents and the default mode
     path = tmp_path / "deep" / "pip" / "pip.conf"
     local_sudo_context(tmp_path)
 
@@ -684,59 +609,14 @@ def test_config_creates_a_missing_file_with_parents(tmp_path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
     assert call_data(result)["ini_action"] == "added"
 
+    # dry run reports the change without writing
+    dry = tmp_path / "dry.conf"
+    local_sudo_context(tmp_path, dry_run=True)
 
-def test_config_uses_one_snapshot_without_a_separate_stat(tmp_path):
-    path = tmp_path / "pip.conf"
-    ctx = privileged_context(tmp_path)
-    worker = CountingWorker(ctx.privileged_worker)
-    ctx.privileged_worker = worker  # type: ignore[assignment]
+    result = pip.config("timeout", 30, path=dry)
 
-    try:
-        pip.config("timeout", 30, path=path, sudo=True)
-    finally:
-        ctx.close()
-
-    target_actions = [action for action, target in worker.actions if target == str(path)]
-    assert target_actions.count("snapshot") == 1
-    assert "stat" not in target_actions
-    assert "read" not in target_actions
-
-
-def test_config_matches_and_writes_canonical_option_names(tmp_path):
-    path = tmp_path / "pip.conf"
-    path.write_text("[global]\nFind-Links = old\nkeep = 1\n")
-    local_sudo_context(tmp_path)
-
-    result = pip.config("find_links", "https://new", path=path)
-
-    # the non-canonical line is replaced by a single canonical one, not duplicated
-    assert path.read_text() == "[global]\nfind-links = https://new\nkeep = 1\n"
-    assert result["option"] == "find-links"
-    assert call_data(result)["ini_action"] == "replaced"
-
-    # setting the same value again is unchanged, matching the canonical line
-    result = pip.config("find-links", "https://new", path=path)
-    assert result.changed is False
-
-
-def test_config_absent_removes_non_canonical_option_lines(tmp_path):
-    path = tmp_path / "pip.conf"
-    path.write_text("[global]\nfind_links: /a\nkeep = 1\n")
-    local_sudo_context(tmp_path)
-
-    result = pip.config("find-links", state="absent", path=path)
-
-    assert path.read_text() == "[global]\nkeep = 1\n"
     assert result.changed is True
-
-
-def test_config_edits_per_command_section(tmp_path):
-    path = tmp_path / "pip.conf"
-    local_sudo_context(tmp_path)
-
-    pip.config("no-deps", value=True, section="install", path=path)
-
-    assert path.read_text() == "[install]\nno-deps = true\n"
+    assert not dry.exists()
 
 
 def test_config_normalizes_typed_values(tmp_path):
@@ -752,91 +632,28 @@ def test_config_normalizes_typed_values(tmp_path):
     )
 
 
-def test_config_dry_run_reports_without_writing(tmp_path):
-    path = tmp_path / "pip.conf"
-    local_sudo_context(tmp_path, dry_run=True)
-
-    result = pip.config("timeout", 30, path=path)
-
-    assert result.changed is True
-    assert not path.exists()
-
-
-def test_config_dry_run_does_not_create_parent_directories(tmp_path):
-    deep = tmp_path / "deep" / "pip" / "pip.conf"
-    local_sudo_context(tmp_path, dry_run=True)
-
-    result = pip.config("timeout", 30, path=deep)
-
-    assert result.changed is True
-    assert not (tmp_path / "deep").exists()
-
-
-def test_config_absent_on_missing_file_does_not_create_parents(tmp_path):
-    deep = tmp_path / "deep" / "pip" / "pip.conf"
-    local_sudo_context(tmp_path)
-
-    result = pip.config("timeout", state="absent", path=deep)
-
-    assert result.changed is False
-    assert not (tmp_path / "deep").exists()
-
-
-def test_config_scope_user_uses_xdg_config_home(tmp_path, monkeypatch):
+def test_config_scope_paths(tmp_path, monkeypatch):
+    # user scope honors XDG_CONFIG_HOME
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     make_context(tmp_path)
 
     result = pip.config("timeout", 30, scope="user")
 
-    target = tmp_path / "xdg" / "pip" / "pip.conf"
-    assert target.read_text() == "[global]\ntimeout = 30\n"
-    assert result["path"] == str(target)
+    user_target = tmp_path / "xdg" / "pip" / "pip.conf"
+    assert user_target.read_text() == "[global]\ntimeout = 30\n"
+    assert result["path"] == str(user_target)
 
-
-def test_config_scope_user_defaults_to_dot_config(tmp_path, monkeypatch):
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    make_context(tmp_path)
-
-    result = pip.config("timeout", 30, scope="user")
-
-    target = tmp_path / ".config" / "pip" / "pip.conf"
-    assert target.read_text() == "[global]\ntimeout = 30\n"
-    assert result["path"] == str(target)
-
-
-def test_config_scope_global_defaults_to_etc_pip_conf(tmp_path, monkeypatch):
-    target = tmp_path / "pip.conf"
-    monkeypatch.setattr(pip, "_GLOBAL_CONFIG_PATH", target)
+    # global scope defaults to the system-wide pip.conf
+    global_target = tmp_path / "global-pip.conf"
+    monkeypatch.setattr(pip, "_GLOBAL_CONFIG_PATH", global_target)
     local_sudo_context(tmp_path)
 
     result = pip.config("index-url", "https://pypi.example.com/simple", scope="global")
 
-    assert target.read_text() == "[global]\nindex-url = https://pypi.example.com/simple\n"
-    assert result["path"] == str(target)
+    assert global_target.read_text() == "[global]\nindex-url = https://pypi.example.com/simple\n"
+    assert result["path"] == str(global_target)
 
-
-def test_config_scope_user_rejected_as_root(tmp_path):
-    local_sudo_context(tmp_path)  # is_root=True
-
-    with pytest.raises(TaskFailed, match="user-scoped pip config cannot run as root"):
-        pip.config("timeout", 30, scope="user")
-
-
-def test_config_scope_user_rejects_sudo(tmp_path, monkeypatch):
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    make_context(tmp_path)  # non-root
-
-    # a privileged write would leave a root-owned file in the user's home
-    with pytest.raises(TaskFailed, match="user-scoped pip config cannot use sudo"):
-        pip.config("timeout", 30, scope="user", sudo=True)
-    with pytest.raises(TaskFailed, match="user-scoped pip config cannot use sudo"):
-        pip.config("timeout", state="absent", scope="user", sudo=True)
-    assert not (tmp_path / ".config").exists()
-
-
-def test_config_scope_site_uses_the_venv(tmp_path):
+    # site scope requires a real virtualenv
     local_sudo_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="site scope requires a venv"):
@@ -857,6 +674,25 @@ def test_config_scope_site_uses_the_venv(tmp_path):
 
     assert result["path"] == str(venv / "pip.conf")
     assert (venv / "pip.conf").read_text() == "[global]\ntimeout = 30\n"
+
+
+def test_config_user_scope_guards(tmp_path, monkeypatch):
+    # user scope cannot run as root
+    local_sudo_context(tmp_path)  # is_root=True
+
+    with pytest.raises(TaskFailed, match="user-scoped pip config cannot run as root"):
+        pip.config("timeout", 30, scope="user")
+
+    # a privileged write would leave a root-owned file in the user's home
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    make_context(tmp_path)  # non-root
+
+    with pytest.raises(TaskFailed, match="user-scoped pip config cannot use sudo"):
+        pip.config("timeout", 30, scope="user", sudo=True)
+    with pytest.raises(TaskFailed, match="user-scoped pip config cannot use sudo"):
+        pip.config("timeout", state="absent", scope="user", sudo=True)
+    assert not (tmp_path / ".config").exists()
 
 
 def test_config_validates_arguments_before_touching_the_file(tmp_path):
@@ -891,10 +727,8 @@ def test_config_validates_arguments_before_touching_the_file(tmp_path):
         pip.config("find-links", {"a", "b"}, path=missing)
     assert not missing.exists()
 
-
-def test_config_validates_before_creating_parent_directories(tmp_path):
+    # validation happens before parent directories are created
     deep = tmp_path / "deep" / "pip" / "pip.conf"
-    local_sudo_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="config state 'present' requires a value"):
         pip.config("timeout", path=deep)

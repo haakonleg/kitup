@@ -6,7 +6,7 @@ from kitup.modules import gsettings
 from .helpers import FakeCommandRunner, FakeSudo, argvs, call_data, make_context, response
 
 
-def test_matching_value_is_a_noop(tmp_path):
+def test_matching_and_all_value_types_use_gvariant_syntax(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "'dark'\n")]
     ctx = make_context(tmp_path, command=command)
@@ -16,8 +16,6 @@ def test_matching_value_is_a_noop(tmp_path):
     assert argvs(command) == [["gsettings", "get", "org.example", "theme"]]
     assert ctx.changes == []
 
-
-def test_string_value_is_set_with_gvariant_quoting(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "'light'\n"), response(0)]
     ctx = make_context(tmp_path, command=command)
@@ -34,13 +32,13 @@ def test_string_value_is_set_with_gvariant_quoting(tmp_path):
     assert command.calls[1][1]["sudo"] is False
     assert call_data(ctx.changes[0])["value"] == "it's dark"
 
-
-def test_bool_int_and_list_values_are_formatted(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, "false\n"),
         response(0),
         response(0, "0\n"),
+        response(0),
+        response(0, "[]\n"),
         response(0),
         response(0, "[]\n"),
         response(0),
@@ -50,20 +48,12 @@ def test_bool_int_and_list_values_are_formatted(tmp_path):
     gsettings.key("org.example", "enabled", value=True)
     gsettings.key("org.example", "count", 3)
     gsettings.key("org.example", "items", ["a", 2])
+    gsettings.key("org.example", "sources", [("xkb", "us")])
 
     assert command.calls[1][0][-1] == "true"
     assert command.calls[3][0][-1] == "3"
     assert command.calls[5][0][-1] == "['a', 2]"
-
-
-def test_tuple_values_use_gvariant_tuple_syntax(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0, "[]\n"), response(0)]
-    make_context(tmp_path, command=command)
-
-    gsettings.key("org.example", "sources", [("xkb", "us")])
-
-    assert command.calls[1][0][-1] == "[('xkb', 'us')]"
+    assert command.calls[7][0][-1] == "[('xkb', 'us')]"
 
 
 def test_gsettings_refuses_root(tmp_path):
@@ -84,7 +74,7 @@ def test_dry_run_does_not_set(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_absent_resets_the_key(tmp_path):
+def test_absent_resets_the_key_or_noops_at_the_schema_default(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, "'dark'\n"),
@@ -109,8 +99,6 @@ def test_absent_resets_the_key(tmp_path):
     assert ctx.changes[0].action == "gsettings.key"
     assert ctx.changes[0].summary == "reset org.example theme"
 
-
-def test_absent_is_a_noop_at_the_schema_default(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, "'default'\n"),

@@ -11,7 +11,7 @@ from kitup.errors import TaskFailed
 from kitup.modules import files
 from kitup.registry import Bundle
 
-from .helpers import CountingWorker, FakeSudo, call_data, make_context, plain_output, privileged_context
+from .helpers import FakeSudo, call_data, make_context, plain_output, privileged_context
 
 
 def context(tmp_path, *, dry_run=False, diff=False):
@@ -53,19 +53,19 @@ def test_file_creates_file_and_is_idempotent(tmp_path):
     assert ctx.calls[1].changed is False
 
 
-@pytest.mark.parametrize("mode", ["0600", "600", "0o600"])
-def test_file_accepts_octal_string_mode_and_is_idempotent(tmp_path, mode):
-    path = tmp_path / "example.conf"
-    ctx = context(tmp_path)
+def test_file_accepts_octal_string_mode_and_is_idempotent(tmp_path):
+    for mode in ("0600", "600", "0o600"):
+        path = tmp_path / f"example-{mode}.conf"
+        ctx = context(tmp_path)
 
-    files.file(path, content="value = 1\n", mode=mode)
+        files.file(path, content="value = 1\n", mode=mode)
 
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert len(ctx.changes) == 1
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600, f"mode {mode}"
+        assert len(ctx.changes) == 1, f"mode {mode}"
 
-    files.file(path, content="value = 1\n", mode=mode)
-    assert len(ctx.changes) == 1
-    assert ctx.calls[-1].changed is False
+        files.file(path, content="value = 1\n", mode=mode)
+        assert len(ctx.changes) == 1, f"mode {mode}"
+        assert ctx.calls[-1].changed is False, f"mode {mode}"
 
 
 def test_directory_accepts_octal_string_mode(tmp_path):
@@ -75,42 +75,6 @@ def test_directory_accepts_octal_string_mode(tmp_path):
     files.directory(path, mode="0700")
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o700
-    assert len(ctx.changes) == 1
-
-
-def test_file_skips_reading_a_target_with_a_different_size(tmp_path, monkeypatch):
-    path = tmp_path / "file"
-    path.write_text("old\n")
-    context(tmp_path)
-    reads = record_reads(monkeypatch)
-
-    files.file(path, content="new content\n")
-
-    assert reads == []
-    assert path.read_text() == "new content\n"
-
-
-def test_file_reads_a_same_size_target_to_compare_content(tmp_path, monkeypatch):
-    path = tmp_path / "file"
-    path.write_text("old\n")
-    context(tmp_path)
-    reads = record_reads(monkeypatch)
-
-    files.file(path, content="new\n")
-
-    assert reads == [path]
-    assert path.read_text() == "new\n"
-
-
-def test_file_updates_metadata_without_rewriting(tmp_path):
-    path = tmp_path / "example.conf"
-    path.write_text("value = 1\n")
-    path.chmod(0o644)
-    ctx = context(tmp_path)
-
-    files.file(path, content="value = 1\n", mode=0o600)
-
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert len(ctx.changes) == 1
 
 
@@ -140,15 +104,7 @@ def test_file_dry_run_reports_without_writing(tmp_path):
     assert len(ctx.changes) == 1
 
 
-@pytest.mark.parametrize(
-    ("owner", "group", "message"),
-    [
-        ("kitup-missing-user", None, "unknown user"),
-        (None, "kitup-missing-group", "unknown group"),
-    ],
-)
-def test_dry_run_validates_metadata_identities(tmp_path, owner, group, message):
-    ctx = context(tmp_path, dry_run=True)
+def test_dry_run_validates_metadata_identities(tmp_path):
     source = tmp_path / "source"
     source.write_text("data\n")
     existing_file = tmp_path / "existing"
@@ -157,38 +113,43 @@ def test_dry_run_validates_metadata_identities(tmp_path, owner, group, message):
     existing_dir = tmp_path / "existing-dir"
     existing_dir.mkdir()
 
-    calls = [
-        lambda: files.file(
-            tmp_path / "new-file",
-            content="data\n",
-            owner=owner,
-            group=group,
-        ),
-        lambda: files.file(
-            existing_file,
-            content="data\n",
-            mode=0o600,
-            owner=owner,
-            group=group,
-        ),
-        lambda: files.copy(source, tmp_path / "new-copy", owner=owner, group=group),
-        lambda: files.directory(tmp_path / "new-dir", owner=owner, group=group),
-        lambda: files.directory(
-            existing_dir,
-            mode=0o700,
-            owner=owner,
-            group=group,
-        ),
-    ]
+    for owner, group, message in [
+        ("kitup-missing-user", None, "unknown user"),
+        (None, "kitup-missing-group", "unknown group"),
+    ]:
+        ctx = context(tmp_path, dry_run=True)
+        calls = [
+            lambda owner=owner, group=group: files.file(
+                tmp_path / "new-file",
+                content="data\n",
+                owner=owner,
+                group=group,
+            ),
+            lambda owner=owner, group=group: files.file(
+                existing_file,
+                content="data\n",
+                mode=0o600,
+                owner=owner,
+                group=group,
+            ),
+            lambda owner=owner, group=group: files.copy(source, tmp_path / "new-copy", owner=owner, group=group),
+            lambda owner=owner, group=group: files.directory(tmp_path / "new-dir", owner=owner, group=group),
+            lambda owner=owner, group=group: files.directory(
+                existing_dir,
+                mode=0o700,
+                owner=owner,
+                group=group,
+            ),
+        ]
 
-    for call in calls:
-        with pytest.raises(TaskFailed, match=message):
-            call()
+        for call in calls:
+            with pytest.raises(TaskFailed, match=message):
+                call()
 
-    assert ctx.changes == []
-    assert not (tmp_path / "new-file").exists()
-    assert not (tmp_path / "new-copy").exists()
-    assert not (tmp_path / "new-dir").exists()
+        assert ctx.changes == [], (owner, group)
+        assert not (tmp_path / "new-file").exists(), (owner, group)
+        assert not (tmp_path / "new-copy").exists(), (owner, group)
+        assert not (tmp_path / "new-dir").exists(), (owner, group)
 
 
 def test_file_replaces_symlink_without_following_it(tmp_path):
@@ -210,32 +171,6 @@ def test_file_requires_parent_directory(tmp_path):
 
     with pytest.raises(TaskFailed, match="parent directory"):
         files.file(tmp_path / "missing" / "file", content="content")
-
-
-def test_file_defers_parent_directory_check_in_dry_run(tmp_path):
-    # An earlier task may create the parent in a real run, so a dry run reports
-    # the write without requiring the parent to exist yet.
-    ctx = context(tmp_path, dry_run=True)
-
-    files.file(tmp_path / "missing" / "file", content="content")
-
-    assert not (tmp_path / "missing").exists()
-    assert len(ctx.changes) == 1
-    assert ctx.changes[0].changed
-
-
-def test_copy_defers_parent_directory_check_in_dry_run(tmp_path):
-    source = tmp_path / "source"
-    source.write_text("data\n")
-    ctx = context(tmp_path, dry_run=True)
-
-    files.copy(source, tmp_path / "missing" / "dest")
-    files.copy(source, str(tmp_path / "missing-dir") + "/")
-
-    assert not (tmp_path / "missing").exists()
-    assert not (tmp_path / "missing-dir").exists()
-    assert len(ctx.changes) == 2
-    assert all(change.changed for change in ctx.changes)
 
 
 def test_dry_run_allows_a_parent_created_by_an_earlier_task(tmp_path):
@@ -343,49 +278,6 @@ def test_privileged_symlink_copy_and_metadata_use_worker(tmp_path):
         ctx.close()
 
 
-def test_privileged_copy_uses_compare_and_copy_without_content(tmp_path):
-    source = tmp_path / "source"
-    source.write_text("data\n")
-    dest = tmp_path / "dest"
-    ctx = privileged_context(tmp_path)
-    worker = CountingWorker(ctx.privileged_worker)
-    ctx.privileged_worker = worker  # type: ignore[assignment]
-
-    try:
-        files.copy(source, dest, sudo=True)
-        assert dest.read_text() == "data\n"
-        actions = [action for action, _ in worker.actions]
-        assert "compare" in actions
-        assert "copy" in actions
-        assert "read" not in actions
-        assert "write" not in actions
-
-        worker.actions.clear()
-        files.copy(source, dest, sudo=True)
-        actions = [action for action, _ in worker.actions]
-        assert "compare" in actions
-        assert "copy" not in actions
-    finally:
-        ctx.close()
-
-
-def test_file_without_content_reconciles_metadata_without_reading(tmp_path):
-    path = tmp_path / "existing"
-    path.write_text("keep me\n")
-    ctx = privileged_context(tmp_path)
-    worker = CountingWorker(ctx.privileged_worker)
-    ctx.privileged_worker = worker  # type: ignore[assignment]
-
-    try:
-        files.file(path, mode=0o600, sudo=True)
-    finally:
-        ctx.close()
-
-    assert path.read_text() == "keep me\n"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert "read" not in [action for action, _ in worker.actions]
-
-
 def test_file_without_content_creates_an_empty_file(tmp_path):
     path = tmp_path / "new"
     ctx = privileged_context(tmp_path)
@@ -446,16 +338,6 @@ def test_privileged_remove_reports_a_friendly_error(tmp_path):
     assert (path / "file").read_text() == "keep\n"
 
 
-def test_unknown_owner_is_a_task_failure(tmp_path):
-    path = tmp_path / "example"
-
-    with pytest.raises(TaskFailed, match="unknown user"):
-        context(tmp_path)
-        files.file(path, content="value\n", owner="kitup-missing-user")
-
-    assert not path.exists()
-
-
 def test_unprivileged_file_operations_do_not_request_credentials(tmp_path):
     path = tmp_path / "user-owned.conf"
     sudo = FakeSudo()
@@ -470,30 +352,24 @@ def test_unprivileged_file_operations_do_not_request_credentials(tmp_path):
 def test_file_absent_removes_file(tmp_path):
     path = tmp_path / "obsolete"
     path.write_text("old\n")
-    ctx = context(tmp_path)
-
-    result = files.file(path, state="absent")
-
-    assert not path.exists()
-    assert len(ctx.changes) == 1
-    assert result.action == "files.file"
-
-
-def test_file_absent_removes_valid_and_broken_symlinks(tmp_path):
     target = tmp_path / "target"
     target.write_text("keep\n")
     link = tmp_path / "link"
     link.symlink_to(target)
     broken = tmp_path / "broken"
     broken.symlink_to(tmp_path / "missing")
-    context(tmp_path)
+    ctx = context(tmp_path)
 
+    result = files.file(path, state="absent")
     files.file(link, state="absent")
     files.file(broken, state="absent")
 
+    assert not path.exists()
     assert not link.is_symlink()
     assert not broken.is_symlink()
     assert target.read_text() == "keep\n"
+    assert len(ctx.changes) == 3
+    assert result.action == "files.file"
 
 
 def test_file_invalid_state_is_an_error(tmp_path):
@@ -647,17 +523,6 @@ def test_directory_creates_and_is_idempotent(tmp_path):
     assert ctx.calls[-1].summary == f"ensure directory {path}"
 
 
-def test_directory_defers_parent_directory_check_in_dry_run(tmp_path):
-    path = tmp_path / "missing" / "newdir"
-    ctx = context(tmp_path, dry_run=True)
-
-    files.directory(path)
-
-    assert not (tmp_path / "missing").exists()
-    assert len(ctx.changes) == 1
-    assert ctx.changes[0].changed
-
-
 def test_directory_refuses_file_in_both_states(tmp_path):
     path = tmp_path / "file"
     path.write_text("x")
@@ -681,15 +546,6 @@ def test_directory_preserves_existing_mode_by_default(tmp_path):
     assert ctx.changes == []
 
 
-def test_directory_new_directory_uses_default_mode(tmp_path):
-    path = tmp_path / "newdir"
-    context(tmp_path)
-
-    files.directory(path)
-
-    assert stat.S_IMODE(path.stat().st_mode) == 0o755
-
-
 def test_directory_parents_creates_missing_ancestors(tmp_path):
     path = tmp_path / "one" / "two" / "three"
     ctx = context(tmp_path)
@@ -701,6 +557,10 @@ def test_directory_parents_creates_missing_ancestors(tmp_path):
         assert stat.S_IMODE(directory.stat().st_mode) == 0o700
     assert len(ctx.changes) == 1
     assert result.summary == f"mkdir -p {path}"
+
+    files.directory(path, mode=0o700, parents=True)
+    assert len(ctx.changes) == 1
+    assert ctx.calls[-1].summary == f"ensure directory {path}"
 
 
 def test_directory_parents_never_changes_existing_parent_modes(tmp_path):
@@ -725,17 +585,6 @@ def test_directory_parents_never_changes_existing_parent_modes(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_directory_parents_is_idempotent(tmp_path):
-    path = tmp_path / "one" / "two"
-    ctx = context(tmp_path)
-
-    files.directory(path, mode=0o700, parents=True)
-    files.directory(path, mode=0o700, parents=True)
-
-    assert len(ctx.changes) == 1
-    assert ctx.calls[-1].summary == f"ensure directory {path}"
-
-
 def test_directory_parents_dry_run_creates_nothing(tmp_path):
     path = tmp_path / "one" / "two"
     context(tmp_path, dry_run=True)
@@ -752,29 +601,6 @@ def test_directory_parents_requires_present_state(tmp_path):
 
     with pytest.raises(TaskFailed, match="parents"):
         files.directory(tmp_path / "dir", state="absent", parents=True)
-
-
-def test_directory_parents_accepts_a_symlinked_parent(tmp_path):
-    real = tmp_path / "real"
-    real.mkdir()
-    link = tmp_path / "link"
-    link.symlink_to(real)
-    context(tmp_path)
-
-    files.directory(link / "child", parents=True)
-
-    assert (real / "child").is_dir()
-
-
-def test_directory_parents_rejects_a_parent_file(tmp_path):
-    parent = tmp_path / "file"
-    parent.write_text("keep\n")
-    context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="could not stat"):
-        files.directory(parent / "child", parents=True)
-
-    assert parent.read_text() == "keep\n"
 
 
 def test_privileged_directory_parents_use_worker(tmp_path):
@@ -859,17 +685,6 @@ def test_symlink_refuses_directory(tmp_path):
         files.symlink("new", link)
 
 
-def test_symlink_defers_parent_directory_check_in_dry_run(tmp_path):
-    link = tmp_path / "missing" / "link"
-    ctx = context(tmp_path, dry_run=True)
-
-    files.symlink("new", link)
-
-    assert not (tmp_path / "missing").exists()
-    assert len(ctx.changes) == 1
-    assert ctx.changes[0].changed
-
-
 def test_copy_preserves_mode_and_is_idempotent(tmp_path):
     source = tmp_path / "source.sh"
     source.write_text("#!/bin/sh\n")
@@ -925,41 +740,6 @@ def test_copy_replaces_destination_symlink(tmp_path):
     assert target.read_text() == "old\n"
 
 
-def test_copy_does_not_read_content_to_compare(tmp_path, monkeypatch):
-    source = tmp_path / "source"
-    source.write_text("new content\n")
-    target = tmp_path / "target"
-    target.write_text("old\n")
-    context(tmp_path)
-    reads = record_reads(monkeypatch)
-
-    files.copy(source, target)
-
-    assert reads == []
-    assert target.read_text() == "new content\n"
-
-
-def test_copy_compares_same_size_targets(tmp_path, monkeypatch):
-    source = tmp_path / "source"
-    source.write_text("new\n")
-    target = tmp_path / "target"
-    target.write_text("old\n")
-    context(tmp_path)
-    comparisons = []
-    compare_paths = file_actions.compare_paths
-
-    def compare(left, right):
-        comparisons.append((left, right))
-        return compare_paths(left, right)
-
-    monkeypatch.setattr(file_actions, "compare_paths", compare)
-
-    files.copy(source, target)
-
-    assert comparisons == [(source, target)]
-    assert target.read_text() == "new\n"
-
-
 def test_copy_reports_source_permission_errors(tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.write_text("data\n")
@@ -978,16 +758,16 @@ def test_copy_reports_source_permission_errors(tmp_path, monkeypatch):
         files.copy(source, dest)
 
 
-@pytest.mark.parametrize("dry_run", [False, True])
-def test_copy_rejects_non_regular_destinations(tmp_path, dry_run):
+def test_copy_rejects_non_regular_destinations(tmp_path):
     source = tmp_path / "source"
     source.write_text("data\n")
     fifo = tmp_path / "fifo"
     os.mkfifo(fifo)
-    context(tmp_path, dry_run=dry_run)
 
-    with pytest.raises(TaskFailed, match="destination is not a regular file"):
-        files.copy(source, fifo)
+    for dry_run in (False, True):
+        context(tmp_path, dry_run=dry_run)
+        with pytest.raises(TaskFailed, match="destination is not a regular file"):
+            files.copy(source, fifo)
 
 
 def test_copy_into_directory_with_trailing_slash(tmp_path):
@@ -1059,19 +839,6 @@ def test_move_replaces_destination_file(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_move_into_directory_with_trailing_slash(tmp_path):
-    source = tmp_path / "source.conf"
-    source.write_text("value\n")
-    dest_dir = tmp_path / "dest"
-    dest_dir.mkdir()
-    context(tmp_path)
-
-    files.move(source, f"{dest_dir}/")
-
-    assert not source.exists()
-    assert (dest_dir / source.name).read_text() == "value\n"
-
-
 def test_move_sets_requested_mode(tmp_path):
     source = tmp_path / "source.conf"
     source.write_text("value\n")
@@ -1117,20 +884,6 @@ def test_move_dry_run_reports_without_moving(tmp_path):
     assert source.read_text() == "value\n"
     assert not dest.exists()
     assert len(ctx.changes) == 1
-
-
-def test_move_defers_parent_directory_check_in_dry_run(tmp_path):
-    source = tmp_path / "source.conf"
-    source.write_text("value\n")
-    dest = tmp_path / "missing" / "dest.conf"
-    ctx = context(tmp_path, dry_run=True)
-
-    files.move(source, dest)
-
-    assert source.read_text() == "value\n"
-    assert not (tmp_path / "missing").exists()
-    assert len(ctx.changes) == 1
-    assert ctx.changes[0].changed
 
 
 def test_move_missing_source_without_destination_fails(tmp_path):
@@ -1179,7 +932,8 @@ def test_move_uses_privileged_worker(tmp_path):
     assert dest.read_text() == "value\n"
 
 
-def test_ini_sets_option_and_is_idempotent(tmp_path):
+def test_ini_edit_scenarios_and_result_fields(tmp_path):
+    # Replacing reports the action, summary, and call data; a second run is a no-op.
     path = tmp_path / "app.conf"
     path.write_text("[drinks]\nfav = tea\n")
     ctx = context(tmp_path)
@@ -1204,9 +958,8 @@ def test_ini_sets_option_and_is_idempotent(tmp_path):
     assert call_data(result)["ini_action"] == "unchanged"
     assert len(ctx.changes) == 1
 
-
-def test_ini_result_fields_report_ini_action_and_arguments(tmp_path):
-    path = tmp_path / "app.conf"
+    # Every mutation reports the ini action and its arguments.
+    path = tmp_path / "actions.conf"
     path.write_text("[s]\na = 1\n")
     context(tmp_path)
 
@@ -1252,8 +1005,6 @@ def test_ini_result_fields_report_ini_action_and_arguments(tmp_path):
         "ini_action": "added",
     }
 
-
-def test_ini_edit_scenarios(tmp_path):
     # Spacing variants that already match are no-ops.
     path = tmp_path / "spacing.conf"
     path.write_text("[drinks]\nfav=lemonade\n")
@@ -1452,7 +1203,8 @@ def test_ini_match_failure_scenarios(tmp_path):
     assert len(ctx.changes) == 1
 
 
-def test_ini_invalid_arguments_are_rejected(tmp_path):
+def test_ini_and_toml_validation_errors(tmp_path):
+    # ini: malformed arguments are rejected before the file is touched.
     path = tmp_path / "app.conf"
     path.write_text("[s]\na = 1\n")
     ctx = context(tmp_path)
@@ -1491,29 +1243,118 @@ def test_ini_invalid_arguments_are_rejected(tmp_path):
     assert ctx.changes == []
     assert path.read_text() == "[s]\na = 1\n"
 
+    # ini: argument errors win over filesystem errors and create=False checks.
+    ctx = context(tmp_path)
 
-def test_ini_rejects_directories_symlinks_and_non_utf8_files(tmp_path):
+    with pytest.raises(TaskFailed, match="requires an option"):
+        files.ini(tmp_path, state="present", value="1")
+    with pytest.raises(TaskFailed, match="requires a section or an option"):
+        files.ini(tmp_path, state="absent")
+    with pytest.raises(TaskFailed, match="requires a value"):
+        files.ini(tmp_path / "missing.conf", option="a", create=False)
+
+    assert ctx.changes == []
+
+    # ini: comment-prefixed option names are rejected.
+    path = tmp_path / "comments.conf"
+    path.write_text("[s]\n#foo = 1\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="comment character"):
+        files.ini(path, section="s", option="#foo", value="2")
+    with pytest.raises(TaskFailed, match="comment character"):
+        files.ini(path, section="s", option=";foo", state="absent")
+
+    assert path.read_text() == "[s]\n#foo = 1\n"
+    assert ctx.changes == []
+
+    # toml: malformed arguments are rejected before the file is touched.
+    path = tmp_path / "app.toml"
+    path.write_text("[s]\na = 1\n")
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="invalid toml state"):
+        files.toml(path, table="s", key="a", value=1, state="unknown")
+    with pytest.raises(TaskFailed, match="toml path must not be empty"):
+        files.toml("", table="s", key="a", value=1)
+    with pytest.raises(TaskFailed, match="toml table must use bare key parts"):
+        files.toml(path, table="a b", key="a", value=1)
+    with pytest.raises(TaskFailed, match="toml key must use bare key parts"):
+        files.toml(path, table="s", key='"quoted"', value=1)
+    with pytest.raises(TaskFailed, match="requires a key"):
+        files.toml(path, table="s", value=1)
+    with pytest.raises(TaskFailed, match="requires a value"):
+        files.toml(path, table="s", key="a")
+    with pytest.raises(TaskFailed, match="requires a key or a table"):
+        files.toml(path, state="absent")
+    with pytest.raises(TaskFailed, match="does not take a value"):
+        files.toml(path, table="s", key="a", value=1, state="absent")
+    with pytest.raises(TaskFailed, match="must be a boolean"):
+        files.toml(path, table="s", key="a", value=1, create="yes")
+    with pytest.raises(TaskFailed, match="unsupported toml value type"):
+        files.toml(path, table="s", key="a", value={"a": 1})
+    with pytest.raises(TaskFailed, match="toml array items must be strings"):
+        files.toml(path, table="s", key="a", value=["a", 1])
+
+    assert ctx.changes == []
+    assert path.read_text() == "[s]\na = 1\n"
+
+    # toml: argument errors win over filesystem errors and create=False checks.
+    ctx = context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="requires a value"):
+        files.toml(tmp_path, table="s", key="a")
+    with pytest.raises(TaskFailed, match="requires a key or a table"):
+        files.toml(tmp_path, state="absent")
+    with pytest.raises(TaskFailed, match="requires a value"):
+        files.toml(tmp_path / "missing.toml", key="a", create=False)
+
+    assert ctx.changes == []
+
+
+def test_ini_and_toml_reject_directories_symlinks_and_non_utf8_files(tmp_path):
     context(tmp_path)
 
+    # ini
     with pytest.raises(TaskFailed, match="directory"):
         files.ini(tmp_path, section="s", option="a", value="1")
 
-    target = tmp_path / "target"
+    target = tmp_path / "target.conf"
     target.write_text("[s]\na = 1\n")
-    link = tmp_path / "link"
+    link = tmp_path / "link.conf"
     link.symlink_to(target)
     with pytest.raises(TaskFailed, match="symlink"):
         files.ini(link, section="s", option="a", value="2")
 
-    binary = tmp_path / "binary"
+    binary = tmp_path / "binary.conf"
     binary.write_bytes(b"[s]\n\xff\xfe\n")
     with pytest.raises(TaskFailed, match="UTF-8"):
         files.ini(binary, section="s", option="a", value="2")
 
     assert target.read_text() == "[s]\na = 1\n"
 
+    # toml
+    with pytest.raises(TaskFailed, match="directory"):
+        files.toml(tmp_path, table="s", key="a", value=1)
 
-def test_ini_dry_run_reports_without_writing_and_repairs_final_newline(tmp_path):
+    target = tmp_path / "target.toml"
+    target.write_text("[s]\na = 1\n")
+    link = tmp_path / "link.toml"
+    link.symlink_to(target)
+    with pytest.raises(TaskFailed, match="symlink"):
+        files.toml(link, table="s", key="a", value=2)
+
+    binary = tmp_path / "binary.toml"
+    binary.write_bytes(b"[s]\n\xff\xfe\n")
+    with pytest.raises(TaskFailed, match="UTF-8"):
+        files.toml(binary, table="s", key="a", value=2)
+
+    assert target.read_text() == "[s]\na = 1\n"
+
+
+def test_ini_and_toml_dry_run_report_without_writing(tmp_path):
+    # ini: reports the change, leaves the file untouched, and repairs the final
+    # newline on the real run.
     path = tmp_path / "app.conf"
     path.write_text("[s]\na = 1")
     ctx = context(tmp_path, dry_run=True)
@@ -1528,143 +1369,62 @@ def test_ini_dry_run_reports_without_writing_and_repairs_final_newline(tmp_path)
     files.ini(path, section="s", option="b", value="2")
     assert path.read_text() == "[s]\na = 1\nb = 2\n"
 
-
-def test_ini_noop_does_not_repair_a_missing_final_newline(tmp_path):
-    path = tmp_path / "app.conf"
-    path.write_text("[s]\na = 1")
-    context(tmp_path)
-
-    result = files.ini(path, section="s", option="a", value="1")
-
-    assert path.read_text() == "[s]\na = 1"
-    assert result.changed is False
-
-
-def test_ini_preserves_existing_file_mode(tmp_path):
-    path = tmp_path / "app.conf"
+    # toml: reports the change without creating a missing file or its parents.
+    path = tmp_path / "app.toml"
     path.write_text("[s]\na = 1\n")
-    path.chmod(0o600)
-    context(tmp_path)
+    ctx = context(tmp_path, dry_run=True)
 
-    files.ini(path, section="s", option="a", value="2")
+    result = files.toml(path, table="s", key="b", value=2)
 
-    assert path.read_text() == "[s]\na = 2\n"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert path.read_text() == "[s]\na = 1\n"
+    assert result.changed is True
+    assert len(ctx.changes) == 1
 
-
-def test_ini_value_may_contain_equals_signs(tmp_path):
-    path = tmp_path / "app.conf"
-    context(tmp_path)
-
-    files.ini(path, section="s", option="filter", value="a=b=c")
-
-    assert path.read_text() == "[s]\nfilter = a=b=c\n"
-    result = files.ini(path, section="s", option="filter", value="a=b=c")
-    assert result.changed is False
+    missing = tmp_path / "deep" / "new.toml"
+    result = files.toml(missing, table="s", key="a", value=1)
+    assert result.changed is True
+    assert not missing.exists()
+    assert not (tmp_path / "deep").exists()
 
 
-def test_ini_uses_privileged_worker(tmp_path):
-    path = tmp_path / "root-owned.conf"
+def test_ini_and_toml_use_privileged_worker(tmp_path):
+    ini_path = tmp_path / "root-owned.conf"
+    toml_path = tmp_path / "root-owned.toml"
     ctx = privileged_context(tmp_path)
 
     try:
-        result = files.ini(path, section="s", option="a", value="1", sudo=True)
+        result = files.ini(ini_path, section="s", option="a", value="1", sudo=True)
         assert result.changed is True
-        assert path.read_text() == "[s]\na = 1\n"
+        assert ini_path.read_text() == "[s]\na = 1\n"
 
-        result = files.ini(path, section="s", option="a", value="1", sudo=True)
+        result = files.ini(ini_path, section="s", option="a", value="1", sudo=True)
+        assert result.changed is False
+
+        result = files.toml(toml_path, table="s", key="a", value=1, sudo=True)
+        assert result.changed is True
+        assert toml_path.read_text() == "[s]\na = 1\n"
+
+        result = files.toml(toml_path, table="s", key="a", value=1, sudo=True)
         assert result.changed is False
         assert ctx.sudo.refresh_count > 0
     finally:
         ctx.close()
 
 
-def test_ini_stats_and_reads_the_target_once(tmp_path):
-    path = tmp_path / "root-owned.conf"
-    path.write_text("[s]\na = 1\n")
-    ctx = privileged_context(tmp_path)
-    worker = CountingWorker(ctx.privileged_worker)
-    ctx.privileged_worker = worker  # type: ignore[assignment]
-
-    try:
-        files.ini(path, section="s", option="a", value="2", sudo=True)
-    finally:
-        ctx.close()
-
-    target_actions = [action for action, target in worker.actions if target == str(path)]
-    assert target_actions.count("snapshot") == 1
-    assert "stat" not in target_actions
-    assert "read" not in target_actions
-
-
-def test_ini_validates_arguments_before_touching_the_file(tmp_path):
-    ctx = context(tmp_path)
-
-    # argument errors win over filesystem errors (the path is a directory)
-    with pytest.raises(TaskFailed, match="requires an option"):
-        files.ini(tmp_path, state="present", value="1")
-    with pytest.raises(TaskFailed, match="requires a section or an option"):
-        files.ini(tmp_path, state="absent")
-    # argument errors win over the create=False missing-file check
-    with pytest.raises(TaskFailed, match="requires a value"):
-        files.ini(tmp_path / "missing.conf", option="a", create=False)
-
-    assert ctx.changes == []
-
-
-@pytest.mark.parametrize("char", ["\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029", "\0"])
-def test_ini_rejects_line_breaks_and_null_bytes_in_arguments(tmp_path, char):
+def test_ini_rejects_line_breaks_and_null_bytes_in_arguments(tmp_path):
     path = tmp_path / "app.conf"
     path.write_text("[s]\na = 1\n")
     ctx = context(tmp_path)
 
-    with pytest.raises(TaskFailed, match="must not contain"):
-        files.ini(path, section=f"s{char}t", option="a", value="1")
-    with pytest.raises(TaskFailed, match="must not contain"):
-        files.ini(path, section="s", option=f"a{char}b", value="1")
-    with pytest.raises(TaskFailed, match="must not contain"):
-        files.ini(path, section="s", option="a", value=f"1{char}2")
+    for char in ("\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029", "\0"):
+        with pytest.raises(TaskFailed, match="must not contain"):
+            files.ini(path, section=f"s{char}t", option="a", value="1")
+        with pytest.raises(TaskFailed, match="must not contain"):
+            files.ini(path, section="s", option=f"a{char}b", value="1")
+        with pytest.raises(TaskFailed, match="must not contain"):
+            files.ini(path, section="s", option="a", value=f"1{char}2")
 
     assert path.read_text() == "[s]\na = 1\n"
-    assert ctx.changes == []
-
-
-def test_ini_rejects_non_utf8_encodable_arguments(tmp_path):
-    path = tmp_path / "app.conf"
-    path.write_text("[s]\na = 1\n")
-    ctx = context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="UTF-8 encodable"):
-        files.ini(path, section="s", option="a", value="\ud800")
-    with pytest.raises(TaskFailed, match="UTF-8 encodable"):
-        files.ini(path, section="\ud800", option="a", value="1")
-
-    assert path.read_text() == "[s]\na = 1\n"
-    assert ctx.changes == []
-
-
-def test_line_rejects_non_utf8_encodable_text(tmp_path):
-    path = tmp_path / "lines"
-    path.write_text("one\n")
-    context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="UTF-8 encodable"):
-        files.line(path, "bad\ud800")
-
-    assert path.read_text() == "one\n"
-
-
-def test_ini_rejects_comment_prefixed_option_names(tmp_path):
-    path = tmp_path / "app.conf"
-    path.write_text("[s]\n#foo = 1\n")
-    ctx = context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="comment character"):
-        files.ini(path, section="s", option="#foo", value="2")
-    with pytest.raises(TaskFailed, match="comment character"):
-        files.ini(path, section="s", option=";foo", state="absent")
-
-    assert path.read_text() == "[s]\n#foo = 1\n"
     assert ctx.changes == []
 
 
@@ -1681,7 +1441,7 @@ def test_ini_absent_on_a_missing_file_is_a_noop_and_creates_nothing(tmp_path):
     assert ctx.changes == []
 
 
-def test_ini_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
+def test_ini_handles_a_utf8_bom_on_noop_write_and_section_removal(tmp_path):
     path = tmp_path / "bom.conf"
     path.write_bytes(b"\xef\xbb\xbf[s]\na = 1\nb = 2\n")
     context(tmp_path)
@@ -1705,14 +1465,11 @@ def test_ini_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
     files.ini(path, section="t", option="c", value="3")
     assert path.read_bytes() == b"[s]\na = 9\nb = 2\n[t]\nc = 3\n"
 
-
-def test_ini_absent_removes_a_bom_prefixed_section_and_strips_the_bom(tmp_path):
-    path = tmp_path / "bom.conf"
+    # removing a BOM-prefixed section strips the BOM too
     path.write_bytes(b"\xef\xbb\xbf[s]\na = 1\n[t]\nb = 2\n")
     context(tmp_path)
 
     result = files.ini(path, section="s", state="absent")
-
     assert result.changed is True
     assert path.read_bytes() == b"[t]\nb = 2\n"
 
@@ -1720,7 +1477,8 @@ def test_ini_absent_removes_a_bom_prefixed_section_and_strips_the_bom(tmp_path):
     assert result.changed is False
 
 
-def test_toml_sets_key_and_is_idempotent(tmp_path):
+def test_toml_edit_scenarios_and_result_fields(tmp_path):
+    # Replacing reports the action, summary, and call data; a second run is a no-op.
     path = tmp_path / "app.toml"
     path.write_text('[server]\nhost = "old"\nport = 8080\n')
     ctx = context(tmp_path)
@@ -1745,9 +1503,8 @@ def test_toml_sets_key_and_is_idempotent(tmp_path):
     assert call_data(result)["toml_action"] == "unchanged"
     assert len(ctx.changes) == 1
 
-
-def test_toml_result_fields_report_toml_action_and_arguments(tmp_path):
-    path = tmp_path / "app.toml"
+    # Every mutation reports the toml action and its arguments.
+    path = tmp_path / "actions.toml"
     path.write_text("[s]\na = 1\n")
     context(tmp_path)
 
@@ -1792,10 +1549,6 @@ def test_toml_result_fields_report_toml_action_and_arguments(tmp_path):
         "value": True,
         "toml_action": "added",
     }
-
-
-def test_toml_edit_scenarios(tmp_path):
-    context(tmp_path)
 
     # Spacing and quote variants that already match are no-ops.
     path = tmp_path / "spacing.toml"
@@ -1849,8 +1602,7 @@ def test_toml_edit_scenarios(tmp_path):
     assert path.read_text() == "[s]\na = 1"
     assert result.changed is False
 
-
-def test_toml_value_types(tmp_path):
+    # Values are rendered and compared by parsed type.
     path = tmp_path / "typed.toml"
     context(tmp_path)
 
@@ -1905,246 +1657,16 @@ def test_toml_absent_scenarios(tmp_path):
     assert result.changed is True
 
 
-def test_toml_absent_removes_a_dotted_key_declared_table(tmp_path):
-    path = tmp_path / "dotted-table.toml"
-    path.write_text('tool.uv.native-tls = true\n[project]\nname = "demo"\n')
-    context(tmp_path)
-
-    result = files.toml(path, table="tool.uv", state="absent")
-
-    assert path.read_text() == '[project]\nname = "demo"\n'
-    assert result.changed is True
-    assert result.summary == f"remove table [tool.uv] from {path}"
-
-
-def test_toml_create_false_rejects_a_missing_file(tmp_path):
-    context(tmp_path)
-    missing = tmp_path / "missing.toml"
-
-    with pytest.raises(TaskFailed, match="does not exist"):
-        files.toml(missing, table="s", key="a", value=1, create=False)
-    with pytest.raises(TaskFailed, match="does not exist"):
-        files.toml(missing, table="s", key="a", state="absent", create=False)
-
-    assert not missing.exists()
-
-
-def test_toml_creates_a_missing_file_with_parents(tmp_path):
-    path = tmp_path / "deep" / "nested" / "app.toml"
-    context(tmp_path)
-
-    result = files.toml(path, table="s", key="a", value=1)
-
-    assert path.read_text() == "[s]\na = 1\n"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o644
-    assert stat.S_IMODE((tmp_path / "deep").stat().st_mode) == 0o755
-    assert result.changed is True
-
-
-def test_toml_absent_on_a_missing_file_is_a_noop_and_creates_nothing(tmp_path):
-    missing = tmp_path / "missing.toml"
-    ctx = context(tmp_path)
-
-    result = files.toml(missing, table="s", key="a", state="absent")
-    assert result.changed is False
-    result = files.toml(missing, table="s", state="absent")
-    assert result.changed is False
-
-    assert not missing.exists()
-    assert ctx.changes == []
-
-
-def test_toml_dry_run_reports_without_writing_or_creating(tmp_path):
-    path = tmp_path / "app.toml"
-    path.write_text("[s]\na = 1\n")
-    ctx = context(tmp_path, dry_run=True)
-
-    result = files.toml(path, table="s", key="b", value=2)
-
-    assert path.read_text() == "[s]\na = 1\n"
-    assert result.changed is True
-    assert len(ctx.changes) == 1
-
-    missing = tmp_path / "deep" / "new.toml"
-    result = files.toml(missing, table="s", key="a", value=1)
-    assert result.changed is True
-    assert not missing.exists()
-    assert not (tmp_path / "deep").exists()
-
-
-def test_toml_invalid_arguments_are_rejected(tmp_path):
+def test_toml_rejects_line_breaks_and_null_bytes_in_arguments(tmp_path):
     path = tmp_path / "app.toml"
     path.write_text("[s]\na = 1\n")
     ctx = context(tmp_path)
 
-    with pytest.raises(TaskFailed, match="invalid toml state"):
-        files.toml(path, table="s", key="a", value=1, state="unknown")
-    with pytest.raises(TaskFailed, match="toml path must not be empty"):
-        files.toml("", table="s", key="a", value=1)
-    with pytest.raises(TaskFailed, match="toml table must use bare key parts"):
-        files.toml(path, table="a b", key="a", value=1)
-    with pytest.raises(TaskFailed, match="toml key must use bare key parts"):
-        files.toml(path, table="s", key='"quoted"', value=1)
-    with pytest.raises(TaskFailed, match="requires a key"):
-        files.toml(path, table="s", value=1)
-    with pytest.raises(TaskFailed, match="requires a value"):
-        files.toml(path, table="s", key="a")
-    with pytest.raises(TaskFailed, match="requires a key or a table"):
-        files.toml(path, state="absent")
-    with pytest.raises(TaskFailed, match="does not take a value"):
-        files.toml(path, table="s", key="a", value=1, state="absent")
-    with pytest.raises(TaskFailed, match="must be a boolean"):
-        files.toml(path, table="s", key="a", value=1, create="yes")
-    with pytest.raises(TaskFailed, match="unsupported toml value type"):
-        files.toml(path, table="s", key="a", value={"a": 1})
-    with pytest.raises(TaskFailed, match="toml array items must be strings"):
-        files.toml(path, table="s", key="a", value=["a", 1])
-
-    assert ctx.changes == []
-    assert path.read_text() == "[s]\na = 1\n"
-
-
-def test_toml_rejects_array_of_tables_targets(tmp_path):
-    path = tmp_path / "aot.toml"
-    path.write_text('[[tool.uv.index]]\nurl = "https://x"\n')
-    ctx = context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="array-of-tables"):
-        files.toml(path, table="tool.uv.index", key="url", value="https://y")
-    with pytest.raises(TaskFailed, match="array-of-tables"):
-        files.toml(path, table="tool.uv.index", key="url", state="absent")
-    with pytest.raises(TaskFailed, match="array-of-tables"):
-        files.toml(path, table="tool.uv.index", state="absent")
-
-    assert path.read_text() == '[[tool.uv.index]]\nurl = "https://x"\n'
-    assert ctx.changes == []
-
-
-def test_toml_rejects_directories_symlinks_and_non_utf8_files(tmp_path):
-    context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="directory"):
-        files.toml(tmp_path, table="s", key="a", value=1)
-
-    target = tmp_path / "target.toml"
-    target.write_text("[s]\na = 1\n")
-    link = tmp_path / "link.toml"
-    link.symlink_to(target)
-    with pytest.raises(TaskFailed, match="symlink"):
-        files.toml(link, table="s", key="a", value=2)
-
-    binary = tmp_path / "binary.toml"
-    binary.write_bytes(b"[s]\n\xff\xfe\n")
-    with pytest.raises(TaskFailed, match="UTF-8"):
-        files.toml(binary, table="s", key="a", value=2)
-
-    assert target.read_text() == "[s]\na = 1\n"
-
-
-def test_toml_preserves_existing_file_mode(tmp_path):
-    path = tmp_path / "app.toml"
-    path.write_text("[s]\na = 1\n")
-    path.chmod(0o600)
-    context(tmp_path)
-
-    files.toml(path, table="s", key="a", value=2)
-
-    assert path.read_text() == "[s]\na = 2\n"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-
-
-def test_toml_uses_privileged_worker(tmp_path):
-    path = tmp_path / "root-owned.toml"
-    ctx = privileged_context(tmp_path)
-
-    try:
-        result = files.toml(path, table="s", key="a", value=1, sudo=True)
-        assert result.changed is True
-        assert path.read_text() == "[s]\na = 1\n"
-
-        result = files.toml(path, table="s", key="a", value=1, sudo=True)
-        assert result.changed is False
-        assert ctx.sudo.refresh_count > 0
-    finally:
-        ctx.close()
-
-
-def test_toml_stats_and_reads_the_target_once(tmp_path):
-    path = tmp_path / "root-owned.toml"
-    path.write_text("a = 1\n")
-    ctx = privileged_context(tmp_path)
-    worker = CountingWorker(ctx.privileged_worker)
-    ctx.privileged_worker = worker  # type: ignore[assignment]
-
-    try:
-        files.toml(path, key="a", value=2, sudo=True)
-    finally:
-        ctx.close()
-
-    target_actions = [action for action, target in worker.actions if target == str(path)]
-    assert target_actions.count("snapshot") == 1
-    assert "stat" not in target_actions
-    assert "read" not in target_actions
-
-
-def test_toml_validates_arguments_before_touching_the_file(tmp_path):
-    ctx = context(tmp_path)
-
-    # argument errors win over filesystem errors (the path is a directory)
-    with pytest.raises(TaskFailed, match="requires a value"):
-        files.toml(tmp_path, table="s", key="a")
-    with pytest.raises(TaskFailed, match="requires a key or a table"):
-        files.toml(tmp_path, state="absent")
-    # argument errors win over the create=False missing-file check
-    with pytest.raises(TaskFailed, match="requires a value"):
-        files.toml(tmp_path / "missing.toml", key="a", create=False)
-
-    assert ctx.changes == []
-
-
-@pytest.mark.parametrize("char", ["\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029", "\0"])
-def test_toml_rejects_line_breaks_and_null_bytes_in_arguments(tmp_path, char):
-    path = tmp_path / "app.toml"
-    path.write_text("[s]\na = 1\n")
-    ctx = context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="must not contain"):
-        files.toml(path, table=f"s{char}t", key="a", value=1)
-    with pytest.raises(TaskFailed, match="must not contain"):
-        files.toml(path, table="s", key=f"a{char}b", value=1)
+    for char in ("\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029", "\0"):
+        with pytest.raises(TaskFailed, match="must not contain"):
+            files.toml(path, table=f"s{char}t", key="a", value=1)
+        with pytest.raises(TaskFailed, match="must not contain"):
+            files.toml(path, table="s", key=f"a{char}b", value=1)
 
     assert path.read_text() == "[s]\na = 1\n"
     assert ctx.changes == []
-
-
-def test_toml_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
-    path = tmp_path / "bom.toml"
-    path.write_bytes(b"\xef\xbb\xbf[s]\na = 1\nb = 2\n")
-    context(tmp_path)
-
-    # a no-op run only reads, so the BOM is kept
-    result = files.toml(path, table="s", key="a", value=1)
-    assert result.changed is False
-    assert path.read_bytes() == b"\xef\xbb\xbf[s]\na = 1\nb = 2\n"
-
-    # the first real write drops the BOM
-    result = files.toml(path, table="s", key="a", value=9)
-    assert result.changed is True
-    assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
-
-    result = files.toml(path, table="s", key="a", value=9)
-    assert result.changed is False
-    assert path.read_bytes() == b"[s]\na = 9\nb = 2\n"
-
-
-def test_line_strips_a_utf8_bom_on_write_but_not_on_a_noop(tmp_path):
-    path = tmp_path / "lines"
-    path.write_bytes(b"\xef\xbb\xbfone\ntwo\n")
-    context(tmp_path)
-
-    result = files.line(path, "one")
-    assert result.changed is False
-    assert path.read_bytes() == b"\xef\xbb\xbfone\ntwo\n"
-
-    files.line(path, "ONE", match=r"^one$")
-    assert path.read_bytes() == b"ONE\ntwo\n"

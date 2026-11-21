@@ -25,7 +25,7 @@ def test_parse_os_release_handles_quotes_comments_and_blanks():
     }
 
 
-def test_parse_mountinfo_extracts_unescaped_mount_attributes():
+def test_parse_mountinfo_and_collect_mounts(tmp_path):
     text = (
         "36 35 98:0 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p1 rw,seclabel\n"
         "37 35 0:32 / /run/user/1000 rw,nosuid,nodev shared:2 "
@@ -50,8 +50,6 @@ def test_parse_mountinfo_extracts_unescaped_mount_attributes():
         "options": ("ro", "nosuid", "compress=zstd:1", "subvolid=257", "subvol=/data"),
     }
 
-
-def test_collect_mounts_adds_capacity_and_skips_unreadable_mounts(tmp_path):
     path = tmp_path / "mountinfo"
     path.write_text(
         "36 35 98:0 / / rw,relatime - ext4 /dev/nvme0n1p1 rw\n37 35 0:32 / /run rw,nosuid - tmpfs tmpfs rw\n",
@@ -71,30 +69,30 @@ def test_collect_mounts_adds_capacity_and_skips_unreadable_mounts(tmp_path):
             raise FileNotFoundError(mountpoint)
         return sizes[mountpoint]
 
-    mounts = collect_mounts(path, statvfs=fake_statvfs)
+    collected = collect_mounts(path, statvfs=fake_statvfs)
 
-    assert len(mounts) == 1
-    assert mounts[0]["mount"] == "/"
-    assert mounts[0].mount == "/"
-    assert mounts[0]["device"] == "/dev/nvme0n1p1"
-    assert mounts[0].device == "/dev/nvme0n1p1"
-    assert mounts[0]["fstype"] == "ext4"
-    assert mounts[0].fstype == "ext4"
-    assert mounts[0]["options"] == ("rw", "relatime")
-    assert mounts[0].options == ("rw", "relatime")
-    assert mounts[0]["bytes_total"] == 4096 * 1000
-    assert mounts[0].bytes_total == 4096 * 1000
-    assert mounts[0]["bytes_free"] == 4096 * 250
-    assert mounts[0].bytes_free == 4096 * 250
-    assert mounts[0]["bytes_used"] == 4096 * 750
-    assert mounts[0].bytes_used == 4096 * 750
-    assert mounts[0]["bytes_total"] == mounts[0]["bytes_used"] + mounts[0]["bytes_free"]
+    assert len(collected) == 1
+    assert collected[0]["mount"] == "/"
+    assert collected[0].mount == "/"
+    assert collected[0]["device"] == "/dev/nvme0n1p1"
+    assert collected[0].device == "/dev/nvme0n1p1"
+    assert collected[0]["fstype"] == "ext4"
+    assert collected[0].fstype == "ext4"
+    assert collected[0]["options"] == ("rw", "relatime")
+    assert collected[0].options == ("rw", "relatime")
+    assert collected[0]["bytes_total"] == 4096 * 1000
+    assert collected[0].bytes_total == 4096 * 1000
+    assert collected[0]["bytes_free"] == 4096 * 250
+    assert collected[0].bytes_free == 4096 * 250
+    assert collected[0]["bytes_used"] == 4096 * 750
+    assert collected[0].bytes_used == 4096 * 750
+    assert collected[0]["bytes_total"] == collected[0]["bytes_used"] + collected[0]["bytes_free"]
 
     with pytest.raises(TypeError):
-        mounts[0]["bytes_free"] = 0
+        collected[0]["bytes_free"] = 0
 
 
-def test_collect_facts_from_os_release(tmp_path):
+def test_collect_facts_are_read_only_and_missing_sources_are_omitted(tmp_path):
     path = tmp_path / "os-release"
     path.write_text(
         'NAME="Test Linux"\nID=testos\nVERSION_ID=1\nPRETTY_NAME="Test Linux 1 (Workstation Edition)"\n',
@@ -117,10 +115,6 @@ def test_collect_facts_from_os_release(tmp_path):
     assert facts["kernel"]
     assert facts.kernel
 
-
-def test_facts_are_read_only(tmp_path):
-    facts = collect_facts(tmp_path / "missing-os-release")
-
     with pytest.raises(AttributeError):
         facts.hostname = "other"
     with pytest.raises(TypeError):
@@ -128,12 +122,10 @@ def test_facts_are_read_only(tmp_path):
     with pytest.raises(TypeError):
         del facts["hostname"]
 
-
-def test_missing_sources_omit_optional_facts(tmp_path):
     assert collect_mounts(tmp_path / "missing-mountinfo") == ()
 
-    facts = collect_facts(tmp_path / "missing-os-release")
-    assert "os_release" not in facts
-    assert "distro_id" not in facts
-    assert "version_id" not in facts
-    assert "hostname" in facts
+    missing = collect_facts(tmp_path / "missing-os-release")
+    assert "os_release" not in missing
+    assert "distro_id" not in missing
+    assert "version_id" not in missing
+    assert "hostname" in missing

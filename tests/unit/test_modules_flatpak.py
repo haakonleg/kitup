@@ -28,7 +28,7 @@ def installed(*entries: tuple[str, str]) -> str:
     return "".join(f"{application}\t{ref}\n" for application, ref in entries)
 
 
-def test_remote_present_adds_missing_remote(tmp_path):
+def test_remote_present_adds_missing_remote_and_noops_or_dry_runs(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0), response(0)]
     ctx = make_context(tmp_path, command=command)
@@ -56,8 +56,6 @@ def test_remote_present_adds_missing_remote(tmp_path):
     assert ctx.changes[0].action == "flatpak.remote"
     assert ctx.changes[0].summary == f"add remote {REMOTE}"
 
-
-def test_remote_present_is_a_noop_when_it_exists(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, f"{REMOTE}\n")]
     ctx = make_context(tmp_path, command=command)
@@ -67,8 +65,15 @@ def test_remote_present_is_a_noop_when_it_exists(tmp_path):
     assert argvs(command) == [REMOTES]
     assert ctx.changes == []
 
+    command = FakeCommandRunner()
+    command.responses = [response(0)]
+    ctx = make_context(tmp_path, dry_run=True, command=command)
 
-def test_remote_present_can_disable_gpg_verification(tmp_path):
+    flatpak.remote(REMOTE, REMOTE_URL)
+
+    assert argvs(command) == [REMOTES]
+    assert len(ctx.changes) == 1
+
     command = FakeCommandRunner()
     command.responses = [response(0), response(0)]
     make_context(tmp_path, command=command)
@@ -86,18 +91,7 @@ def test_remote_present_can_disable_gpg_verification(tmp_path):
     ]
 
 
-def test_remote_present_dry_run_does_not_add(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0)]
-    ctx = make_context(tmp_path, dry_run=True, command=command)
-
-    flatpak.remote(REMOTE, REMOTE_URL)
-
-    assert argvs(command) == [REMOTES]
-    assert len(ctx.changes) == 1
-
-
-def test_remote_absent_removes_existing_remote(tmp_path):
+def test_remote_absent_removes_existing_and_noops_when_missing(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, f"{REMOTE}\n"), response(0)]
     ctx = make_context(tmp_path, command=command)
@@ -114,8 +108,6 @@ def test_remote_absent_removes_existing_remote(tmp_path):
     assert call_data(ctx.changes[0]) == {"remote": REMOTE, "scope": "system"}
     assert ctx.changes[0].summary == f"remove remote {REMOTE}"
 
-
-def test_remote_absent_is_a_noop_when_missing(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "other\n")]
     ctx = make_context(tmp_path, command=command)
@@ -126,7 +118,7 @@ def test_remote_absent_is_a_noop_when_missing(tmp_path):
     assert ctx.changes == []
 
 
-def test_invalid_remote_arguments_are_rejected(tmp_path):
+def test_invalid_arguments_are_rejected(tmp_path):
     make_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="URL is required"):
@@ -142,8 +134,21 @@ def test_invalid_remote_arguments_are_rejected(tmp_path):
     with pytest.raises(TaskFailed, match="flatpak gpg_verify must be a boolean"):
         flatpak.remote(REMOTE, REMOTE_URL, gpg_verify="yes")
 
+    with pytest.raises(TaskFailed, match="invalid flatpak state"):
+        flatpak.packages([APP], state="invalid")
+    with pytest.raises(TaskFailed, match="invalid flatpak scope"):
+        flatpak.packages([APP], scope="session")
+    with pytest.raises(TaskFailed, match="flatpak refs must not be empty"):
+        flatpak.packages([])
+    with pytest.raises(TaskFailed, match="flatpak ref must not be empty"):
+        flatpak.packages("")
+    with pytest.raises(TaskFailed, match="flatpak ref must not be empty"):
+        flatpak.packages([APP, "  "])
+    with pytest.raises(TaskFailed, match="flatpak remote must not be empty"):
+        flatpak.packages([APP], remote="  ")
 
-def test_packages_present_is_a_noop_when_installed(tmp_path):
+
+def test_packages_present_installs_missing_refs_and_noops_when_installed(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, installed((APP, APP_REF)))]
     ctx = make_context(tmp_path, command=command)
@@ -153,8 +158,6 @@ def test_packages_present_is_a_noop_when_installed(tmp_path):
     assert argvs(command) == [LIST]
     assert ctx.changes == []
 
-
-def test_packages_present_installs_missing_refs(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0),
@@ -180,7 +183,7 @@ def test_packages_present_installs_missing_refs(tmp_path):
     assert ctx.changes[0].summary == f"+{APP}"
 
 
-def test_packages_present_installs_only_missing_refs(tmp_path):
+def test_packages_present_installs_only_missing_refs_and_matches_full_refs(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, installed((APP, APP_REF))),
@@ -201,8 +204,6 @@ def test_packages_present_installs_only_missing_refs(tmp_path):
     ]
     assert call_data(ctx.changes[0]) == {"added": [RUNTIME], "scope": "system"}
 
-
-def test_packages_full_refs_and_kind_prefixes_match_exactly(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, installed((APP, APP_REF), (RUNTIME, RUNTIME_REF))),
@@ -215,7 +216,7 @@ def test_packages_full_refs_and_kind_prefixes_match_exactly(tmp_path):
     assert ctx.changes == []
 
 
-def test_packages_absent_removes_installed_ref(tmp_path):
+def test_packages_absent_removes_refs_all_branches_and_noops_when_missing(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, installed((APP, APP_REF))),
@@ -238,8 +239,6 @@ def test_packages_absent_removes_installed_ref(tmp_path):
     assert call_data(ctx.changes[0]) == {"removed": [APP_REF], "scope": "system"}
     assert ctx.changes[0].summary == f"-{APP_REF}"
 
-
-def test_packages_absent_removes_all_branches_of_a_bare_id(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(
@@ -270,8 +269,6 @@ def test_packages_absent_removes_all_branches_of_a_bare_id(tmp_path):
         "scope": "system",
     }
 
-
-def test_packages_absent_is_a_noop_when_missing(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, installed((RUNTIME, RUNTIME_REF)))]
     ctx = make_context(tmp_path, command=command)
@@ -336,24 +333,7 @@ def test_user_scope_refuses_root(tmp_path):
         flatpak.packages([APP], scope="user")
 
 
-def test_invalid_package_arguments_are_rejected(tmp_path):
-    make_context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="invalid flatpak state"):
-        flatpak.packages([APP], state="invalid")
-    with pytest.raises(TaskFailed, match="invalid flatpak scope"):
-        flatpak.packages([APP], scope="session")
-    with pytest.raises(TaskFailed, match="flatpak refs must not be empty"):
-        flatpak.packages([])
-    with pytest.raises(TaskFailed, match="flatpak ref must not be empty"):
-        flatpak.packages("")
-    with pytest.raises(TaskFailed, match="flatpak ref must not be empty"):
-        flatpak.packages([APP, "  "])
-    with pytest.raises(TaskFailed, match="flatpak remote must not be empty"):
-        flatpak.packages([APP], remote="  ")
-
-
-def test_install_verification_failure_is_reported(tmp_path):
+def test_install_and_removal_verification_failures_are_reported(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0), response(0), response(0)]
     make_context(tmp_path, command=command)
@@ -361,8 +341,6 @@ def test_install_verification_failure_is_reported(tmp_path):
     with pytest.raises(TaskFailed, match="still missing after install"):
         flatpak.packages([APP])
 
-
-def test_removal_verification_failure_is_reported(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(0, installed((APP, APP_REF))),

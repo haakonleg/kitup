@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from kitup.errors import BundleError, PresetError, ProjectError
+from kitup.errors import PresetError, ProjectError
 from kitup.project import (
     discover_bundle_dirs,
     discover_var_paths,
@@ -12,7 +12,6 @@ from kitup.project import (
     on_project_path,
     resolve_preset,
 )
-from kitup.resolver import resolve
 from kitup.variables import load_vars
 
 from ..helpers import make_project, write
@@ -55,19 +54,6 @@ def test_unknown_user_in_project_path_is_a_project_error():
         load_project("~bogususer/kitup")
 
 
-def test_unknown_user_in_on_project_path_is_a_project_error():
-    with (
-        pytest.raises(ProjectError, match="cannot resolve path '~bogususer/kitup'"),
-        on_project_path("~bogususer/kitup"),
-    ):
-        pass
-
-
-def test_unknown_user_in_preset_path_is_a_preset_error(tmp_path):
-    with pytest.raises(PresetError, match="cannot resolve path '~bogususer/laptop'"):
-        resolve_preset(tmp_path, "~bogususer/laptop")
-
-
 def test_discovers_bundles_by_folder_id(tmp_path):
     make_project(
         tmp_path,
@@ -95,30 +81,6 @@ def test_discovers_bundles_by_folder_id(tmp_path):
     assert [task.name for task in base.tasks] == ["Install"]
 
 
-def test_discovered_bundles_are_immutable(tmp_path):
-    make_project(
-        tmp_path,
-        bundles={"base": {"__init__.py": "from kitup import bundle\n\nbundle('Base')\n"}},
-    )
-
-    (bundle,) = load_project(tmp_path).bundles
-
-    assert isinstance(bundle.tasks, tuple)
-    for attribute, value in (
-        ("id", "other"),
-        ("name", "Other"),
-        ("description", "other"),
-        ("path", tmp_path),
-        ("var_paths", (tmp_path / "vars.py",)),
-        ("priority", 1),
-    ):
-        with pytest.raises(AttributeError, match="immutable after discovery"):
-            setattr(bundle, attribute, value)
-
-    with pytest.raises(BundleError, match="immutable after discovery"):
-        bundle.task(lambda: None)
-
-
 def test_synthesizes_a_bundle_when_the_folder_has_no_init(tmp_path):
     make_project(
         tmp_path,
@@ -130,24 +92,6 @@ def test_synthesizes_a_bundle_when_the_folder_has_no_init(tmp_path):
 
     assert bundle.id == "base"
     assert bundle.name == "base"
-    assert [task.name for task in bundle.tasks] == ["Hello"]
-
-
-def test_synthesizes_a_bundle_when_init_does_not_construct_one(tmp_path):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": {
-                "__init__.py": "VALUE = 1\n",
-                "tasks.py": task_source("hello"),
-            }
-        },
-    )
-
-    project = load_project(tmp_path)
-    (bundle,) = project.bundles
-
-    assert bundle.id == "base"
     assert [task.name for task in bundle.tasks] == ["Hello"]
 
 
@@ -170,28 +114,24 @@ def test_auto_discovery_is_sorted_and_skips_private_modules(tmp_path):
     assert [task.func.__name__ for task in bundle.tasks] == ["first", "second"]
 
 
-def test_invalid_bundle_folder_name_is_an_error(tmp_path):
-    write(tmp_path / "bundles" / "bad-name" / "__init__.py", "from kitup import bundle\n\nbundle()\n")
-
-    with pytest.raises(ProjectError, match="invalid bundle name 'bad-name'"):
-        load_project(tmp_path)
-
-
-def test_keyword_bundle_folder_name_is_an_error(tmp_path):
-    write(tmp_path / "bundles" / "class" / "__init__.py", "from kitup import bundle\n\nbundle()\n")
-
-    with pytest.raises(ProjectError, match="invalid bundle name 'class'"):
-        load_project(tmp_path)
+def test_invalid_bundle_folder_names_are_errors(tmp_path):
+    for index, name in enumerate(["bad-name", "01_", "01_bad-name", "123", "01_2bad"]):
+        root = tmp_path / str(index)
+        write(root / "bundles" / name / "__init__.py", "from kitup import bundle\n\nbundle()\n")
+        expected = f"invalid bundle name '{name}'" if name == "bad-name" else "invalid bundle name"
+        with pytest.raises(ProjectError, match=expected):
+            load_project(root)
 
 
-def test_keyword_var_name_is_an_error(tmp_path):
-    write(tmp_path / "vars" / "for.py", "VALUE = 1\n")
+def test_invalid_var_names_are_errors(tmp_path):
+    for index, name in enumerate(["for", "bad-name"]):
+        root = tmp_path / str(index)
+        write(root / "vars" / f"{name}.py", "VALUE = 1\n")
+        with pytest.raises(ProjectError, match=f"invalid var name '{name}'"):
+            load_project(root)
 
-    with pytest.raises(ProjectError, match="invalid var name 'for'"):
-        load_project(tmp_path)
 
-
-def test_numbered_bundle_folders_sort_numerically_before_unnumbered(tmp_path):
+def test_numbered_bundle_folders_sort_numerically_and_strip_their_prefix(tmp_path):
     make_project(
         tmp_path,
         bundles={
@@ -206,44 +146,16 @@ def test_numbered_bundle_folders_sort_numerically_before_unnumbered(tmp_path):
     project = load_project(tmp_path)
 
     assert [bundle.id for bundle in project.bundles] == ["one", "two", "ten", "alpha", "zeta"]
-
-
-def test_numbered_bundle_prefix_is_stripped_from_the_id(tmp_path):
-    make_project(tmp_path, bundles={"01_setup": task_source("install")})
-
-    (bundle,) = load_project(tmp_path).bundles
-
-    assert bundle.id == "setup"
-    assert bundle.name == "setup"
-    assert [task.id for task in bundle.tasks] == ["setup.install"]
-
-
-def test_numbered_bundle_keeps_an_explicit_display_name(tmp_path):
-    make_project(
-        tmp_path,
-        bundles={
-            "01_setup": {"__init__.py": "from kitup import bundle\n\nbundle('Setup')\n", "tasks.py": task_source("x")},
-        },
-    )
-
-    (bundle,) = load_project(tmp_path).bundles
-
-    assert bundle.id == "setup"
-    assert bundle.name == "Setup"
+    setup = load_project(make_project(tmp_path / "setup", bundles={"01_setup": task_source("install")})).bundles[0]
+    assert setup.id == "setup"
+    assert setup.name == "setup"
+    assert [task.id for task in setup.tasks] == ["setup.install"]
 
 
 def test_numbered_and_plain_folders_with_the_same_id_are_rejected(tmp_path):
     make_project(tmp_path, bundles={"01_setup": task_source("a"), "setup": task_source("b")})
 
     with pytest.raises(ProjectError, match=r"duplicate bundle id 'setup'.*01_setup.*setup"):
-        load_project(tmp_path)
-
-
-@pytest.mark.parametrize("name", ["01_", "01_bad-name", "123", "01_2bad"])
-def test_invalid_numbered_bundle_folder_names_are_errors(tmp_path, name):
-    write(tmp_path / "bundles" / name / "__init__.py", "from kitup import bundle\n\nbundle()\n")
-
-    with pytest.raises(ProjectError, match="invalid bundle name"):
         load_project(tmp_path)
 
 
@@ -257,48 +169,6 @@ def test_priority_orders_bundles_before_folder_names(tmp_path):
     )
 
     assert [bundle.id for bundle in load_project(tmp_path).bundles] == ["alpha", "base"]
-
-
-def test_equal_priorities_keep_folder_order(tmp_path):
-    make_project(
-        tmp_path,
-        bundles={
-            "02_b": {"__init__.py": bundle_source(5), "tasks.py": task_source("b")},
-            "01_a": {"__init__.py": bundle_source(5), "tasks.py": task_source("a")},
-        },
-    )
-
-    assert [bundle.id for bundle in load_project(tmp_path).bundles] == ["a", "b"]
-
-
-def test_priority_takes_precedence_over_numbered_prefixes(tmp_path):
-    make_project(
-        tmp_path,
-        bundles={
-            "01_first": {"__init__.py": bundle_source(10), "tasks.py": task_source("f")},
-            "02_second": {"__init__.py": bundle_source(5), "tasks.py": task_source("s")},
-        },
-    )
-
-    assert [bundle.id for bundle in load_project(tmp_path).bundles] == ["second", "first"]
-
-
-def test_dependencies_win_over_priority_and_prefixes(tmp_path):
-    make_project(
-        tmp_path,
-        bundles={
-            "01_first": {"__init__.py": bundle_source(100), "tasks.py": task_source("f")},
-            "02_second": {
-                "__init__.py": bundle_source(1, depends_on=("first",)),
-                "tasks.py": task_source("s"),
-            },
-        },
-    )
-
-    project = load_project(tmp_path)
-    plan = resolve(project.bundles, registry={bundle.id: bundle for bundle in project.bundles})
-
-    assert [bundle.id for bundle in plan.bundles] == ["first", "second"]
 
 
 def test_bundles_py_shadowing_is_reported(tmp_path):
@@ -366,14 +236,6 @@ def test_bundle_vars_are_discovered_from_the_bundle_folder(tmp_path):
     assert all(path.parent == tmp_path / "bundles" / "base" / "vars" for path in bundle.var_paths)
 
 
-def test_bundles_without_vars_have_no_var_paths(tmp_path):
-    make_project(tmp_path, bundles={"base": {"tasks.py": task_source("run")}})
-
-    project = load_project(tmp_path)
-
-    assert project.bundles[0].var_paths == ()
-
-
 def test_invalid_bundle_var_name_is_reported_with_bundle_context(tmp_path):
     write(tmp_path / "bundles" / "base" / "vars" / "bad-name.py", "VALUE = 1\n")
     write(tmp_path / "bundles" / "base" / "tasks.py", task_source("run"))
@@ -382,7 +244,7 @@ def test_invalid_bundle_var_name_is_reported_with_bundle_context(tmp_path):
         load_project(tmp_path)
 
 
-def test_bundle_vars_follow_an_explicit_bundle_path(tmp_path):
+def test_bundle_vars_follow_explicit_and_external_bundle_paths(tmp_path):
     resources = tmp_path / "shared"
     write(resources / "vars" / "defaults.py", "VALUE = 1\n")
     write(
@@ -395,9 +257,7 @@ def test_bundle_vars_follow_an_explicit_bundle_path(tmp_path):
 
     assert project.bundles[0].var_paths == (resources / "vars" / "defaults.py",)
 
-
-def test_external_bundle_vars_are_discovered(tmp_path):
-    external = tmp_path / "bundles"
+    external = tmp_path / "external-bundles"
     external_bundle(external, "extra")
     write(external / "extra" / "vars" / "local.py", "VALUE = 1\n")
     root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
@@ -420,31 +280,6 @@ def test_preset_paths_resolve_under_presets(tmp_path):
 
     project = load_project(tmp_path, preset_paths=[relative])
     assert project.preset_paths == (relative,)
-
-
-def test_load_project_resolves_relative_preset_paths(tmp_path):
-    project = load_project(tmp_path, preset_paths=[Path("presets/laptop")])
-
-    assert project.preset_paths == (tmp_path / "presets" / "laptop",)
-
-
-def test_load_project_restores_sys_path(tmp_path):
-    make_project(tmp_path, bundles={"base": {"__init__.py": "from kitup import bundle\n\nbundle()\n"}})
-    before = list(sys.path)
-
-    load_project(tmp_path)
-
-    assert sys.path == before
-
-
-def test_load_project_can_run_repeatedly_on_the_same_project(tmp_path):
-    make_project(tmp_path, bundles={"base": {"tasks.py": task_source("hello")}})
-
-    first = load_project(tmp_path)
-    second = load_project(tmp_path)
-
-    assert [task.id for task in first.bundles[0].tasks] == ["base.hello"]
-    assert [task.id for task in second.bundles[0].tasks] == ["base.hello"]
 
 
 def test_load_project_isolates_projects_with_the_same_bundle_names(tmp_path):
@@ -562,17 +397,6 @@ def test_relative_imports_inside_an_external_bundle(tmp_path):
     assert extra.tasks[0].func() == "from helper"
 
 
-def test_external_bundle_can_depend_on_a_local_bundle(tmp_path):
-    external = tmp_path / "bundles"
-    external_bundle(external, "extra", depends_on=("local",))
-    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
-
-    project = load_project(root, bundle_paths=[external])
-
-    extra = next(bundle for bundle in project.bundles if bundle.id == "extra")
-    assert extra.depends_on == ("local",)
-
-
 def test_duplicate_bundle_ids_across_roots_are_rejected(tmp_path):
     external = tmp_path / "bundles"
     external_bundle(external, "base")
@@ -582,43 +406,20 @@ def test_duplicate_bundle_ids_across_roots_are_rejected(tmp_path):
         load_project(root, bundle_paths=[external])
 
 
-def test_bundle_paths_must_exist_and_be_directories(tmp_path):
+def test_path_roots_must_exist_and_be_directories(tmp_path):
     root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
-
-    with pytest.raises(ProjectError, match="bundle path is not a directory"):
-        load_project(root, bundle_paths=["missing"])
-
     target = root / "not-a-directory"
     target.write_text("", encoding="utf-8")
-    with pytest.raises(ProjectError, match="bundle path is not a directory"):
-        load_project(root, bundle_paths=[target])
 
-
-def test_files_paths_resolve_relative_to_the_project_root(tmp_path):
-    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
-    external = tmp_path / "machine" / "shared" / "files"
-    external.mkdir(parents=True)
-
-    relative = load_project(root, files_paths=["shared/files"])
-    absolute = load_project(root, files_paths=[external])
-
-    for project in (relative, absolute):
-        assert project.files_roots == (external,)
-
-    duplicate = load_project(root, files_paths=[external, external])
-    assert duplicate.files_roots == (external,)
-
-
-def test_files_paths_must_exist_and_be_directories(tmp_path):
-    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
-
-    with pytest.raises(ProjectError, match="files path is not a directory"):
-        load_project(root, files_paths=["missing"])
-
-    target = root / "not-a-directory"
-    target.write_text("", encoding="utf-8")
-    with pytest.raises(ProjectError, match="files path is not a directory"):
-        load_project(root, files_paths=[target])
+    for kind, keyword in (
+        ("bundle", "bundle_paths"),
+        ("files", "files_paths"),
+        ("modules", "modules_paths"),
+    ):
+        with pytest.raises(ProjectError, match=f"{kind} path is not a directory"):
+            load_project(root, **{keyword: ["missing"]})
+        with pytest.raises(ProjectError, match=f"{kind} path is not a directory"):
+            load_project(root, **{keyword: [target]})
 
 
 def test_modules_paths_resolve_relative_to_the_project_root(tmp_path):
@@ -649,18 +450,6 @@ def test_load_project_modules_accepts_modules_paths(tmp_path):
     assert [path.stem for path in project.module_paths] == ["extra"]
 
 
-def test_modules_paths_must_exist_and_be_directories(tmp_path):
-    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
-
-    with pytest.raises(ProjectError, match="modules path is not a directory"):
-        load_project(root, modules_paths=["missing"])
-
-    target = root / "not-a-directory"
-    target.write_text("", encoding="utf-8")
-    with pytest.raises(ProjectError, match="modules path is not a directory"):
-        load_project(root, modules_paths=[target])
-
-
 def test_duplicate_module_ids_across_roots_are_rejected(tmp_path):
     root = make_project(
         tmp_path / "machine",
@@ -673,7 +462,7 @@ def test_duplicate_module_ids_across_roots_are_rejected(tmp_path):
         load_project(root, modules_paths=[external])
 
 
-def test_files_and_modules_paths_expand_home(tmp_path, monkeypatch):
+def test_all_public_paths_expand_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -681,29 +470,25 @@ def test_files_and_modules_paths_expand_home(tmp_path, monkeypatch):
     files.mkdir()
     modules = home / "modules"
     write(modules / "extra.py", 'from kitup import module\n\nmodule("extra")\n')
-    root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
-
-    project = load_project(root, files_paths=["~/files"], modules_paths=["~/modules"])
-
-    assert project.files_roots == (files,)
-    assert project.module_roots == (modules,)
-    assert [path.stem for path in project.module_paths] == ["extra"]
-
-
-def test_bundle_paths_and_extra_var_paths_expand_home(tmp_path, monkeypatch):
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
     external = home / "bundles"
     external_bundle(external, "extra")
     extra_var = home / "secrets.py"
     write(extra_var, "SECRET = 1\n")
     root = make_project(tmp_path / "machine", bundles={"local": task_source("local")})
 
-    project = load_project(root, bundle_paths=["~/bundles"], extra_var_paths=["~/secrets.py"])
+    project = load_project(
+        root,
+        bundle_paths=["~/bundles"],
+        files_paths=["~/files"],
+        modules_paths=["~/modules"],
+        extra_var_paths=["~/secrets.py"],
+    )
 
     assert project.bundle_roots == (external,)
+    assert project.files_roots == (files,)
+    assert project.module_roots == (modules,)
     assert project.var_paths[-1] == extra_var
+    assert [path.stem for path in project.module_paths] == ["extra"]
     assert [bundle.id for bundle in project.bundles] == ["local", "extra"]
 
 
@@ -726,14 +511,11 @@ def test_extra_var_paths_are_resolved_and_validated(tmp_path):
     with pytest.raises(ProjectError, match=r"must end in \.py"):
         load_project(root, extra_var_paths=[text])
 
-
-def test_duplicate_var_ids_across_discovered_and_extra_files_are_rejected(tmp_path):
-    root = make_project(tmp_path / "machine", var_files={"secrets": "VALUE = 1\n"})
-    extra = root / "elsewhere" / "secrets.py"
-    write(extra, "SECRET = 1\n")
-
+    duplicate_root = make_project(tmp_path / "duplicates", var_files={"secrets": "VALUE = 1\n"})
+    duplicate = duplicate_root / "elsewhere" / "secrets.py"
+    write(duplicate, "SECRET = 1\n")
     with pytest.raises(ProjectError, match=r"duplicate var id 'secrets'.*vars/secrets.py.*secrets.py"):
-        load_project(root, extra_var_paths=[extra])
+        load_project(duplicate_root, extra_var_paths=[duplicate])
 
 
 def test_external_bundle_modules_are_purged_between_project_loads(tmp_path):

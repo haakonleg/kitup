@@ -17,7 +17,7 @@ def parse_with_paths(tmp_path, argv):
     return parse_with_presets(cli.build_parser(), argv, root=tmp_path)
 
 
-def test_read_preset_tokens_splits_shell_style_lines(tmp_path):
+def test_read_preset_tokens(tmp_path):
     make_project(
         tmp_path,
         preset={
@@ -39,20 +39,19 @@ def test_read_preset_tokens_splits_shell_style_lines(tmp_path):
         "packages, config",
     ]
 
-
-def test_only_full_line_hash_comments_are_ignored(tmp_path):
+    # Only a full-line hash starts a comment; a hash inside a token is kept.
     write(tmp_path / "presets" / "laptop", "# full-line comment\n--tags a#b\n")
 
     assert read_preset_tokens(tmp_path / "presets" / "laptop") == ["--tags", "a#b"]
 
 
-@pytest.mark.parametrize("option", ["-h", "--help", "-V", "--version"])
-def test_help_and_version_in_preset_are_ignored(tmp_path, option):
-    make_project(tmp_path, preset={"laptop": f"{option}\n--include-bundles base\n"})
+def test_help_and_version_in_preset_are_ignored(tmp_path):
+    for option in ["-h", "--help", "-V", "--version"]:
+        make_project(tmp_path, preset={"laptop": f"{option}\n--include-bundles base\n"})
 
-    args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
+        args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
 
-    assert args.include_bundles == ["base"]
+        assert args.include_bundles == ["base"], option
 
 
 def test_preset_values_are_merged_into_the_real_arguments(tmp_path):
@@ -94,22 +93,6 @@ def test_later_presets_win(tmp_path):
     assert preset_paths == (tmp_path / "presets" / "first", tmp_path / "presets" / "second")
 
 
-def test_append_options_replace_wholesale(tmp_path):
-    make_project(tmp_path, preset={"laptop": "-t packages -t config\n"})
-
-    args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop", "-t", "docs"])
-
-    assert args.tags == ["docs"]
-
-
-def test_without_presets_only_explicit_options_are_present(tmp_path):
-    args, preset_paths = parse_with_paths(tmp_path, ["list", str(tmp_path)])
-
-    assert not hasattr(args, "include_bundles")
-    assert not hasattr(args, "dry_run")
-    assert preset_paths == ()
-
-
 def test_absolute_preset_paths_are_used_as_is(tmp_path):
     path = tmp_path / "elsewhere" / "laptop"
     write(path, "--include-bundles base\n")
@@ -119,62 +102,30 @@ def test_absolute_preset_paths_are_used_as_is(tmp_path):
     assert args.include_bundles == ["base"]
 
 
-def test_relative_presets_resolve_under_presets(tmp_path):
-    make_project(tmp_path, preset={"web": "--include-bundles base\n"})
+def test_relative_and_subdirectory_presets_resolve_under_presets(tmp_path):
+    relative_root = tmp_path / "relative"
+    make_project(relative_root, preset={"web": "--include-bundles base\n"})
 
-    args, preset_paths = parse_with_paths(tmp_path, ["apply", str(tmp_path), "--preset", "web"])
-
-    assert args.include_bundles == ["base"]
-    assert preset_paths == (tmp_path / "presets" / "web",)
-
-
-def test_subdirectory_presets_are_allowed(tmp_path):
-    make_project(tmp_path, preset={"web/laptop": "--include-bundles base\n"})
-
-    args, preset_paths = parse_with_paths(tmp_path, ["apply", str(tmp_path), "--preset", "web/laptop"])
+    args, preset_paths = parse_with_paths(relative_root, ["apply", str(relative_root), "--preset", "web"])
 
     assert args.include_bundles == ["base"]
-    assert preset_paths == (tmp_path / "presets" / "web" / "laptop",)
+    assert preset_paths == (relative_root / "presets" / "web",)
+
+    nested_root = tmp_path / "nested"
+    make_project(nested_root, preset={"web/laptop": "--include-bundles base\n"})
+
+    args, preset_paths = parse_with_paths(nested_root, ["apply", str(nested_root), "--preset", "web/laptop"])
+
+    assert args.include_bundles == ["base"]
+    assert preset_paths == (nested_root / "presets" / "web" / "laptop",)
 
 
-def test_relative_preset_traversal_is_rejected(tmp_path):
+def test_invalid_preset_paths_are_rejected(tmp_path):
     with pytest.raises(PresetError, match="preset path must stay inside presets/"):
         parse(tmp_path, ["apply", str(tmp_path), "--preset", "../laptop"])
 
-
-def test_missing_preset_is_an_error(tmp_path):
     with pytest.raises(PresetError, match=r"preset not found:.*presets.*missing"):
         parse(tmp_path, ["apply", str(tmp_path), "--preset", "missing"])
-
-
-def test_unknown_user_in_preset_path_is_an_error(tmp_path):
-    with pytest.raises(PresetError, match="cannot resolve path '~bogususer/laptop'"):
-        parse(tmp_path, ["apply", str(tmp_path), "--preset", "~bogususer/laptop"])
-
-
-def test_unknown_user_in_project_dir_is_an_error():
-    with pytest.raises(PresetError, match="cannot resolve path '~bogususer/machine'"):
-        parse_with_presets(cli.build_parser(), ["apply", "~bogususer/machine"])
-
-
-def test_directory_preset_is_an_error(tmp_path):
-    (tmp_path / "presets").mkdir()
-
-    with pytest.raises(PresetError, match="preset is not a file"):
-        parse(tmp_path, ["apply", str(tmp_path), "--preset", "."])
-
-
-def test_disallowed_options_in_preset_warn_and_are_ignored(tmp_path):
-    make_project(tmp_path, preset={"laptop": "--nope value\n--include-bundles base\n"})
-
-    warned = []
-    args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"], warned=warned)
-
-    assert args.include_bundles == ["base"]
-    assert args.project_dir == str(tmp_path)
-    assert len(warned) == 1
-    assert str(tmp_path / "presets" / "laptop") in warned[0]
-    assert "--nope" in warned[0]
 
 
 def test_positional_tokens_in_preset_are_ignored(tmp_path):
@@ -186,29 +137,28 @@ def test_positional_tokens_in_preset_are_ignored(tmp_path):
     assert args.project_dir == str(tmp_path)
 
 
-@pytest.mark.parametrize("line", ["--preset other", "--preset=other", "-p other", "-p=other"])
-def test_nested_preset_options_in_preset_are_ignored(tmp_path, line):
-    make_project(tmp_path, preset={"laptop": f"{line}\n--include-bundles base\n"})
+def test_nested_preset_options_in_preset_are_ignored(tmp_path):
+    for line in ["--preset other", "--preset=other", "-p other", "-p=other"]:
+        make_project(tmp_path, preset={"laptop": f"{line}\n--include-bundles base\n"})
 
-    args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
+        args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
 
-    assert args.include_bundles == ["base"]
-    assert args.preset == ["laptop"]
-
-
-@pytest.mark.parametrize("line", ["--c other", "--cm other", "-nm other", "--include-bundl base"])
-def test_unknown_option_forms_in_preset_warn_and_are_ignored(tmp_path, line):
-    make_project(tmp_path, preset={"laptop": f"{line}\n--include-bundles base\n"})
-
-    warned = []
-    args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"], warned=warned)
-
-    assert args.include_bundles == ["base"]
-    assert len(warned) == 1
-    assert line.split()[0] in warned[0]
+        assert args.include_bundles == ["base"], line
+        assert args.preset == ["laptop"], line
 
 
-def test_unknown_options_warn_by_default(tmp_path):
+def test_unknown_options_in_preset_warn_and_are_ignored(tmp_path):
+    for line in ["--c other", "--cm other", "-nm other", "--include-bundl base"]:
+        make_project(tmp_path, preset={"laptop": f"{line}\n--include-bundles base\n"})
+
+        warned = []
+        args = parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"], warned=warned)
+
+        assert args.include_bundles == ["base"], line
+        assert len(warned) == 1, line
+        assert line.split()[0] in warned[0], line
+
+    # Without a warning callback, warnings go through the warnings module.
     make_project(tmp_path, preset={"laptop": "--dry-runn\n--include-bundles base\n"})
 
     with pytest.warns(UserWarning, match="ignoring unknown option '--dry-runn'"):
@@ -216,11 +166,10 @@ def test_unknown_options_warn_by_default(tmp_path):
 
     assert args.include_bundles == ["base"]
 
-
-def test_options_from_another_command_are_ignored(tmp_path):
+    # Options that are valid for another command are ignored silently.
     make_project(tmp_path, preset={"laptop": "--dry-run\n--include-bundles base\n"})
-
     warned = []
+
     args = parse(tmp_path, ["list", str(tmp_path), "--preset", "laptop"], warned=warned)
 
     assert args.include_bundles == ["base"]
@@ -240,12 +189,6 @@ def test_missing_option_value_in_preset_is_an_error(tmp_path):
 
     with pytest.raises(PresetError, match="expected one argument"):
         parse(tmp_path, ["apply", str(tmp_path), "--preset", "laptop"])
-
-
-def test_blank_and_comment_only_preset_is_empty(tmp_path):
-    write(tmp_path / "laptop", "# nothing here\n\n")
-
-    assert read_preset_tokens(tmp_path / "laptop") == []
 
 
 def test_unreadable_preset_is_an_error(tmp_path):

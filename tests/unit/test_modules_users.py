@@ -197,7 +197,8 @@ def make_users_context(
     return make_context(tmp_path, dry_run=dry_run, command=store), store
 
 
-def test_create_user_with_attributes(tmp_path, monkeypatch):
+def test_create_user_with_attributes_and_options(tmp_path, monkeypatch):
+    # create with every attribute, including a password
     store = FakeAccounts()
     store.add_group("devs", gid=1500)
     ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
@@ -232,6 +233,7 @@ def test_create_user_with_attributes(tmp_path, monkeypatch):
     assert store.calls[1][1]["stdin"] == f"alice:{PASSWORD}\n"
     assert all(PASSWORD not in command for command in argvs(store))
 
+    # a second identical run is a no-op apart from the shadow probe
     arguments = {
         "uid": 1001,
         "group": "devs",
@@ -245,9 +247,9 @@ def test_create_user_with_attributes(tmp_path, monkeypatch):
     assert second.changes == []
     assert argvs(store)[before:] == [["getent", "shadow", "alice"]]
 
-
-def test_create_user_options(tmp_path, monkeypatch):
-    _ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch)
+    # create_home=False and a numeric primary GID
+    store = FakeAccounts()
+    _ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
     users.user("alice", create_home=False)
     assert ["useradd", "-M", "alice"] in argvs(store)
     assert store.users["alice"]["home"] == "/home/alice"
@@ -259,7 +261,7 @@ def test_create_user_options(tmp_path, monkeypatch):
     assert store.users["alice"]["gid"] == 1500
 
 
-def test_modify_user_attributes(tmp_path, monkeypatch):
+def test_modify_user_and_uid_scenarios(tmp_path, monkeypatch):
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
     store.add_group("devs", gid=1500)
@@ -279,15 +281,11 @@ def test_modify_user_attributes(tmp_path, monkeypatch):
     }
     assert ["usermod", "-g", "devs", "-d", "/srv/alice", "-s", "/bin/zsh", "alice"] in argvs(store)
 
-
-def test_user_uid_scenarios(tmp_path, monkeypatch):
-    store = FakeAccounts()
-    store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
-    ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
-
+    # changing an existing UID is rejected, while repeating the same UID is a no-op
+    before = len(store.calls)
     with pytest.raises(TaskFailed, match="changing an existing UID is not supported"):
         users.user("alice", uid=1002)
-    assert not any(command[0] == "usermod" for command in argvs(store))
+    assert not any(command[0] == "usermod" for command in argvs(store)[before:])
 
     ctx, _ = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
     users.user("alice", uid=1001)
@@ -343,7 +341,8 @@ def test_remove_user_scenarios(tmp_path, monkeypatch):
     assert not any(command[0] == "userdel" for command in argvs(store))
 
 
-def test_create_group_scenarios(tmp_path, monkeypatch):
+def test_group_lifecycle_scenarios(tmp_path, monkeypatch):
+    # create with an explicit GID and verify idempotency
     ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch)
 
     users.group("devs", gid=1500)
@@ -358,16 +357,15 @@ def test_create_group_scenarios(tmp_path, monkeypatch):
     assert second.changes == []
     assert argvs(store)[before:] == []
 
+    # a group without an explicit GID lets groupadd choose one
     ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch)
     users.group("devs")
     assert ["groupadd", "devs"] in argvs(store)
 
-
-def test_group_gid_scenarios(tmp_path, monkeypatch):
+    # an existing GID is immutable, but the same GID is a no-op
     store = FakeAccounts()
     store.add_group("devs", gid=1500)
     ctx, _ = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
-
     with pytest.raises(TaskFailed, match="changing an existing GID is not supported"):
         users.group("devs", gid=1600)
 
@@ -375,12 +373,10 @@ def test_group_gid_scenarios(tmp_path, monkeypatch):
     users.group("devs", gid=1500)
     assert ctx.changes == []
 
-
-def test_remove_group_scenarios(tmp_path, monkeypatch):
+    # remove an existing group, then confirm removing a missing group is a no-op
     store = FakeAccounts()
     store.add_group("devs", gid=1500)
     ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
-
     users.group("devs", state="absent")
     assert "devs" not in store.groups
     assert call_data(ctx.changes[0]) == {"group": "devs"}
@@ -392,6 +388,7 @@ def test_remove_group_scenarios(tmp_path, monkeypatch):
     assert ctx.changes == []
     assert not any(command[0] == "groupdel" for command in argvs(store))
 
+    # a group that is still a user's primary group cannot be removed
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1500, home="/home/alice", shell="/bin/bash")
     store.add_group("devs", gid=1500)
@@ -401,12 +398,13 @@ def test_remove_group_scenarios(tmp_path, monkeypatch):
     assert "devs" in store.groups
 
 
-def test_membership_add_remove_and_primary_group_noop(tmp_path, monkeypatch):
+def test_membership_add_remove_and_failures(tmp_path, monkeypatch):
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
     store.add_group("devs", gid=1500)
     ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
 
+    # add, then repeat as a no-op, then remove
     users.membership("alice", "devs")
     assert store.groups["devs"]["members"] == ["alice"]
     assert call_data(ctx.changes[0]) == {"user": "alice", "group": "devs"}
@@ -424,6 +422,7 @@ def test_membership_add_remove_and_primary_group_noop(tmp_path, monkeypatch):
     assert call_data(third.changes[0]) == {"user": "alice", "group": "devs"}
     assert third.changes[0].action == "users.membership"
 
+    # membership in the primary group is implicit and needs no change
     primary_store = FakeAccounts()
     primary_store.add_user("alice", uid=1001, gid=1500, home="/home/alice", shell="/bin/bash")
     primary_store.add_group("devs", gid=1500)
@@ -431,15 +430,11 @@ def test_membership_add_remove_and_primary_group_noop(tmp_path, monkeypatch):
     users.membership("alice", "devs")
     assert primary_ctx.changes == []
 
-
-def test_membership_failure_scenarios(tmp_path, monkeypatch):
-    store = FakeAccounts()
-    store.add_user("alice", uid=1001, gid=1500, home="/home/alice", shell="/bin/bash")
-    store.add_group("devs", gid=1500)
-    _ctx, _ = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
+    # removing the implicit primary-group membership is refused
     with pytest.raises(TaskFailed, match="primary group"):
         users.membership("alice", "devs", state="absent")
 
+    # missing user and missing group are reported clearly
     store = FakeAccounts()
     store.add_group("devs", gid=1500)
     _ctx, _ = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
@@ -478,9 +473,10 @@ def test_dry_run_reports_without_mutating(tmp_path, monkeypatch):
     assert not any(command[0] in {"useradd", "groupadd", "chpasswd"} for command in argvs(store))
 
 
-@pytest.mark.parametrize(
-    ("call", "message"),
-    [
+def test_invalid_arguments_are_rejected(tmp_path, monkeypatch):
+    make_users_context(tmp_path, monkeypatch=monkeypatch)
+
+    cases = [
         (lambda: users.user(""), "user name must not be empty"),
         (lambda: users.user("-bad"), "invalid user name"),
         (lambda: users.user("alice", uid=-1), "uid must be a non-negative integer"),
@@ -498,16 +494,15 @@ def test_dry_run_reports_without_mutating(tmp_path, monkeypatch):
         (lambda: users.group("devs", gid=-1), "gid must be a non-negative integer"),
         (lambda: users.membership("", "devs"), "user name must not be empty"),
         (lambda: users.membership("alice", ""), "group name must not be empty"),
-    ],
-)
-def test_invalid_arguments_are_rejected(tmp_path, monkeypatch, call, message):
-    make_users_context(tmp_path, monkeypatch=monkeypatch)
-
-    with pytest.raises(TaskFailed, match=message):
-        call()
+    ]
+    for call, message in cases:
+        with pytest.raises(TaskFailed, match=message) as error:
+            call()
+        assert message in str(error.value), f"unexpected failure for case {message!r}: {error.value}"
 
 
-def test_command_failure_propagates(tmp_path, monkeypatch):
+def test_command_and_password_failure_scenarios(tmp_path, monkeypatch):
+    # useradd failures propagate with their stderr
     store = FakeAccounts()
     store.fail["useradd"] = "useradd: cannot create user"
     _ctx, _ = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
@@ -515,8 +510,7 @@ def test_command_failure_propagates(tmp_path, monkeypatch):
     with pytest.raises(TaskFailed, match="command failed"):
         users.user("alice")
 
-
-def test_password_failure_does_not_leak_hash(tmp_path, monkeypatch):
+    # chpasswd failures never expose the hash in the error
     store = FakeAccounts()
     store.add_user(
         "alice",

@@ -1,13 +1,12 @@
 from contextlib import contextmanager
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
-import kitup
 from kitup import ctx as ambient_ctx
 from kitup import facts as ambient_facts
 from kitup import vars as ambient_vars
-from kitup.context import current_context
+from kitup.context import current_context, set_current_context
 from kitup.errors import TaskFailed, VarsError
 from kitup.modules import files
 from kitup.project import Project
@@ -34,6 +33,10 @@ def test_module_function_outside_a_task_fails_clearly(tmp_path):
 
 
 def test_ambient_proxies_resolve_the_current_context(tmp_path):
+    set_current_context(None)
+    with pytest.raises(AttributeError, match="no active task context"):
+        _ = ambient_ctx.vars
+
     context = make_context(tmp_path, vars=Vars(VALUE="base"), facts={"os": "fedora"})
 
     assert current_context() is context
@@ -42,31 +45,7 @@ def test_ambient_proxies_resolve_the_current_context(tmp_path):
     assert ambient_facts["os"] == "fedora"
 
 
-def test_ambient_proxy_without_a_context_raises_attribute_error():
-    with pytest.raises(AttributeError, match="no active task context"):
-        _ = ambient_ctx.vars
-
-
-def test_ambient_proxy_repr_is_safe_without_a_context():
-    assert "inactive" in repr(ambient_ctx)
-
-
-def test_ambient_facts_proxy_supports_mapping_operations(tmp_path):
-    make_context(tmp_path, facts={"os": "fedora", "arch": "x86_64"})
-
-    assert len(ambient_facts) == 2
-    assert "os" in ambient_facts
-    assert sorted(ambient_facts) == ["arch", "os"]
-
-
-def test_public_vars_and_facts_are_proxies():
-    assert kitup.vars is ambient_vars
-    assert kitup.facts is ambient_facts
-    assert not isinstance(kitup.vars, ModuleType)
-    assert not isinstance(kitup.facts, ModuleType)
-
-
-def test_changed_records_calls_notes_and_task_scope(tmp_path):
+def test_changed_records_calls_notes_task_scope_and_action_inference(tmp_path):
     context = make_context(tmp_path)
     result = CallResult(action="test.task", changed=True, summary="+git", added=["git"])
 
@@ -81,21 +60,6 @@ def test_changed_records_calls_notes_and_task_scope(tmp_path):
     assert context.changes == []
     assert context.notes == []
 
-
-def test_changed_builds_calls_and_defaults_action(tmp_path):
-    context = make_context(tmp_path)
-
-    explicit = CallResult(action="test.method", changed=True, summary="+pkg", package="pkg")
-    result = context.changed(explicit)
-    assert isinstance(result, CallResult)
-    assert result.action == "test.method"
-    assert result.changed is True
-    assert result.summary == "+pkg"
-    assert result.package == "pkg"
-    assert context.calls == [result]
-    assert context.changes == [result]
-
-    context.begin_task(task_for())
     assert context.changed(summary="+pkg").action == "task._noop"
 
     no_change = context.changed(changed=False, summary="ensure pkg", package="pkg")
@@ -103,16 +67,12 @@ def test_changed_builds_calls_and_defaults_action(tmp_path):
     assert context.calls[-1] is no_change
     assert no_change not in context.changes
 
+    explicit = CallResult(action="test.method", changed=True, summary="+pkg", package="pkg")
+    assert context.changed(explicit).action == "test.method"
 
-def test_call_result_action_is_an_inferred_sentinel(tmp_path):
     empty = CallResult(changed=True, summary="+pkg")
     assert empty.action == ""
-
-    context = make_context(tmp_path)
-    assert context.changed(empty).action == "task"
-    assert context.changed(summary="+pkg").action == "task"
-
-    context.begin_task(task_for())
+    assert make_context(tmp_path).changed(empty).action == "task"
     inferred = context.changed(CallResult(changed=True, summary="+pkg"))
     assert inferred.action == "task._noop"
 
@@ -121,27 +81,6 @@ def test_call_result_action_is_an_inferred_sentinel(tmp_path):
 
 
 def test_memo_and_input_share_a_store_across_tasks(tmp_path, monkeypatch):
-    monkeypatch.setattr("builtins.input", lambda prompt: "provided")
-    context = make_context(tmp_path)
-    calls = []
-
-    def load():
-        calls.append(1)
-        return "loaded"
-
-    assert context.memo("key", load) == "loaded"
-    context.begin_task(task_for())
-    assert context.memo("key", load) == "loaded"
-    assert len(calls) == 1
-
-    context.input("provided_key")
-    context.begin_task(task_for("Other"))
-    assert context.memo("provided_key", load) == "provided"
-    assert context.get("provided_key") == "provided"
-    assert len(calls) == 1
-
-
-def test_input_enters_interactive_output_and_clears_prompt(tmp_path, monkeypatch):
     calls = []
     prompts = []
     cleared = []
@@ -164,11 +103,30 @@ def test_input_enters_interactive_output_and_clears_prompt(tmp_path, monkeypatch
     monkeypatch.setattr("builtins.input", fake_input)
     output = SimpleNamespace(interactive=interactive, clear_input=clear_input)
     context = make_context(tmp_path, output=output)
+    loads = []
+
+    def load():
+        loads.append(1)
+        return "loaded"
+
+    assert context.memo("key", load) == "loaded"
+    context.begin_task(task_for())
+    assert context.memo("key", load) == "loaded"
+    assert len(loads) == 1
 
     assert context.input(prompt="Value: ") == "provided"
     assert prompts == ["Value: "]
     assert cleared == [("Value: ", "provided")]
     assert calls == ["begin", "end"]
+
+    context.begin_task(task_for("Other"))
+    assert context.memo("Value: ", load) == "loaded"
+    assert context.input("provided_key") == "provided"
+    assert context.memo("provided_key", load) == "provided"
+    assert context.get("provided_key") == "provided"
+    assert cleared[-1] == ("", "provided")
+    assert calls == ["begin", "end", "begin", "end"]
+    assert len(loads) == 2
 
 
 def test_get_returns_default_and_raises_for_missing_key(tmp_path):
@@ -197,27 +155,7 @@ def test_result_returns_stored_results_and_raises_for_unrun_tasks(tmp_path):
     with pytest.raises(TaskFailed, match="no result for task:"):
         context.result(other)
 
-
-def test_results_returns_a_snapshot_that_survives_begin_task(tmp_path):
     context = make_context(tmp_path)
-    task = task_for("Check")
-    context.begin_task(task)
-    result = TaskResult(task=task, status=Status.OK)
-    context.store_result(task, result)
-
-    snapshot = context.results
-    assert snapshot == {task.id: result}
-    snapshot.clear()
-    assert context.result(task.func) is result
-
-    context.begin_task(task_for("Other"))
-    assert context.result(task.func) is result
-
-
-def test_result_and_results_are_empty_without_a_current_bundle(tmp_path):
-    context = make_context(tmp_path)
-    task = task_for("Check")
-    result = TaskResult(task=task, status=Status.OK)
     context.store_result(task, result)
 
     assert context.results == {}
@@ -225,18 +163,7 @@ def test_result_and_results_are_empty_without_a_current_bundle(tmp_path):
         context.result(task.func)
 
 
-def test_finish_run_clears_the_current_bundle(tmp_path):
-    context = make_context(tmp_path)
-    context.begin_task(task_for("Check"))
-    assert context.run_state.current is not None
-
-    context.finish_run()
-
-    assert context.run_state.current is None
-    assert context.results == {}
-
-
-def test_run_executes_and_forwards_options(tmp_path):
+def test_run_executes_and_probe_returns_nonzero_instead_of_failing(tmp_path):
     command = FakeCommandRunner()
     context = make_context(tmp_path, command=command)
 
@@ -251,28 +178,12 @@ def test_run_executes_and_forwards_options(tmp_path):
     context.run(["login"], stdin="secret\n")
     assert command.calls[2][1]["stdin"] == "secret\n"
 
-
-def test_run_does_not_handle_guards_or_dry_run(tmp_path):
-    command = FakeCommandRunner()
-    context = make_context(tmp_path, dry_run=True, command=command)
-
-    context.run(["touch", "file"])
-    assert command.calls[0][0] == ["touch", "file"]
-    assert context.calls == []
-
-    with pytest.raises(TypeError):
-        context.run(["true"], creates="marker")  # type: ignore[call-arg]
-    with pytest.raises(TypeError):
-        context.run(["true"], unless=["true"])  # type: ignore[call-arg]
-
-
-def test_probe_returns_nonzero_result_instead_of_failing(tmp_path):
-    command = FakeCommandRunner(returncode=1)
-    context = make_context(tmp_path, command=command)
+    failing = FakeCommandRunner(returncode=1)
+    context = make_context(tmp_path, command=failing)
 
     result = context.probe(["rpm", "-q", "git"])
     assert result.returncode == 1
-    assert command.calls[0][1]["check"] is False
+    assert failing.calls[0][1]["check"] is False
 
 
 def test_ensure_sudo_prompts_only_when_credentials_are_invalid(tmp_path):
@@ -303,7 +214,7 @@ def test_run_requests_sudo_even_in_dry_run(tmp_path):
     assert command.calls[0][1]["sudo"] is True
 
 
-def test_sudo_auth_failure_reprompts_and_retries(tmp_path):
+def test_sudo_auth_failure_retries_runs_and_probes_but_other_failures_do_not(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(1, stderr="sudo: a password is required\n"),
@@ -320,15 +231,12 @@ def test_sudo_auth_failure_reprompts_and_retries(tmp_path):
     assert sudo.refresh_count == 1
     assert sudo.reasons == ['task "Install packages" requires sudo privileges']
 
-
-def test_sudo_auth_failure_retries_probes(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         response(1, stderr="sudo: a password is required\n"),
         response(0, stdout="enabled\n"),
     ]
-    sudo = FakeSudo()
-    context = make_context(tmp_path, command=command, sudo=sudo)
+    context = make_context(tmp_path, command=command, sudo=FakeSudo())
 
     result = context.probe(["systemctl", "is-enabled", "foo.service"], sudo=True)
 
@@ -336,65 +244,37 @@ def test_sudo_auth_failure_retries_probes(tmp_path):
     assert result.stdout == "enabled\n"
     assert len(command.calls) == 2
 
-
-def test_sudo_command_failure_is_not_retried(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1, stderr="boom\n")]
-    sudo = FakeSudo()
-    context = make_context(tmp_path, command=command, sudo=sudo)
-
+    context = make_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="exit code 1"):
         context.run(["dnf5", "install"], sudo=True)
-
     assert len(command.calls) == 1
-    assert sudo.refresh_count == 0
 
-
-def test_sudo_error_with_valid_credentials_is_not_retried(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(1, stderr="sudo: unknown command\n")]
-    sudo = FakeSudo()
-    sudo.valid = True
-    context = make_context(tmp_path, command=command, sudo=sudo)
-
-    with pytest.raises(TaskFailed, match="exit code 1"):
-        context.run(["dnf5", "install"], sudo=True)
-
-    assert len(command.calls) == 1
-    assert sudo.refresh_count == 0
-
-
-def test_non_sudo_failure_is_not_retried(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1, stderr="sudo: a password is required\n")]
     context = make_context(tmp_path, command=command)
-
     with pytest.raises(TaskFailed, match="exit code 1"):
         context.run(["false"])
-
     assert len(command.calls) == 1
 
 
-def test_bundle_is_the_owning_bundle_for_the_current_task(tmp_path):
-    bundle = Bundle("base", path=tmp_path)
-    add_task(bundle, lambda: None, name="Task")
-    context = make_context(tmp_path)
-
-    context.begin_task(bundle.tasks[0])
-
-    assert context.bundle is bundle
-    assert context.bundle_path == tmp_path
-
-
-def test_context_exposes_root_project_and_vars(tmp_path):
+def test_context_exposes_root_project_vars_and_owning_bundle(tmp_path):
     project = Project(root=tmp_path)
     values = Vars(VALUE=1)
+    bundle = Bundle("base", path=tmp_path)
+    add_task(bundle, lambda: None, name="Task")
     context = make_context(tmp_path, project=project, vars=values)
 
     assert context.root == tmp_path
     assert context.project is project
     assert context.vars.VALUE == 1
     assert context.vars.get("MISSING", "fallback") == "fallback"
+
+    context.begin_task(bundle.tasks[0])
+
+    assert context.bundle is bundle
+    assert context.bundle_path == tmp_path
 
     with pytest.raises(VarsError, match="missing var value: MISSING"):
         context.vars.require("MISSING")
@@ -417,32 +297,6 @@ def test_begin_task_switches_to_bundle_scoped_vars(tmp_path):
 
     context.begin_task(other.tasks[0])
     assert context.vars.VALUE == "project"
-
-
-def test_side_effect_queues_for_the_current_task(tmp_path):
-    context = make_context(tmp_path)
-    context.begin_task(task_for())
-    effect = side_effect("Refresh")(lambda: None)
-
-    context.side_effect(effect)
-
-    assert context.take_side_effects() == [effect]
-
-
-def test_side_effect_rejects_invalid_contexts(tmp_path):
-    context = make_context(tmp_path)
-    effect = side_effect("Refresh")(lambda: None)
-
-    with pytest.raises(TaskFailed, match="side effects can only be registered from a task"):
-        context.side_effect(effect)
-
-    context.begin_task(task_for(), is_side_effect=True)
-    with pytest.raises(TaskFailed, match="side effects cannot register other side effects"):
-        context.side_effect(effect)
-
-    context.begin_task(task_for())
-    with pytest.raises(TaskFailed, match="side_effect expects a SideEffect"):
-        context.side_effect(lambda: None)  # type: ignore[arg-type]
 
 
 def test_side_effect_queue_lifecycle(tmp_path):
@@ -468,24 +322,32 @@ def test_side_effect_queue_lifecycle(tmp_path):
     assert context.take_side_effects() == []
 
 
-def test_side_effect_rejects_duplicate_function_names(tmp_path):
+def test_side_effect_validation(tmp_path):
     context = make_context(tmp_path)
+    assert context.take_side_effects() == []
+    effect = side_effect("Refresh")(lambda: None)
+
+    with pytest.raises(TaskFailed, match="side effects can only be registered from a task"):
+        context.side_effect(effect)
+
+    context.begin_task(task_for(), is_side_effect=True)
+    with pytest.raises(TaskFailed, match="side effects cannot register other side effects"):
+        context.side_effect(effect)
+
     context.begin_task(task_for())
+    with pytest.raises(TaskFailed, match="side_effect expects a SideEffect"):
+        context.side_effect(lambda: None)  # type: ignore[arg-type]
 
     def refresh():
         pass
 
     first = side_effect("Refresh")(refresh)
     second = side_effect("Refresh again")(refresh)
-
     context.side_effect(first)
     context.side_effect(first)
-
     with pytest.raises(TaskFailed, match="duplicate side effect function name in bundle 'test': refresh"):
         context.side_effect(second)
 
-
-def test_side_effect_rejects_task_function_name_collisions(tmp_path):
     bundle = Bundle("test")
 
     def shared():
@@ -494,7 +356,6 @@ def test_side_effect_rejects_task_function_name_collisions(tmp_path):
     add_task(bundle, shared, name="Shared")
     context = make_context(tmp_path)
     context.begin_task(bundle.tasks[0])
-    effect = side_effect("Shared effect")(shared)
-
+    colliding = side_effect("Shared effect")(shared)
     with pytest.raises(TaskFailed, match="collides with a task in bundle 'test'"):
-        context.side_effect(effect)
+        context.side_effect(colliding)

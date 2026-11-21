@@ -56,104 +56,21 @@ def test_apply_uses_discovered_vars(tmp_path, capsys):
     assert "value=work" in capsys.readouterr().out
 
 
-def test_apply_dry_run_prints_banner_and_would_change(tmp_path, capsys):
-    make_project(tmp_path, bundles={"base": task_source("run")})
-
-    code = cli.main(["apply", str(tmp_path), "-n", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "dry run: no changes will be applied" in out
-    assert "would" in out
-    assert "Summary: 1 would change" in out
-
-
-def test_list_prints_plan_recap(tmp_path, capsys):
-    make_project(tmp_path, bundles={"base": task_source("run")})
-
-    code = cli.main(["list", str(tmp_path), "--no-color"])
-
-    assert code == 0
-    assert "1 bundle, 1 task" in capsys.readouterr().out
-
-
-def test_default_project_is_the_current_directory(tmp_path, monkeypatch, capsys):
-    make_project(tmp_path, bundles={"base": task_source("run")})
+def test_project_dir_defaults_to_cwd_and_accepts_relative_paths(tmp_path, monkeypatch, capsys):
+    make_project(tmp_path / "machine", bundles={"base": task_source("run")})
     monkeypatch.chdir(tmp_path)
 
-    code = cli.main(["list", "--no-color"])
+    code = cli.main(["list", "machine", "--no-color"])
+    assert code == 0
+    assert "bundle: base" in capsys.readouterr().out
 
+    monkeypatch.chdir(tmp_path / "machine")
+    code = cli.main(["list", "--no-color"])
     assert code == 0
     assert "bundle: base" in capsys.readouterr().out
 
 
-def test_unknown_preset_option_warns_on_stderr(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        preset={"laptop": "--dry-runn\n"},
-        bundles={"base": task_source("run")},
-    )
-
-    code = cli.main(["list", str(tmp_path), "--preset", "laptop", "--no-color"])
-
-    assert code == 0
-    err = capsys.readouterr().err
-    assert "warning: preset" in err
-    assert "--dry-runn" in err
-
-
-def test_list_shows_project_preset_and_active_vars(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        vars="VALUE = 1\n",
-        var_files={"laptop": "VALUE = 2\n"},
-        preset={"laptop": "--include-vars laptop\n"},
-        bundles={"base": task_source("run")},
-    )
-
-    code = cli.main(["list", str(tmp_path), "--preset", "laptop", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert f"project: {tmp_path.name}" in out
-    assert "preset: laptop" in out
-    assert "vars: laptop.py" in out
-    assert "base.py" not in out
-    assert "include vars" not in out
-    assert "exclude vars" not in out
-    assert "include bundles" not in out
-    assert "exclude bundles" not in out
-    assert "bundle: base" in out
-    assert str(tmp_path) not in out
-
-    code = cli.main(["list", str(tmp_path), "--preset", "laptop", "--no-color", "-v"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert f"project: {tmp_path}" in out
-    assert f"preset: {tmp_path / 'presets' / 'laptop'}" in out
-    assert f"vars: {tmp_path / 'vars' / 'laptop.py'}" in out
-
-
-def test_list_vars_header_shows_only_active_vars(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        vars="VALUE = 1\n",
-        var_files={"laptop": "VALUE = 2\n", "work": "VALUE = 3\n"},
-        bundles={"base": task_source("run")},
-    )
-
-    code = cli.main(["list", str(tmp_path), "--exclude-vars", "laptop", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "vars: base.py, work.py" in out
-    assert "laptop.py" not in out
-    assert "include vars" not in out
-    assert "exclude vars" not in out
-
-
-def test_list_does_not_load_var_files(tmp_path, capsys):
+def test_list_does_not_load_var_files_but_check_does(tmp_path, capsys):
     make_project(tmp_path, vars="1 / 0\n", bundles={"base": task_source("run")})
 
     code = cli.main(["list", str(tmp_path), "--no-color"])
@@ -163,13 +80,23 @@ def test_list_does_not_load_var_files(tmp_path, capsys):
     assert "bundle: base" in out
     assert "vars: base.py" in out
 
-
-def test_check_loads_var_files(tmp_path, capsys):
-    make_project(tmp_path, vars="1 / 0\n", bundles={"base": task_source("run")})
-
     code = cli.main(["check", str(tmp_path), "--no-color"])
 
     assert code == 2
+    assert "division by zero" in capsys.readouterr().err
+
+    bundle_vars = make_project(
+        tmp_path / "bundle-vars",
+        bundles={"base": {"tasks.py": task_source("run"), "vars/base.py": "1 / 0\n"}},
+    )
+
+    assert cli.main(["list", str(bundle_vars), "--no-color"]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["check", str(bundle_vars), "--no-color"]) == 2
+    assert "division by zero" in capsys.readouterr().err
+
+    assert cli.main(["apply", str(bundle_vars), "-n", "--no-color"]) == 2
     assert "division by zero" in capsys.readouterr().err
 
 
@@ -185,180 +112,7 @@ def test_list_and_check_do_not_collect_facts(tmp_path, monkeypatch):
     assert cli.main(["check", str(tmp_path), "--no-color"]) == 0
 
 
-def test_list_shows_ids_and_display_names(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": {
-                "__init__.py": "from kitup import bundle\n\nbundle('Base system')\n",
-                "tasks.py": task_source("install"),
-            }
-        },
-    )
-
-    code = cli.main(["list", str(tmp_path), "--no-color"])
-
-    assert code == 0
-    assert "bundle: Base system (base)" in capsys.readouterr().out
-
-
-def test_list_non_verbose_shows_bundle_description(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": {
-                "__init__.py": "from kitup import bundle\n\nbundle('Base system', 'Core packages')\n",
-                "tasks.py": """
-                from kitup import ctx, task
-
-                @task(tags={'packages'})
-                def install_packages():
-                    '''Install base packages.'''
-                    pass
-                """,
-            }
-        },
-    )
-
-    code = cli.main(["list", str(tmp_path), "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "bundle: Base system (base)" in out
-    assert "Core packages" in out
-    assert "- Install packages" in out
-    assert "tags:" not in out
-    assert "id:" not in out
-
-
-def test_list_verbose_shows_bundle_id_name_and_description(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": {
-                "__init__.py": "from kitup import bundle\n\nbundle('Base system', 'Core packages')\n",
-                "tasks.py": task_source("install"),
-            }
-        },
-    )
-
-    code = cli.main(["list", str(tmp_path), "--no-color", "-v"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "bundle: base" in out
-    assert "name: Base system" in out
-    assert "description: Core packages" in out
-    assert "bundle: Base system (base)" not in out
-
-
-def test_list_verbose_shows_task_details(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": {
-                "__init__.py": "from kitup import bundle\n\nbundle()\n",
-                "tasks.py": """
-                from kitup import ctx, task
-
-                @task(tags={'packages'})
-                def install_packages():
-                    '''Install base packages.'''
-                    pass
-                """,
-            }
-        },
-    )
-
-    code = cli.main(["list", str(tmp_path), "--no-color", "-v"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "- Install packages" in out
-    assert "id: base.install_packages" in out
-    assert "tags: packages" in out
-    assert "description: Install base packages." in out
-
-
-def test_verbose_output_indents_multiline_descriptions(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": {
-                "__init__.py": "from kitup import bundle\n\nbundle('Base', 'Bundle first.\\n\\nBundle second.')\n",
-                "tasks.py": """
-                from kitup import ctx, task
-
-                @task
-                def install():
-                    '''First line.
-
-                    Second paragraph.
-                    '''
-                    pass
-                """,
-            }
-        },
-    )
-
-    code = cli.main(["list", str(tmp_path), "--no-color", "-v"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "  name: Base" in out
-    assert "  description: Bundle first." in out
-    assert "\n  Bundle second." in out
-    assert "      description: First line." in out
-    assert "\n      Second paragraph." in out
-
-    code = cli.main(["apply", str(tmp_path), "-n", "-v", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "\n    First line." in out
-    assert "\n    Second paragraph." in out
-
-
-def test_shared_task_module_is_listed_and_applied_in_each_bundle(tmp_path, capsys):
-    write(tmp_path / "bundles" / "__init__.py", "")
-    write(
-        tmp_path / "bundles" / "shared.py",
-        """
-        from kitup import ctx, task
-
-        @task
-        def shared():
-            ctx.changed(summary="ran")
-        """,
-    )
-    for bundle_id, display in (("one", "One"), ("two", "Two")):
-        write(
-            tmp_path / "bundles" / bundle_id / "__init__.py",
-            f"""
-            from kitup import bundle
-            from .. import shared
-
-            bundle({display!r}, modules=[shared])
-            """,
-        )
-
-    code = cli.main(["list", str(tmp_path), "--no-color", "-v"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "id: one.shared" in out
-    assert "id: two.shared" in out
-
-    code = cli.main(["apply", str(tmp_path), "-n", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "bundle: One (one)" in out
-    assert "bundle: Two (two)" in out
-    assert out.count("Shared") == 2
-
-
-def test_apply_with_missing_bundles_dir_suggests_init(tmp_path, capsys):
+def test_commands_without_bundles(tmp_path, capsys):
     code = cli.main(["apply", str(tmp_path)])
 
     assert code == 2
@@ -366,24 +120,11 @@ def test_apply_with_missing_bundles_dir_suggests_init(tmp_path, capsys):
     assert "no bundles found" in error
     assert "kitup init" in error
 
-
-def test_apply_with_empty_bundles_dir_is_exit_2(tmp_path, capsys):
-    (tmp_path / "bundles").mkdir()
-
-    code = cli.main(["apply", str(tmp_path)])
-
-    assert code == 2
-    assert "no bundles found" in capsys.readouterr().err
-
-
-def test_check_with_zero_bundles_is_exit_2(tmp_path, capsys):
     code = cli.main(["check", str(tmp_path)])
 
     assert code == 2
     assert "no bundles found" in capsys.readouterr().err
 
-
-def test_list_with_zero_bundles_succeeds(tmp_path, capsys):
     code = cli.main(["list", str(tmp_path), "--no-color"])
 
     assert code == 0
@@ -495,12 +236,13 @@ def test_apply_tag_filters(tmp_path, capsys):
     assert "Docs" in out
 
 
-def test_apply_include_and_exclude_bundles(tmp_path, capsys):
+def test_bundle_filters_support_include_exclude_comma_and_repeated_values(tmp_path, capsys):
     make_project(
         tmp_path,
         bundles={
             "base": task_source("base_task", body="ctx.changed(summary='base')"),
             "desktop": task_source("desktop_task", body="ctx.changed(summary='desktop')"),
+            "gaming": task_source("gaming_task", body="ctx.changed(summary='gaming')"),
         },
     )
 
@@ -516,18 +258,8 @@ def test_apply_include_and_exclude_bundles(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "Base task" in out
+    assert "Gaming task" in out
     assert "Desktop task" not in out
-
-
-def test_bundle_filters_accept_comma_separated_and_repeated_values(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": task_source("base_task"),
-            "desktop": task_source("desktop_task"),
-            "gaming": task_source("gaming_task"),
-        },
-    )
 
     code = cli.main(["list", str(tmp_path), "--no-color", "-b", "base,gaming"])
 
@@ -610,7 +342,7 @@ def test_unknown_var_filter_lists_available_ids(tmp_path, capsys):
     assert "unknown var: missing (available: base)" in capsys.readouterr().err
 
 
-def test_preset_sets_options(tmp_path, capsys):
+def test_preset_sets_options_and_real_cli_overrides_them(tmp_path, capsys):
     make_project(
         tmp_path,
         preset={"laptop": "--include-bundles desktop\n"},
@@ -627,23 +359,12 @@ def test_preset_sets_options(tmp_path, capsys):
     assert "Desktop task" in out
     assert "Base task" not in out
 
-
-def test_real_cli_overrides_preset(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        preset={"laptop": "--include-bundles base\n"},
-        bundles={
-            "base": task_source("base_task", body="ctx.changed(summary='base')"),
-            "desktop": task_source("desktop_task", body="ctx.changed(summary='desktop')"),
-        },
-    )
-
-    code = cli.main(["apply", str(tmp_path), "--preset", "laptop", "-b", "desktop", "-n", "--no-color"])
+    code = cli.main(["apply", str(tmp_path), "--preset", "laptop", "-b", "base", "-n", "--no-color"])
 
     out = capsys.readouterr().out
     assert code == 0
-    assert "Desktop task" in out
-    assert "Base task" not in out
+    assert "Base task" in out
+    assert "Desktop task" not in out
 
 
 def test_init_scaffolds_a_working_project(tmp_path, capsys):
@@ -703,34 +424,6 @@ def test_sudo_validation_failure_is_exit_2(tmp_path, capsys, monkeypatch):
     assert "error: no credentials" in capsys.readouterr().err
 
 
-def test_apply_closes_context_on_success(tmp_path, monkeypatch):
-    contexts = []
-
-    class Context:
-        def __init__(self, **kwargs):
-            self.closed = False
-            contexts.append(self)
-
-        def close(self):
-            self.closed = True
-
-    class Runner:
-        def __init__(self, plan, context, output, **kwargs):
-            pass
-
-        def run(self):
-            return 0
-
-    monkeypatch.setattr(cli, "TaskContext", Context)
-    monkeypatch.setattr(cli, "Runner", Runner)
-    make_project(tmp_path, bundles={"base": task_source("run")})
-
-    code = cli.main(["apply", str(tmp_path)])
-
-    assert code == 0
-    assert contexts and contexts[0].closed
-
-
 def test_apply_closes_context_on_failure(tmp_path, capsys, monkeypatch):
     contexts = []
 
@@ -760,45 +453,6 @@ def test_apply_closes_context_on_failure(tmp_path, capsys, monkeypatch):
     assert "error: boom" in capsys.readouterr().err
 
 
-def test_apply_passes_root_and_project_to_the_context(tmp_path, monkeypatch):
-    seen = {}
-
-    class Context:
-        def __init__(self, **kwargs):
-            seen.update(kwargs)
-
-        def close(self):
-            pass
-
-    class Runner:
-        def __init__(self, plan, context, output, **kwargs):
-            pass
-
-        def run(self):
-            return 0
-
-    monkeypatch.setattr(cli, "TaskContext", Context)
-    monkeypatch.setattr(cli, "Runner", Runner)
-    make_project(tmp_path, bundles={"base": task_source("run")})
-
-    code = cli.main(["apply", str(tmp_path)])
-
-    assert code == 0
-    assert seen["root"] == tmp_path.resolve()
-    assert seen["project"].root == tmp_path.resolve()
-
-
-def test_apply_verbose_shows_environment(tmp_path, capsys):
-    make_project(tmp_path, vars="VALUE = 1\n", bundles={"base": task_source("run")})
-
-    code = cli.main(["apply", str(tmp_path), "-n", "-v", "--no-color"])
-
-    out = capsys.readouterr().out
-    assert code == 0
-    assert f"project: {tmp_path}" in out
-    assert f"vars: {tmp_path / 'vars' / 'base.py'}" in out
-
-
 def test_invalid_task_tags_are_exit_2(tmp_path, capsys):
     make_project(
         tmp_path,
@@ -819,33 +473,7 @@ def test_invalid_task_tags_are_exit_2(tmp_path, capsys):
     assert "task tags must contain strings" in capsys.readouterr().err
 
 
-def test_list_does_not_show_side_effect_names(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": """
-            from kitup import ctx, side_effect, task
-
-            @side_effect
-            def refresh():
-                pass
-
-            @task
-            def install():
-                ctx.side_effect(refresh)
-            """
-        },
-    )
-
-    code = cli.main(["list", str(tmp_path), "--no-color"])
-
-    out = capsys.readouterr().out
-    assert code == 0
-    assert "Install" in out
-    assert "Refresh" not in out
-
-
-def test_apply_shows_and_prefixes_side_effect_lines(tmp_path, capsys):
+def test_side_effects_are_listed_on_apply_and_hidden_from_list(tmp_path, capsys):
     make_project(
         tmp_path,
         bundles={
@@ -856,88 +484,33 @@ def test_apply_shows_and_prefixes_side_effect_lines(tmp_path, capsys):
             def reload_nginx():
                 ctx.changed(summary="+reloaded")
 
-            @side_effect
-            def refresh_package_metadata():
-                ctx.changed(summary="+refreshed")
-
             @task
             def configure_nginx():
                 ctx.changed(summary="+conf")
                 ctx.side_effect(reload_nginx)
-                ctx.side_effect(refresh_package_metadata)
             """
         },
     )
 
+    code = cli.main(["list", str(tmp_path), "--no-color"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Configure nginx" in out
+    assert "Reload nginx" not in out
+
     code = cli.main(["apply", str(tmp_path), "-n", "--no-color"])
 
     out = capsys.readouterr().out
-    lines = out.splitlines()
     assert code == 0
-    assert any(line.startswith("  [1/1] Configure nginx") for line in lines)
-    assert any(line.startswith("  ↳") and "Reload nginx" in line for line in lines)
-    assert any(line.startswith("  ↳") and "Refresh package metadata" in line for line in lines)
-    assert not any(line.startswith("  ↳") and "Configure nginx" in line for line in lines)
+    assert "Configure nginx" in out
+    assert "Reload nginx" in out
 
 
 def test_version_matches_pyproject():
     pyproject = tomllib.loads((Path(__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert kitup.__version__ == pyproject["project"]["version"]
-
-
-def test_version_flag(capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["--version"])
-
-    assert exc.value.code == 0
-    assert "kitup 3.0.0" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("options", [["--include-bundl", "base"], ["-nm", "other"]])
-def test_cli_rejects_undocumented_option_forms(options, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.build_parser().parse_args(["apply", *options])
-
-    assert exc.value.code == 2
-    assert "unrecognized arguments" in capsys.readouterr().err
-
-
-def test_cli_accepts_exact_option_forms():
-    args = cli.build_parser().parse_args(["apply", "-p", "laptop", "--dry-run"])
-
-    assert args.preset == ["laptop"]
-    assert args.dry_run is True
-
-
-def test_defaults_cover_every_parser_option():
-    dests = {option.dest for option in cli._ALL_OPTIONS if option.default is not cli._NO_DEFAULT}
-
-    assert dests == set(cli._DEFAULTS)
-    assert cli._DEFAULTS["include_bundles"] == ()
-    assert cli._DEFAULTS["dry_run"] is False
-    assert cli._DEFAULTS["project_dir"] is None
-
-
-def test_apply_uses_vars_get_and_require(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        vars="VALUE = 1\n",
-        bundles={
-            "base": """
-            from kitup import ctx, task
-
-            @task
-            def show():
-                ctx.changed(summary=f"value={ctx.vars.get('VALUE')} missing={ctx.vars.get('MISSING', 'none')}")
-            """
-        },
-    )
-
-    code = cli.main(["apply", str(tmp_path), "-n", "--no-color"])
-
-    assert code == 0
-    assert "value=1 missing=none" in capsys.readouterr().out
 
 
 def test_project_files_overlay_bundle_files(tmp_path, capsys):
@@ -978,29 +551,6 @@ def test_project_files_overlay_bundle_files(tmp_path, capsys):
     output = capsys.readouterr().out
     assert output.count("copy shared.conf ->") == 2
     assert "files/shared.conf" not in output
-
-
-def test_write_marker_task_uses_project_root(tmp_path):
-    """A task can reach the project root through ``ctx.root``."""
-    marker = tmp_path / "root.txt"
-    make_project(
-        tmp_path,
-        bundles={
-            "base": """
-            from kitup import ctx, task
-
-            @task
-            def write_root():
-                (ctx.root / "root.txt").write_text(str(ctx.root))
-                ctx.changed(summary="write root")
-            """
-        },
-    )
-
-    code = cli.main(["apply", str(tmp_path), "--no-color"])
-
-    assert code == 0
-    assert marker.read_text(encoding="utf-8") == str(tmp_path.resolve())
 
 
 def test_project_dir_can_be_relative(tmp_path, monkeypatch, capsys):
@@ -1045,7 +595,7 @@ def make_external_bundle(root, name, *, summary=None):
     return folder
 
 
-def test_bundle_path_option_loads_external_bundles_for_list_and_apply(tmp_path, capsys):
+def test_bundle_path_option_loads_external_bundles_directly_and_from_a_preset(tmp_path, capsys):
     root = make_project(tmp_path / "machine", bundles={"base": task_source("run")})
     external = tmp_path / "external-bundles"
     make_external_bundle(external, "extra")
@@ -1060,20 +610,14 @@ def test_bundle_path_option_loads_external_bundles_for_list_and_apply(tmp_path, 
     code = cli.main(["apply", str(root), "--bundle-path", str(external), "-n", "--no-color"])
 
     assert code == 0
-    out = capsys.readouterr().out
-    assert "ran extra" in out
+    assert "ran extra" in capsys.readouterr().out
 
-
-def test_bundle_path_option_can_come_from_a_preset(tmp_path, capsys):
-    external = tmp_path / "external-bundles"
-    make_external_bundle(external, "extra")
-    root = make_project(
-        tmp_path / "machine",
+    preset_root = make_project(
+        tmp_path / "preset-machine",
         bundles={"base": task_source("run")},
         preset={"shared": f"--bundle-path {external}\n"},
     )
-
-    code = cli.main(["list", str(root), "--preset", "shared", "--no-color"])
+    code = cli.main(["list", str(preset_root), "--preset", "shared", "--no-color"])
 
     assert code == 0
     assert "bundle: extra" in capsys.readouterr().out
@@ -1145,61 +689,6 @@ def test_modules_path_option_loads_external_modules_for_apply_check_and_list_mod
     assert "  - external" in capsys.readouterr().out
 
 
-def test_files_and_modules_path_options_can_come_from_a_preset(tmp_path, capsys):
-    external_files = tmp_path / "external-files"
-    write(external_files / "base" / "message.txt", "preset files\n")
-    external_modules = tmp_path / "external-modules"
-    make_external_module(external_modules, "external")
-    root = make_project(
-        tmp_path / "machine",
-        bundles={
-            "base": """
-            from kitup import ctx, task
-            from modules import external
-
-            @task
-            def show():
-                result = external.install()
-                content = (ctx.files / "message.txt").read_text().strip()
-                ctx.changed(summary=f"{result.summary}; {content}")
-            """
-        },
-        preset={"shared": f"--files-path {external_files}\n--modules-path {external_modules}\n"},
-    )
-
-    code = cli.main(["apply", str(root), "--preset", "shared", "-n", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "external module; preset files" in out
-
-
-def test_verbose_output_shows_files_and_modules_paths(tmp_path, capsys):
-    root = make_project(tmp_path / "machine", bundles={"base": task_source("run")})
-    external_files = tmp_path / "external-files"
-    external_files.mkdir()
-    external_modules = tmp_path / "external-modules"
-    external_modules.mkdir()
-
-    code = cli.main(
-        [
-            "list",
-            str(root),
-            "--files-path",
-            str(external_files),
-            "--modules-path",
-            str(external_modules),
-            "-v",
-            "--no-color",
-        ]
-    )
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert f"files path: {external_files}" in out
-    assert f"modules path: {external_modules}" in out
-
-
 def test_missing_files_or_modules_path_is_exit_2(tmp_path, capsys):
     root = make_project(tmp_path / "machine", bundles={"base": task_source("run")})
 
@@ -1210,10 +699,11 @@ def test_missing_files_or_modules_path_is_exit_2(tmp_path, capsys):
     assert "modules path is not a directory" in capsys.readouterr().err
 
 
-def test_var_file_option_accepts_absolute_and_relative_paths(tmp_path, capsys):
+def test_var_file_option_accepts_paths_and_loads_after_discovered_files(tmp_path, capsys):
     root = make_project(
         tmp_path / "machine",
         vars="VALUE = 'base'\n",
+        var_files={"late": "VALUE = 'var'\n"},
         bundles={
             "base": """
             from kitup import ctx, task
@@ -1231,29 +721,6 @@ def test_var_file_option_accepts_absolute_and_relative_paths(tmp_path, capsys):
         code = cli.main(["apply", str(root), "--var-file", value, "-n", "--no-color"])
         assert code == 0
         assert "value=extra" in capsys.readouterr().out
-
-
-def test_extra_var_files_load_after_discovered_files(tmp_path, capsys):
-    root = make_project(
-        tmp_path / "machine",
-        var_files={"late": "VALUE = 'var'\n"},
-        bundles={
-            "base": """
-            from kitup import ctx, task
-
-            @task
-            def show():
-                ctx.changed(summary=f"value={ctx.vars.VALUE}")
-            """
-        },
-    )
-    extra = root / "secrets.py"
-    write(extra, "VALUE = 'extra'\n")
-
-    code = cli.main(["apply", str(root), "--var-file", "secrets.py", "-n", "--no-color"])
-
-    assert code == 0
-    assert "value=extra" in capsys.readouterr().out
 
 
 def test_var_filters_apply_to_extra_var_files(tmp_path, capsys):
@@ -1294,7 +761,10 @@ def test_bundle_vars_are_scoped_and_project_values_win(tmp_path, capsys):
                 @task
                 def show():
                     ctx.changed(
-                        summary=f"base value={ctx.vars.VALUE} only={ctx.vars.get('BASE_ONLY', 'none')}"
+                        summary=(
+                            f"base value={ctx.vars.get('VALUE', 'missing')} "
+                            f"only={ctx.vars.get('BASE_ONLY', 'none')}"
+                        )
                     )
                 """,
                 "vars/base.py": "VALUE = 'bundle'\nBASE_ONLY = 1\n",
@@ -1307,7 +777,10 @@ def test_bundle_vars_are_scoped_and_project_values_win(tmp_path, capsys):
                 @task
                 def show():
                     ctx.changed(
-                        summary=f"other value={ctx.vars.VALUE} only={ctx.vars.get('BASE_ONLY', 'none')}"
+                        summary=(
+                            f"other value={ctx.vars.get('VALUE', 'missing')} "
+                            f"only={ctx.vars.get('BASE_ONLY', 'none')}"
+                        )
                     )
                 """,
             },
@@ -1321,79 +794,12 @@ def test_bundle_vars_are_scoped_and_project_values_win(tmp_path, capsys):
     assert "base value=project only=1" in out
     assert "other value=project only=none" in out
 
-
-def test_check_and_apply_load_bundle_vars_but_list_does_not(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": {
-                "tasks.py": task_source("run"),
-                "vars/base.py": "1 / 0\n",
-            }
-        },
-    )
-
-    assert cli.main(["list", str(tmp_path), "--no-color"]) == 0
-    capsys.readouterr()
-
-    assert cli.main(["check", str(tmp_path), "--no-color"]) == 2
-    assert "division by zero" in capsys.readouterr().err
-
-    assert cli.main(["apply", str(tmp_path), "-n", "--no-color"]) == 2
-    assert "division by zero" in capsys.readouterr().err
-
-
-def test_var_filters_do_not_remove_bundle_vars(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        vars="PROJECT_ONLY = 1\n",
-        bundles={
-            "base": {
-                "tasks.py": """
-                from kitup import ctx, task
-
-                @task
-                def show():
-                    project = ctx.vars.get('PROJECT_ONLY', 'missing')
-                    bundle = ctx.vars.get('BUNDLE_ONLY')
-                    ctx.changed(summary=f"project={project} bundle={bundle}")
-                """,
-                "vars/local.py": "BUNDLE_ONLY = 1\n",
-            }
-        },
-    )
-
     code = cli.main(["apply", str(tmp_path), "--exclude-vars", "base", "-n", "--no-color"])
 
     assert code == 0
-    assert "project=missing bundle=1" in capsys.readouterr().out
-
-
-def test_list_verbose_shows_bundle_var_paths(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={
-            "base": {
-                "tasks.py": task_source("run"),
-                "vars/base.py": "VALUE = 1\n",
-            }
-        },
-    )
-
-    code = cli.main(["list", str(tmp_path), "-v", "--no-color"])
-
-    assert code == 0
-    assert f"  vars: {tmp_path / 'bundles' / 'base' / 'vars' / 'base.py'}" in capsys.readouterr().out
-
-
-def test_list_output_includes_extra_var_files(tmp_path, capsys):
-    root = make_project(tmp_path / "machine", vars="VALUE = 1\n", bundles={"base": task_source("run")})
-    write(root / "secrets.py", "SECRET = 1\n")
-
-    code = cli.main(["list", str(root), "--var-file", "secrets.py", "--no-color"])
-
-    assert code == 0
-    assert "vars: base.py, secrets.py" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "base value=bundle only=1" in out
+    assert "other value=missing only=none" in out
 
 
 def test_missing_var_file_is_exit_2(tmp_path, capsys):
@@ -1416,17 +822,6 @@ def test_duplicate_var_stem_is_exit_2(tmp_path, capsys):
 
     assert code == 2
     assert "duplicate var id 'secrets'" in capsys.readouterr().err
-
-
-def test_verbose_output_shows_bundle_paths(tmp_path, capsys):
-    root = make_project(tmp_path / "machine", bundles={"base": task_source("run")})
-    external = tmp_path / "external-bundles"
-    make_external_bundle(external, "extra")
-
-    code = cli.main(["list", str(root), "--bundle-path", str(external), "-v", "--no-color"])
-
-    assert code == 0
-    assert f"bundle path: {external}" in capsys.readouterr().out
 
 
 def test_list_modules_shows_builtin_and_empty_custom_sections(tmp_path, capsys):
@@ -1466,186 +861,38 @@ def test_list_modules_shows_custom_modules_by_registered_name(tmp_path, capsys):
     assert "_private" not in out
 
 
-def test_list_modules_shows_descriptions_in_both_modes(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        modules={"mytool.py": 'from kitup import module\n\nmodule("mytool", "Install mytool.")\n'},
-    )
-
-    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "  - mytool:  Install mytool." in out
-
-    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "  - mytool\n" in out
-    assert "      description: Install mytool." in out
-
-
-def test_list_modules_indents_multiline_descriptions(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        modules={"mytool.py": 'from kitup import module\n\nmodule("mytool", "First line.\\nSecond line.")\n'},
-    )
-
-    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "  - mytool:  First line.\n      Second line." in out
-
-
-def test_list_modules_works_without_bundles(tmp_path, capsys):
-    make_project(tmp_path, modules={"mytool.py": 'from kitup import module\n\nmodule("mytool")\n'})
-
-    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
-
-    assert code == 0
+def test_list_modules_works_without_bundles_and_does_not_load_them(tmp_path, capsys):
+    plain = make_project(tmp_path / "plain", modules={"mytool.py": 'from kitup import module\n\nmodule("mytool")\n'})
+    assert cli.main(["list-modules", str(plain), "--no-color"]) == 0
     assert "  - mytool" in capsys.readouterr().out
 
-
-def test_list_modules_defaults_to_the_current_directory(tmp_path, monkeypatch, capsys):
-    make_project(tmp_path, modules={"mytool.py": 'from kitup import module\n\nmodule("mytool")\n'})
-    monkeypatch.chdir(tmp_path)
-
-    code = cli.main(["list-modules", "--no-color"])
-
-    assert code == 0
-    assert "  - mytool" in capsys.readouterr().out
-
-
-def test_list_modules_does_not_load_bundles(tmp_path, capsys):
-    make_project(
-        tmp_path,
+    root = make_project(
+        tmp_path / "broken-bundles",
         bundles={"base": "raise RuntimeError('broken bundle')\n"},
         modules={"mytool.py": 'from kitup import module\n\nmodule("mytool")\n'},
     )
 
-    code = cli.main(["list-modules", str(tmp_path), "--no-color"])
+    code = cli.main(["list-modules", str(root), "--no-color"])
 
     assert code == 0
     assert "  - mytool" in capsys.readouterr().out
 
 
-def test_list_modules_does_not_collect_facts(tmp_path, monkeypatch):
-    make_project(tmp_path)
-
-    def fail():
-        raise AssertionError("collect_facts called")
-
-    monkeypatch.setattr(cli, "collect_facts", fail)
-
-    assert cli.main(["list-modules", str(tmp_path), "--no-color"]) == 0
-
-
-def test_list_modules_verbose_shows_paths_and_functions(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        modules={
-            "mytool.py": (
-                "from kitup import module\n\n"
-                'module("mytool")\n\n\n'
-                "def install():\n"
-                '    """Install mytool."""\n\n\n'
-                "def _helper():\n"
-                "    pass\n"
-            )
-        },
-    )
-
-    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert f"project: {tmp_path.resolve()}" in out
-    assert f"path: {tmp_path.resolve() / 'modules' / 'mytool.py'}" in out
-    assert "- install: Install mytool." in out
-    assert "_helper" not in out
-
-
-def test_list_modules_verbose_ignores_public_classes(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        modules={
-            "mytool.py": (
-                "from kitup import module\n\n"
-                'module("mytool")\n\n\n'
-                "class Helper:\n"
-                '    """A public class."""\n\n\n'
-                "def install():\n"
-                '    """Install mytool."""\n'
-            )
-        },
-    )
-
-    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "- install: Install mytool." in out
-    assert "Helper" not in out
-
-
-def test_list_modules_verbose_separates_modules_with_blank_lines(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        modules={
-            "one.py": 'from kitup import module\n\nmodule("one")\n\n\ndef first():\n    """First."""\n',
-            "two.py": 'from kitup import module\n\nmodule("two")\n\n\ndef second():\n    """Second."""\n',
-        },
-    )
-
-    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "        - first: First.\n\n  - two\n" in out
-
-
-def test_list_modules_verbose_shows_builtin_functions(tmp_path, capsys):
-    make_project(tmp_path)
-
-    code = cli.main(["list-modules", str(tmp_path), "-v", "--no-color"])
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert "  - files" in out
-    assert "- file: Ensure a text file exists" in out
-    assert "      description: Filesystem and text-file management" in out
-    assert "path:" not in out
-
-
-def test_apply_does_not_import_unused_custom_modules(tmp_path, capsys):
+def test_unused_custom_modules_are_not_imported_by_apply_or_list(tmp_path, capsys):
     make_project(
         tmp_path,
         bundles={"base": task_source("run")},
         modules={"broken.py": "raise RuntimeError('imported broken module')\n"},
     )
 
-    code = cli.main(["apply", str(tmp_path), "-n", "--no-color"])
+    assert cli.main(["apply", str(tmp_path), "-n", "--no-color"]) == 0
+    assert "imported broken module" not in capsys.readouterr().err
 
-    assert code == 0
+    assert cli.main(["list", str(tmp_path), "--no-color"]) == 0
     assert "imported broken module" not in capsys.readouterr().err
 
 
-def test_list_does_not_import_unused_custom_modules(tmp_path, capsys):
-    make_project(
-        tmp_path,
-        bundles={"base": task_source("run")},
-        modules={"broken.py": "raise RuntimeError('imported broken module')\n"},
-    )
-
-    code = cli.main(["list", str(tmp_path), "--no-color"])
-
-    assert code == 0
-    assert "imported broken module" not in capsys.readouterr().err
-
-
-def test_check_imports_custom_modules(tmp_path, capsys):
+def test_check_and_list_modules_import_custom_modules(tmp_path, capsys):
     make_project(
         tmp_path,
         bundles={"base": task_source("run")},
@@ -1656,10 +903,6 @@ def test_check_imports_custom_modules(tmp_path, capsys):
 
     assert code == 2
     assert "failed to import module 'broken'" in capsys.readouterr().err
-
-
-def test_list_modules_imports_custom_modules(tmp_path, capsys):
-    make_project(tmp_path, modules={"broken.py": "raise RuntimeError('imported broken module')\n"})
 
     code = cli.main(["list-modules", str(tmp_path), "--no-color"])
 

@@ -55,26 +55,23 @@ def patch_popen_raises(monkeypatch, error):
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
 
-def test_command_captures_output(monkeypatch):
-    patch_popen(monkeypatch, FakeProcess(stdout="hello"))
+def test_command_captures_output_argv_and_process_group(monkeypatch):
+    calls = patch_popen(monkeypatch, FakeProcess(stdout="hello"))
     runner = CommandRunner(PrivilegeManager())
 
     result = runner.run(["tool"])
 
     assert result.returncode == 0
     assert result.stdout == "hello"
+    assert calls[0][1]["process_group"] == 0
+    assert "start_new_session" not in calls[0][1]
 
-
-def test_single_string_is_one_argument(monkeypatch):
     calls = patch_popen(monkeypatch, FakeProcess())
-    runner = CommandRunner(PrivilegeManager())
-
     runner.run("tool --flag")
-
     assert calls[0][0] == ["tool --flag"]
 
 
-def test_nonzero_exit_raises_task_failed(monkeypatch):
+def test_nonzero_exit_raises_or_can_be_probed(monkeypatch):
     patch_popen(monkeypatch, FakeProcess(returncode=3, stderr="oops"))
     runner = CommandRunner(PrivilegeManager())
 
@@ -85,8 +82,6 @@ def test_nonzero_exit_raises_task_failed(monkeypatch):
     assert "exit code 3" in exc.value.message
     assert exc.value.stderr == "oops"
 
-
-def test_nonzero_exit_can_be_probed(monkeypatch):
     patch_popen(monkeypatch, FakeProcess(returncode=4))
     runner = CommandRunner(PrivilegeManager())
 
@@ -95,7 +90,7 @@ def test_nonzero_exit_can_be_probed(monkeypatch):
     assert result.returncode == 4
 
 
-def test_unstartable_command_can_be_probed(monkeypatch):
+def test_unstartable_command_can_be_probed_or_checked(monkeypatch):
     patch_popen_raises(monkeypatch, FileNotFoundError(2, "No such file or directory", "missing"))
     runner = CommandRunner(PrivilegeManager())
 
@@ -105,23 +100,11 @@ def test_unstartable_command_can_be_probed(monkeypatch):
     assert result.returncode == 127
     assert "could not run missing" in result.stderr
 
-
-def test_unstartable_command_raises_when_checked(monkeypatch):
     patch_popen_raises(monkeypatch, FileNotFoundError(2, "No such file or directory", "missing"))
     runner = CommandRunner(PrivilegeManager())
 
     with pytest.raises(TaskFailed, match="could not run missing"):
         runner.run(["missing"])
-
-
-def test_commands_use_a_process_group_without_a_new_session(monkeypatch):
-    calls = patch_popen(monkeypatch, FakeProcess())
-    runner = CommandRunner(PrivilegeManager())
-
-    runner.run(["true"])
-
-    assert calls[0][1]["process_group"] == 0
-    assert "start_new_session" not in calls[0][1]
 
 
 def test_stdin_is_piped_to_the_process(monkeypatch):
@@ -141,7 +124,7 @@ def test_stdin_is_piped_to_the_process(monkeypatch):
     assert received == ["secret\n"]
 
 
-def test_sudo_is_wrapped(monkeypatch):
+def test_sudo_is_wrapped_and_checks_availability(monkeypatch):
     calls = patch_popen(monkeypatch, FakeProcess())
     sudo = FakeSudo()
     runner = CommandRunner(sudo)  # type: ignore[arg-type]
@@ -149,17 +132,8 @@ def test_sudo_is_wrapped(monkeypatch):
     runner.run(["dnf5", "install"], sudo=True)
 
     assert sudo.refresh_count == 0
-    assert calls[0][0] == ["sudo", "-n", "--", "dnf5", "install"]
-
-
-def test_sudo_checks_availability(monkeypatch):
-    patch_popen(monkeypatch, FakeProcess())
-    sudo = FakeSudo()
-    runner = CommandRunner(sudo)  # type: ignore[arg-type]
-
-    runner.run(["dnf5", "install"], sudo=True)
-
     assert sudo.require_count == 1
+    assert calls[0][0] == ["sudo", "-n", "--", "dnf5", "install"]
 
 
 def test_timeout_kills_the_process_group(monkeypatch):

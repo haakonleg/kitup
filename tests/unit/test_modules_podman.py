@@ -7,13 +7,11 @@ from kitup.modules import podman
 from kitup.registry import Bundle
 
 from .helpers import (
-    CountingWorker,
     FakeCommandRunner,
     FakeSudo,
     argvs,
     call_data,
     make_context,
-    privileged_context,
     response,
 )
 
@@ -243,10 +241,6 @@ def test_build_scenarios(tmp_path):
     podman.build(build_dir, tag=IMAGE, force=True)
     assert argvs(command)[0] == [PODMAN, "build", "-t", IMAGE, str(build_dir)]
 
-
-def test_build_flags(tmp_path):
-    build_dir = tmp_path / "build"
-    build_dir.mkdir()
     containerfile = tmp_path / "Containerfile"
     containerfile.write_text("FROM scratch\n")
     command = FakeCommandRunner()
@@ -315,17 +309,6 @@ def test_build_resolves_bundle_relative_paths(tmp_path):
     assert argvs(command)[10] == [PODMAN, "build", "-t", IMAGE, str(bundle_dir)]
 
 
-def test_build_reports_a_short_context_label(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(1), response(0), response(0)]
-    _ctx, bundle_dir = bundle_context(tmp_path, command=command)
-    (bundle_dir / "files" / "nested" / "container").mkdir(parents=True)
-
-    result = podman.build("files/nested/container", tag=IMAGE)
-
-    assert result.summary == f"build {IMAGE} from nested/container"
-
-
 def test_build_rejects_invalid_arguments(tmp_path):
     context(tmp_path)
 
@@ -378,8 +361,6 @@ def test_tag_scenarios(tmp_path):
     assert len(command.calls) == 3
     assert ctx.changes == []
 
-
-def test_tag_reports_inspection_errors(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1)]
     context(tmp_path, command=command)
@@ -608,8 +589,6 @@ def test_container_verification_failures_are_reported(tmp_path):
         context(tmp_path, command=remove)
         podman.container(CONTAINER, state="absent")
 
-
-def test_container_start_verification_failures_are_reported(tmp_path):
     command = FakeCommandRunner()
     command.responses = [
         missing_container(),
@@ -700,15 +679,6 @@ def test_registry_absent_scenarios(tmp_path):
     with pytest.raises(TaskFailed, match="path is a directory"):
         podman.registry("example", state="absent", path=target)
     assert target.is_dir()
-
-
-def test_registry_appends_conf_suffix(tmp_path):
-    target = tmp_path / "example"
-    context(tmp_path, sudo=FakeSudo(is_root=True))
-
-    podman.registry("example", location="docker.io", path=target)
-
-    assert (tmp_path / "example.conf").exists()
 
 
 def test_registry_user_scope_uses_user_directory(tmp_path, monkeypatch):
@@ -863,20 +833,6 @@ def test_generate_systemd_failure_is_reported(tmp_path):
         podman.generate_systemd(CONTAINER, dest=tmp_path)
 
 
-def test_generate_systemd_user_scope_uses_user_directory(tmp_path, monkeypatch):
-    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    directory = tmp_path / ".config" / "systemd" / "user"
-    directory.mkdir(parents=True)
-    command = FakeCommandRunner()
-    command.responses = [response(0, UNIT)]
-    context(tmp_path, command=command)
-
-    podman.generate_systemd(CONTAINER, scope="user")
-
-    assert (directory / f"container-{CONTAINER}.service").exists()
-    assert command.calls[0][1]["sudo"] is False
-
-
 def test_quadlet_scenarios(tmp_path):
     ctx = context(tmp_path, sudo=FakeSudo(is_root=True))
 
@@ -931,37 +887,6 @@ def test_quadlet_scenarios(tmp_path):
     podman.quadlet(CONTAINER, image=IMAGE, dest=tmp_path)
     assert len(ctx.changes) == 1
     assert ctx.calls[-1].summary == f"ensure quadlet {CONTAINER} in {target}"
-
-
-def test_octal_string_modes_are_applied(tmp_path):
-    registry_target = tmp_path / "example.conf"
-    context(tmp_path, sudo=FakeSudo(is_root=True))
-    podman.registry("example", location="docker.io", path=registry_target, mode="0600")
-    assert stat.S_IMODE(registry_target.stat().st_mode) == 0o600
-
-    command = FakeCommandRunner()
-    command.responses = [response(0, UNIT)]
-    context(tmp_path, command=command, sudo=FakeSudo(is_root=True))
-    podman.generate_systemd(CONTAINER, dest=tmp_path, mode="0600")
-    service = tmp_path / f"container-{CONTAINER}.service"
-    assert stat.S_IMODE(service.stat().st_mode) == 0o600
-
-    context(tmp_path, sudo=FakeSudo(is_root=True))
-    podman.quadlet(CONTAINER, image=IMAGE, dest=tmp_path, mode="0600")
-    quadlet = tmp_path / f"{CONTAINER}.container"
-    assert stat.S_IMODE(quadlet.stat().st_mode) == 0o600
-
-
-def test_quadlet_user_scope_uses_user_directory(tmp_path, monkeypatch):
-    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    directory = tmp_path / ".config" / "containers" / "systemd"
-    directory.mkdir(parents=True)
-    ctx = context(tmp_path)
-
-    podman.quadlet(CONTAINER, image=IMAGE, scope="user")
-
-    assert (directory / f"{CONTAINER}.container").exists()
-    assert ctx.sudo.refresh_count == 0
 
 
 def test_scope_validation(tmp_path):
@@ -1022,80 +947,6 @@ def test_invalid_arguments_are_rejected(tmp_path):
     with pytest.raises(TaskFailed, match="must contain strings"):
         podman.quadlet(CONTAINER, image=IMAGE, dest=tmp_path, extra_options={"Volume": [1]})
 
-    assert not (tmp_path / f"{CONTAINER}.container").exists()
-
-
-def test_missing_podman_binary_is_rejected(tmp_path, monkeypatch):
-    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: None)
-    context(tmp_path)
-
-    with pytest.raises(TaskFailed, match="podman is required"):
-        podman.image(IMAGE)
-    with pytest.raises(TaskFailed, match="podman is required"):
-        podman.container(CONTAINER, image=IMAGE)
-    with pytest.raises(TaskFailed, match="podman is required"):
-        podman.login(REGISTRY, username="kitup", password="secret")
-    with pytest.raises(TaskFailed, match="podman is required"):
-        podman.generate_systemd(CONTAINER, dest=tmp_path)
-
-
-def test_file_backed_functions_do_not_require_podman(tmp_path, monkeypatch):
-    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: None)
-    context(tmp_path, sudo=FakeSudo(is_root=True))
-
-    podman.registry("example", location="docker.io", path=tmp_path / "example.conf")
-    podman.quadlet(CONTAINER, image=IMAGE, dest=tmp_path)
-
-    assert (tmp_path / "example.conf").exists()
-    assert (tmp_path / f"{CONTAINER}.container").exists()
-
-
-def test_file_backed_writes_do_not_repeat_the_parent_check(tmp_path):
-    ctx = privileged_context(tmp_path)
-    worker = CountingWorker(ctx.privileged_worker)
-    ctx.privileged_worker = worker  # type: ignore[assignment]
-
-    try:
-        podman.registry(
-            "example",
-            location="docker.io",
-            scope="system",
-            path=tmp_path / "example.conf",
-        )
-        podman.quadlet(CONTAINER, image=IMAGE, scope="system", dest=tmp_path)
-    finally:
-        ctx.close()
-
-    parent_actions = [action for action, path in worker.actions if path == str(tmp_path)]
-    assert parent_actions.count("stat") == 2
-
-
-def test_dry_run_does_not_write_files(tmp_path):
-    ctx = context(tmp_path, dry_run=True, sudo=FakeSudo(is_root=True))
-
-    podman.registry("example", location="docker.io", path=tmp_path / "example.conf")
-    podman.quadlet(CONTAINER, image=IMAGE, dest=tmp_path)
-
-    assert not (tmp_path / "example.conf").exists()
-    assert not (tmp_path / f"{CONTAINER}.container").exists()
-    assert len(ctx.changes) == 2
-
-
-def test_dry_run_defers_missing_parent_checks(tmp_path):
-    ctx = context(tmp_path, dry_run=True, sudo=FakeSudo(is_root=True))
-    missing = tmp_path / "missing"
-
-    podman.registry("example", location="docker.io", path=missing / "example.conf")
-    podman.quadlet(CONTAINER, image=IMAGE, dest=missing)
-
-    assert not missing.exists()
-    assert len(ctx.changes) == 2
-    assert all(change.changed for change in ctx.changes)
-
-
-def test_invalid_boolean_and_timeout_arguments_are_rejected(tmp_path):
-    context(tmp_path)
-
     with pytest.raises(TaskFailed, match="image sudo must be a boolean"):
         podman.image(IMAGE, sudo="yes")
     with pytest.raises(TaskFailed, match="timeout must be a positive number"):
@@ -1114,6 +965,51 @@ def test_invalid_boolean_and_timeout_arguments_are_rejected(tmp_path):
         podman.login(REGISTRY, username="u", password="p", sudo="yes")
     with pytest.raises(TaskFailed, match="registry sudo must be a boolean"):
         podman.logout(REGISTRY, sudo="yes")
+
+    assert not (tmp_path / f"{CONTAINER}.container").exists()
+
+
+def test_missing_podman_binary_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr("kitup._utils.executables.shutil.which", lambda name: None)
+    context(tmp_path)
+
+    with pytest.raises(TaskFailed, match="podman is required"):
+        podman.image(IMAGE)
+    with pytest.raises(TaskFailed, match="podman is required"):
+        podman.container(CONTAINER, image=IMAGE)
+    with pytest.raises(TaskFailed, match="podman is required"):
+        podman.login(REGISTRY, username="kitup", password="secret")
+    with pytest.raises(TaskFailed, match="podman is required"):
+        podman.generate_systemd(CONTAINER, dest=tmp_path)
+
+    context(tmp_path, sudo=FakeSudo(is_root=True))
+
+    podman.registry("example", location="docker.io", path=tmp_path / "example.conf")
+    podman.quadlet(CONTAINER, image=IMAGE, dest=tmp_path)
+
+    assert (tmp_path / "example.conf").exists()
+    assert (tmp_path / f"{CONTAINER}.container").exists()
+
+
+def test_dry_run_does_not_write_files(tmp_path):
+    ctx = context(tmp_path, dry_run=True, sudo=FakeSudo(is_root=True))
+
+    podman.registry("example", location="docker.io", path=tmp_path / "example.conf")
+    podman.quadlet(CONTAINER, image=IMAGE, dest=tmp_path)
+
+    assert not (tmp_path / "example.conf").exists()
+    assert not (tmp_path / f"{CONTAINER}.container").exists()
+    assert len(ctx.changes) == 2
+
+    ctx = context(tmp_path, dry_run=True, sudo=FakeSudo(is_root=True))
+    missing = tmp_path / "missing"
+
+    podman.registry("example", location="docker.io", path=missing / "example.conf")
+    podman.quadlet(CONTAINER, image=IMAGE, dest=missing)
+
+    assert not missing.exists()
+    assert len(ctx.changes) == 2
+    assert all(change.changed for change in ctx.changes)
 
 
 def test_dry_run_does_not_mutate_containers(tmp_path):

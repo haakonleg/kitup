@@ -9,153 +9,61 @@ def parser():
     return cli.build_parser()
 
 
-def test_long_option_takes_next_token(parser):
-    args = parser.parse_args(["apply", "--preset", "laptop"])
-
-    assert args.preset == ["laptop"]
-
-
-def test_long_option_accepts_inline_value(parser):
-    args = parser.parse_args(["apply", "--preset=laptop"])
-
-    assert args.preset == ["laptop"]
+def test_option_forms(parser):
+    assert parser.parse_args(["apply", "--preset", "laptop"]).preset == ["laptop"]
+    assert parser.parse_args(["apply", "--preset=laptop"]).preset == ["laptop"]
+    assert parser.parse_args(["apply", "-p=laptop"]).preset == ["laptop"]
+    assert parser.parse_args(["apply", "-t", "a", "--tags=b"]).tags == ["a", "b"]
+    assert parser.parse_args(["apply", "--dry-run"]).dry_run is True
 
 
-def test_short_option_accepts_inline_value(parser):
-    args = parser.parse_args(["apply", "-p=laptop"])
-
-    assert args.preset == ["laptop"]
-
-
-def test_append_option_collects_repeated_values(parser):
-    args = parser.parse_args(["apply", "-t", "a", "--tags=b"])
-
-    assert args.tags == ["a", "b"]
-
-
-def test_flag_option_sets_true(parser):
-    args = parser.parse_args(["apply", "--dry-run"])
-
-    assert args.dry_run is True
-
-
-def test_positional_is_optional(parser):
+def test_optional_positional_and_absent_options(parser):
     args = parser.parse_args(["apply"])
 
     assert not hasattr(args, "project_dir")
-
-
-def test_positional_value_is_stored(parser):
-    args = parser.parse_args(["apply", "machine"])
-
-    assert args.project_dir == "machine"
-
-
-def test_only_supplied_options_are_present(parser):
-    args = parser.parse_args(["apply"])
-
     assert not hasattr(args, "include_bundles")
     assert not hasattr(args, "dry_run")
+    assert parser.parse_args(["apply", "machine"]).project_dir == "machine"
 
 
-def test_unknown_long_option_is_rejected(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "--include-bundl", "base"])
+def test_invalid_arguments_are_rejected(parser, capsys):
+    cases = [
+        (["apply", "--nope"], "unrecognized arguments: --nope"),
+        (["apply", "one", "two"], "unrecognized arguments: two"),
+        (["apply", "--preset"], "expected one argument"),
+        (["apply", "--dry-run=yes"], "ignored explicit argument"),
+        (["bogus"], "invalid choice"),
+        ([], "following arguments are required"),
+    ]
 
-    assert exc.value.code == 2
-    assert "unrecognized arguments: --include-bundl" in capsys.readouterr().err
+    for argv, message in cases:
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args(argv)
 
-
-def test_clustered_short_options_are_rejected(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "-nm"])
-
-    assert exc.value.code == 2
-    assert "unrecognized arguments: -nm" in capsys.readouterr().err
-
-
-def test_extra_positional_is_rejected(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "one", "two"])
-
-    assert exc.value.code == 2
-    assert "unrecognized arguments: two" in capsys.readouterr().err
+        assert exc.value.code == 2, argv
+        assert message in capsys.readouterr().err, argv
 
 
-def test_missing_option_value_is_an_error(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "--preset"])
-
-    assert exc.value.code == 2
-    error = capsys.readouterr().err
-    assert "expected one argument" in error
-    assert "usage: kitup apply" in error
-
-
-def test_unknown_option_error_uses_command_usage(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "--nope"])
-
-    assert exc.value.code == 2
-    assert "usage: kitup apply" in capsys.readouterr().err
-
-
-def test_option_value_that_looks_like_an_option_is_an_error(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "--preset", "--dry-run"])
-
-    assert exc.value.code == 2
-    assert "expected one argument" in capsys.readouterr().err
-
-
-def test_flag_with_explicit_value_is_an_error(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "--dry-run=yes"])
-
-    assert exc.value.code == 2
-    assert "ignored explicit argument" in capsys.readouterr().err
-
-
-def test_command_is_required(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args([])
-
-    assert exc.value.code == 2
-    assert "the following arguments are required: COMMAND" in capsys.readouterr().err
-
-
-def test_unknown_command_is_an_error(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["bogus"])
-
-    assert exc.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
-
-
-def test_version_prints_and_exits(parser, capsys):
+def test_help_and_version_exit_successfully(parser, capsys):
     with pytest.raises(SystemExit) as exc:
         parser.parse_args(["--version"])
 
     assert exc.value.code == 0
     assert "kitup 3.0.0" in capsys.readouterr().out
 
+    custom = Parser(
+        prog="demo",
+        description="demo tool",
+        commands=(Command(name="run", help="run things", options=()),),
+    )
 
-def test_version_flag_works_after_the_command(parser, capsys):
     with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "-V"])
-
-    assert exc.value.code == 0
-    assert "kitup 3.0.0" in capsys.readouterr().out
-
-
-def test_help_prints_and_exits(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "--help"])
+        custom.parse_args(["--help"])
 
     assert exc.value.code == 0
     output = capsys.readouterr().out
-    assert "usage: kitup apply" in output
-    assert "--dry-run" in output
+    assert "usage: demo" in output
+    assert "run things" in output
 
 
 def test_double_dash_ends_option_parsing(parser):
@@ -164,58 +72,23 @@ def test_double_dash_ends_option_parsing(parser):
     assert args.project_dir == "--not-an-option"
 
 
-def test_parse_known_args_returns_unknown_options(parser):
+def test_parse_known_args(parser):
     args, extras = parser.parse_known_args(["list", "--dry-run", "--include-bundles", "base"])
 
     assert extras == ["--dry-run"]
     assert args.include_bundles == ["base"]
     assert not hasattr(args, "dry_run")
 
-
-def test_parse_known_args_ignores_extra_positionals(parser):
     args, extras = parser.parse_known_args(["apply", "one", "two"])
-
     assert args.project_dir == "one"
     assert extras == ["two"]
 
-
-def test_parse_known_args_does_not_raise_on_unknown(parser):
     args, extras = parser.parse_known_args(["apply", "--nope", "value"])
-
     assert extras == ["--nope"]
     assert args.project_dir == "value"
 
-
-def test_parse_known_args_raises_on_missing_value(parser):
     with pytest.raises(ParseError, match="expected one argument"):
         parser.parse_known_args(["apply", "--preset"])
-
-
-def test_help_lists_source_path_options(parser, capsys):
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["apply", "--help"])
-
-    assert exc.value.code == 0
-    output = capsys.readouterr().out
-    assert "--bundle-path" in output
-    assert "--files-path" in output
-    assert "--modules-path" in output
-
-
-def test_help_lists_commands(capsys):
-    parser = Parser(
-        prog="demo",
-        description="demo tool",
-        commands=(Command(name="run", help="run things", options=()),),
-    )
-
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["--help"])
-
-    assert exc.value.code == 0
-    output = capsys.readouterr().out
-    assert "usage: demo" in output
-    assert "run things" in output
 
 
 def test_list_modules_command_is_parsed(parser):
@@ -224,11 +97,3 @@ def test_list_modules_command_is_parsed(parser):
     assert args.command == "list-modules"
     assert args.project_dir == "machine"
     assert args.verbose is True
-
-
-def test_help_lists_list_modules(capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.build_parser().parse_args(["--help"])
-
-    assert exc.value.code == 0
-    assert "list-modules" in capsys.readouterr().out

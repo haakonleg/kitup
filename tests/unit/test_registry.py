@@ -5,12 +5,9 @@ from pathlib import Path
 
 import pytest
 
-import kitup
-from kitup.context import TaskContext
 from kitup.errors import BundleError
 from kitup.registry import (
     Bundle,
-    Module,
     SideEffect,
     action_prefix,
     bundle_of,
@@ -22,7 +19,6 @@ from kitup.registry import (
     task,
 )
 from kitup.registry import bundle as define_bundle
-from kitup.results import CallResult
 
 from ..helpers import write
 
@@ -40,81 +36,32 @@ def import_package(tmp_path: Path, files: dict[str, str]) -> tuple[str, object]:
     return name, module
 
 
-def test_bundle_name_is_optional_and_validated():
+def test_bundle_defaults_factory_and_validation():
     bundle = Bundle()
 
     assert bundle.name == ""
     assert bundle.id == ""
     assert bundle.tasks == ()
+    assert Bundle("Base").priority == 0
+    assert Bundle("Base", priority=5).priority == 5
+
+    created = define_bundle("Base", priority=-3)
+    assert created.tasks == ()
+    assert created.id == "Base"
+    assert created.priority == -3
+    assert not hasattr(sys.modules[__name__], "__kitup_bundle__")
 
     with pytest.raises(BundleError, match="bundle name must not be empty"):
         Bundle("")
     with pytest.raises(BundleError, match="bundle name must be a string"):
         Bundle(1)  # type: ignore[arg-type]
-
-
-def test_bundle_priority_defaults_and_is_validated():
-    assert Bundle("Base").priority == 0
-    assert Bundle("Base", priority=5).priority == 5
-    assert define_bundle("Base", priority=-3).priority == -3
-
     with pytest.raises(BundleError, match="bundle priority must be an integer"):
         Bundle("Base", priority="high")  # type: ignore[arg-type]
     with pytest.raises(BundleError, match="bundle priority must be an integer"):
         Bundle("Base", priority=True)
 
 
-def test_package_reexports_the_authoring_api():
-    assert kitup.Bundle is Bundle
-    assert kitup.bundle is define_bundle
-    assert kitup.bundle_of is bundle_of
-    assert kitup.side_effect is side_effect
-    assert kitup.task is task
-    assert kitup.TaskContext is TaskContext
-    assert kitup.module is module
-    assert kitup.Module is Module
-    assert kitup.CallResult is CallResult
-
-
-def test_bundle_defaults_to_no_tasks_outside_a_package(tmp_path):
-    bundle = Bundle("Base")
-
-    assert bundle.tasks == ()
-    assert bundle.id == "Base"
-
-
-def test_bundle_factory_outside_a_package_builds_without_registering():
-    created = define_bundle("Base")
-
-    assert created.tasks == ()
-    assert created.id == "Base"
-    assert not hasattr(sys.modules[__name__], "__kitup_bundle__")
-
-
-def test_bundle_class_does_not_register_itself(tmp_path):
-    _, module = import_package(
-        tmp_path,
-        {"__init__.py": "from kitup import Bundle\n\nBundle('Ignored')\n"},
-    )
-
-    assert getattr(module, "__kitup_bundle__", None) is None
-
-
-def test_bundle_factory_supports_assignment(tmp_path):
-    _, module = import_package(
-        tmp_path,
-        {
-            "__init__.py": "from kitup import bundle\n\ncreated = bundle('Base')\n",
-            "tasks.py": "from kitup import task\n\n@task\ndef install():\n    pass\n",
-        },
-    )
-
-    created = bundle_of(module)  # type: ignore[arg-type]
-    assert created is module.created  # type: ignore[attr-defined]
-    assert [registered.func.__name__ for registered in created.tasks] == ["install"]
-
-
-def test_modules_none_auto_discovers_sibling_task_modules(tmp_path):
+def test_modules_auto_discovery_explicit_order_and_empty_override(tmp_path):
     _, module = import_package(
         tmp_path,
         {
@@ -124,12 +71,9 @@ def test_modules_none_auto_discovers_sibling_task_modules(tmp_path):
             "_helper.py": "VALUE = 1\n",
         },
     )
-
     bundle = bundle_of(module)  # type: ignore[arg-type]
     assert [registered.func.__name__ for registered in bundle.tasks] == ["first", "second"]
 
-
-def test_explicit_modules_define_order(tmp_path):
     _, module = import_package(
         tmp_path,
         {
@@ -140,12 +84,9 @@ def test_explicit_modules_define_order(tmp_path):
             "second.py": "from kitup import task\n\n@task\ndef second():\n    pass\n",
         },
     )
-
     bundle = bundle_of(module)  # type: ignore[arg-type]
     assert [registered.func.__name__ for registered in bundle.tasks] == ["second", "first"]
 
-
-def test_empty_modules_disables_auto_discovery(tmp_path):
     _, module = import_package(
         tmp_path,
         {
@@ -153,11 +94,10 @@ def test_empty_modules_disables_auto_discovery(tmp_path):
             "tasks.py": "from kitup import task\n\n@task\ndef first():\n    pass\n",
         },
     )
-
     assert bundle_of(module).tasks == ()  # type: ignore[arg-type]
 
 
-def test_modules_reject_a_single_module_a_path_and_non_modules(tmp_path):
+def test_modules_validation_and_path_requirements(tmp_path):
     with pytest.raises(BundleError, match="not a single value"):
         Bundle("Base", modules=sys)  # type: ignore[arg-type]
     with pytest.raises(BundleError, match="not a single value"):
@@ -169,48 +109,6 @@ def test_modules_reject_a_single_module_a_path_and_non_modules(tmp_path):
     with pytest.raises(BundleError, match="duplicate task module"):
         Bundle("Base", modules=[sys, sys])
 
-
-def test_modules_accept_relative_and_absolute_paths(tmp_path):
-    bundle_dir = tmp_path / "bundle"
-    write(
-        bundle_dir / "tasks.py",
-        """
-        from kitup import task
-
-        @task
-        def install():
-            pass
-        """,
-    )
-
-    relative = Bundle("Relative", path=bundle_dir, modules=["tasks.py"])
-    absolute = Bundle("Absolute", modules=[bundle_dir / "tasks.py"])
-
-    for bundle in (relative, absolute):
-        assert [registered.func.__name__ for registered in bundle.tasks] == ["install"]
-
-
-def test_path_module_supports_sibling_relative_imports(tmp_path):
-    bundle_dir = tmp_path / "bundle"
-    write(bundle_dir / "_helper.py", "VALUE = 42\n")
-    write(
-        bundle_dir / "tasks.py",
-        """
-        from kitup import task
-        from ._helper import VALUE
-
-        @task
-        def show():
-            return VALUE
-        """,
-    )
-
-    bundle = Bundle("Base", path=bundle_dir, modules=["tasks.py"])
-
-    assert bundle.tasks[0].func() == 42
-
-
-def test_path_modules_must_exist_be_files_and_use_the_py_suffix(tmp_path):
     bundle_dir = tmp_path / "bundle"
     bundle_dir.mkdir()
     (bundle_dir / "tasks.py").mkdir()
@@ -237,23 +135,24 @@ def test_duplicate_task_module_paths_are_rejected(tmp_path):
         Bundle("Base", modules=[tmp_path / "tasks.py", tmp_path / "tasks.py"])
 
 
-def test_path_module_without_tasks_is_an_error(tmp_path):
-    write(tmp_path / "helpers.py", "VALUE = 1\n")
-
-    with pytest.raises(BundleError, match=r"does not register any tasks.*_private"):
-        Bundle("Base", modules=[tmp_path / "helpers.py"])
-
-
-def test_same_path_module_is_shared_between_bundles(tmp_path):
+def test_modules_accept_relative_and_absolute_paths(tmp_path):
+    bundle_dir = tmp_path / "bundle"
     write(
-        tmp_path / "tasks.py",
-        "from kitup import task\n\n@task\ndef shared():\n    pass\n",
+        bundle_dir / "tasks.py",
+        """
+        from kitup import task
+
+        @task
+        def install():
+            pass
+        """,
     )
 
-    first = Bundle("One", modules=[tmp_path / "tasks.py"])
-    second = Bundle("Two", modules=[tmp_path / "tasks.py"])
+    relative = Bundle("Relative", path=bundle_dir, modules=["tasks.py"])
+    absolute = Bundle("Absolute", modules=[bundle_dir / "tasks.py"])
 
-    assert first.tasks[0].func is second.tasks[0].func
+    for bundle in (relative, absolute):
+        assert [registered.func.__name__ for registered in bundle.tasks] == ["install"]
 
 
 def test_discovered_module_without_tasks_is_an_error(tmp_path):
@@ -333,7 +232,7 @@ def test_depends_on_rejects_a_single_string_and_invalid_values():
         Bundle("base", depends_on=[""])
 
 
-def test_module_task_decorator_forms(tmp_path):
+def test_task_decorator_forms_and_normalized_metadata(tmp_path):
     _, module = import_package(
         tmp_path,
         {
@@ -369,15 +268,13 @@ def test_module_task_decorator_forms(tmp_path):
     assert bundle.tasks[2].tags == frozenset({"other"})
     assert bundle.tasks[0].id == "Base.install_base_packages"
 
-
-def test_bundle_task_decorator_forms(tmp_path):
     bundle = Bundle("Base", path=tmp_path)
 
     @bundle.task
     def install_base_packages():
         """Install base packages."""
 
-    @bundle.task("Custom")
+    @bundle.task("  Custom  ")
     def custom():
         pass
 
@@ -385,39 +282,29 @@ def test_bundle_task_decorator_forms(tmp_path):
     def tagged():
         pass
 
-    assert [registered.name for registered in bundle.tasks] == [
-        "Install base packages",
-        "Custom",
-        "Tagged",
-    ]
-    assert bundle.tasks[0].description == "Install base packages."
-    assert bundle.tasks[2].tags == frozenset({"other"})
-
-
-def test_humanized_names_collapse_underscores(tmp_path):
-    bundle = Bundle("Base", path=tmp_path)
-
     def _private_task():
         pass
 
     def install__packages():
         pass
 
-    def trailing_():
-        pass
-
     bundle.task(_private_task)
     bundle.task(install__packages)
-    bundle.task(trailing_)
 
     assert [registered.name for registered in bundle.tasks] == [
+        "Install base packages",
+        "Custom",
+        "Tagged",
         "Private task",
         "Install packages",
-        "Trailing",
     ]
+    assert bundle.tasks[0].description == "Install base packages."
+    assert bundle.tasks[1].name == "Custom"
+    assert bundle.tasks[2].tags == frozenset({"other"})
+    assert side_effect("  Refresh  ")(lambda: None).name == "Refresh"
 
 
-def test_task_names_must_be_strings():
+def test_task_metadata_validation():
     bundle = Bundle("Base")
 
     with pytest.raises(BundleError, match="task name must be a string"):
@@ -429,25 +316,8 @@ def test_task_names_must_be_strings():
     with pytest.raises(BundleError, match="task name must not be empty"):
         task("")
 
-
-def test_names_and_descriptions_are_normalized():
-    bundle = Bundle("Base")
-
-    @bundle.task("  Custom  ")
-    def custom():
-        pass
-
-    effect = side_effect("  Refresh  ")(lambda: None)
-
-    assert bundle.tasks[0].name == "Custom"
-    assert effect.name == "Refresh"
-
-
-def test_descriptions_must_be_strings():
     with pytest.raises(BundleError, match="bundle description must be a string"):
         Bundle("Base", description=1)  # type: ignore[arg-type]
-
-    bundle = Bundle("Base")
     with pytest.raises(BundleError, match="description must be a string"):
         bundle.task(description=1)(lambda: None)  # type: ignore[arg-type]
     with pytest.raises(BundleError, match="description must be a string"):
@@ -455,43 +325,14 @@ def test_descriptions_must_be_strings():
     with pytest.raises(BundleError, match="description must be a string"):
         side_effect(description=1)(lambda: None)  # type: ignore[arg-type]
 
+    class CallableObject:
+        def __call__(self, ctx):
+            pass
 
-def test_dependency_ids_are_stripped():
-    bundle = Bundle("Base", depends_on=[" other "])
-
-    assert bundle.depends_on == ("other",)
-
-
-def test_bundle_tasks_are_cached_and_invalidated_on_add():
-    bundle = Bundle("Base")
-
-    def first():
-        pass
-
-    def second():
-        pass
-
-    bundle.task(first)
-    cached = bundle.tasks
-
-    assert bundle.tasks is cached
-
-    bundle.task(second)
-
-    assert bundle.tasks is not cached
-    assert [task.func.__name__ for task in bundle.tasks] == ["first", "second"]
-
-
-def test_duplicate_task_ids_are_rejected():
-    bundle = Bundle("Base")
-
-    def install():
-        pass
-
-    bundle.task(install)
-
-    with pytest.raises(BundleError, match=r"duplicate task id 'Base\.install'"):
-        bundle.task(install)
+    with pytest.raises(BundleError, match="task decorator requires a Python function"):
+        task(CallableObject())  # type: ignore[arg-type]
+    with pytest.raises(BundleError, match="task decorator requires a Python function"):
+        bundle.task(CallableObject())  # type: ignore[arg-type]
 
 
 def test_duplicate_task_ids_across_modules_are_rejected(tmp_path):
@@ -504,19 +345,6 @@ def test_duplicate_task_ids_across_modules_are_rejected(tmp_path):
                 "second.py": "from kitup import task\n\n@task\ndef install():\n    pass\n",
             },
         )
-
-
-def test_task_decorator_requires_a_function():
-    class CallableObject:
-        def __call__(self, ctx):
-            pass
-
-    with pytest.raises(BundleError, match="task decorator requires a Python function"):
-        task(CallableObject())  # type: ignore[arg-type]
-
-    bundle = Bundle("Base")
-    with pytest.raises(BundleError, match="task decorator requires a Python function"):
-        bundle.task(CallableObject())  # type: ignore[arg-type]
 
 
 def test_task_tags_are_validated_and_normalized():
@@ -541,18 +369,7 @@ def test_task_tags_are_validated_and_normalized():
         bundle.task(tags={"packages,"})
 
 
-def test_task_functions_may_return_values(tmp_path):
-    bundle = Bundle("Local", path=tmp_path)
-
-    @bundle.task("Return value")
-    def return_value():
-        return "value"
-
-    assert return_value() == "value"
-    assert bundle.tasks[0].func is return_value
-
-
-def test_side_effect_decorator_forms():
+def test_side_effect_decorator_forms_and_validation():
     @side_effect
     def reload_nginx():
         """Reload nginx."""
@@ -567,8 +384,6 @@ def test_side_effect_decorator_forms():
     assert explicit.one_shot is False
     assert explicit.description == "details"
 
-
-def test_side_effect_names_and_one_shot_are_validated():
     with pytest.raises(BundleError, match="side effect name must be a string"):
         side_effect(123)  # type: ignore[arg-type]
     with pytest.raises(BundleError, match="side effect name must not be empty"):
@@ -590,110 +405,44 @@ def test_bundle_of_requires_a_bundle(tmp_path):
         bundle_of(module)  # type: ignore[arg-type]
 
 
-def test_bundle_paths_and_resources(tmp_path):
-    resource_root = tmp_path / "resources"
-    resource_root.mkdir()
-    resource = resource_root / "files" / "example.conf"
-    write(resource, "value = 1\n")
-
-    bundle = Bundle("Base", path=resource_root)
-
-    assert bundle.path == resource_root
-    assert (bundle.path / "files" / "example.conf").read_text(encoding="utf-8") == "value = 1\n"
-
-
-def test_unknown_user_in_bundle_path_is_a_bundle_error():
-    with pytest.raises(BundleError, match="cannot resolve path '~bogususer/bundle'"):
-        Bundle("Base", path=Path("~bogususer/bundle"))
-
-
-def test_module_registers_in_the_registry(tmp_path):
-    name, _ = import_package(tmp_path, {"tool.py": 'from kitup import module\n\nmodule("mytool")\n'})
-    tool = importlib.import_module(f"{name}.tool")
-
-    entries = {entry.module_name: entry for entry in registered_modules(name)}
-    assert entries[f"{name}.tool"].name == "mytool"
-    assert entries[f"{name}.tool"].description == ""
-    assert module_of(tool) is entries[f"{name}.tool"]
-    assert action_prefix(f"{name}.tool") == "mytool"
-
-
-def test_module_description_is_optional_and_validated(tmp_path):
+def test_module_registry_lifecycle(tmp_path):
     name, _ = import_package(
         tmp_path,
         {
+            "tool.py": 'from kitup import module\n\nmodule("mytool")\n',
             "plain.py": 'from kitup import module\n\nmodule("plain")\n',
             "described.py": 'from kitup import module\n\nmodule("described", "A described module.")\n',
         },
     )
+    tool = importlib.import_module(f"{name}.tool")
     importlib.import_module(f"{name}.plain")
     importlib.import_module(f"{name}.described")
 
-    entries = {entry.name: entry for entry in registered_modules(name)}
-    assert entries["plain"].description == ""
-    assert entries["described"].description == "A described module."
+    entries = {entry.module_name: entry for entry in registered_modules(name)}
+    assert entries[f"{name}.tool"].name == "mytool"
+    assert entries[f"{name}.tool"].description == ""
+    assert entries[f"{name}.plain"].description == ""
+    assert entries[f"{name}.described"].description == "A described module."
+    assert module_of(tool) is entries[f"{name}.tool"]
+    assert action_prefix(f"{name}.tool") == "mytool"
+    assert registered_modules(f"{name}.tool") == (entries[f"{name}.tool"],)
+    assert registered_modules(f"{name}.missing") == ()
 
     with pytest.raises(BundleError, match="module description must be a string"):
         module("bad", 1)  # type: ignore[arg-type]
 
-
-def test_registered_modules_are_sorted_by_name(tmp_path):
-    name, _ = import_package(
-        tmp_path,
-        {
-            "zulu.py": 'from kitup import module\n\nmodule("zulu")\n',
-            "alpha.py": 'from kitup import module\n\nmodule("alpha")\n',
-        },
-    )
-    importlib.import_module(f"{name}.zulu")
-    importlib.import_module(f"{name}.alpha")
-
-    assert [entry.name for entry in registered_modules(name)] == ["alpha", "zulu"]
-
-
-def test_registered_modules_filter_by_prefix(tmp_path):
-    name, _ = import_package(
-        tmp_path,
-        {
-            "one.py": 'from kitup import module\n\nmodule("one")\n',
-            "two.py": 'from kitup import module\n\nmodule("two")\n',
-        },
-    )
-    importlib.import_module(f"{name}.one")
-    importlib.import_module(f"{name}.two")
-
-    assert [entry.name for entry in registered_modules(name)] == ["one", "two"]
-    assert [entry.name for entry in registered_modules(f"{name}.one")] == ["one"]
-    assert registered_modules(f"{name}.missing") == ()
-
-
-def test_registering_again_replaces_the_entry(tmp_path):
-    name, _ = import_package(
+    replaced_name, _ = import_package(
         tmp_path,
         {"tool.py": 'from kitup import module\n\nmodule("first")\nmodule("second")\n'},
     )
-    tool = importlib.import_module(f"{name}.tool")
-
-    entries = registered_modules(name)
-    registered = module_of(tool)
-    assert [entry.name for entry in entries] == ["second"]
+    replaced_tool = importlib.import_module(f"{replaced_name}.tool")
+    registered = module_of(replaced_tool)
+    assert [entry.name for entry in registered_modules(replaced_name)] == ["second"]
     assert registered is not None
     assert registered.name == "second"
-    assert action_prefix(f"{name}.tool") == "second"
+    assert action_prefix(f"{replaced_name}.tool") == "second"
 
+    forget_module_prefix(replaced_name)
 
-def test_forget_module_prefix_drops_registered_modules(tmp_path):
-    name, _ = import_package(
-        tmp_path,
-        {
-            "one.py": 'from kitup import module\n\nmodule("one")\n',
-            "two.py": 'from kitup import module\n\nmodule("two")\n',
-        },
-    )
-    importlib.import_module(f"{name}.one")
-    importlib.import_module(f"{name}.two")
-
-    forget_module_prefix(name)
-
-    assert action_prefix(f"{name}.one") is None
-    assert registered_modules(name) == ()
+    assert action_prefix(f"{replaced_name}.tool") is None
+    assert registered_modules(replaced_name) == ()

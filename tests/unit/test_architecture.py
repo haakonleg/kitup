@@ -145,8 +145,8 @@ def test_public_module_functions_take_no_context_parameter():
     assert not offenders, "public module functions must not take ctx: " + ", ".join(offenders)
 
 
-def test_modules_have_documentation():
-    """Every built-in module has a matching page in ``docs/modules``."""
+def test_modules_have_documentation_covering_public_functions():
+    """Every built-in module and public function has matching documentation."""
     module_names = _module_names()
     documented = {path.stem for path in DOCS_DIR.glob("*.md") if path.stem != "index"}
 
@@ -155,6 +155,19 @@ def test_modules_have_documentation():
 
     assert not missing, "modules missing documentation: " + ", ".join(missing)
     assert not orphaned, "documentation without a module: " + ", ".join(orphaned)
+
+    violations: list[str] = []
+    for name in sorted(module_names):
+        module = importlib.import_module(f"{PACKAGE_NAME}.modules.{name}")
+        functions = _public_functions(module)
+        documented_functions = _documented_functions(DOCS_DIR / f"{name}.md")
+        missing_functions = sorted(functions - documented_functions)
+        extra = sorted(documented_functions - functions)
+        if missing_functions:
+            violations.append(f"{name}: missing {', '.join(missing_functions)}")
+        if extra:
+            violations.append(f"{name}: sections without a public function {', '.join(extra)}")
+    assert not violations, "module docs must match public functions: " + "; ".join(violations)
 
 
 def _public_functions(module: ModuleType) -> set[str]:
@@ -184,22 +197,6 @@ def _documented_functions(path: Path) -> set[str]:
         if match and "(" in match.group(1):
             documented.add(match.group(1).split("(", 1)[0].strip())
     return documented
-
-
-def test_module_docs_cover_public_functions():
-    """Every public built-in module function has a matching API section."""
-    violations: list[str] = []
-    for name in sorted(_module_names()):
-        module = importlib.import_module(f"{PACKAGE_NAME}.modules.{name}")
-        functions = _public_functions(module)
-        documented = _documented_functions(DOCS_DIR / f"{name}.md")
-        missing = sorted(functions - documented)
-        extra = sorted(documented - functions)
-        if missing:
-            violations.append(f"{name}: missing {', '.join(missing)}")
-        if extra:
-            violations.append(f"{name}: sections without a public function {', '.join(extra)}")
-    assert not violations, "module docs must match public functions: " + "; ".join(violations)
 
 
 class _EmbeddedVisitor(ast.NodeVisitor):
@@ -233,7 +230,7 @@ class _EmbeddedVisitor(ast.NodeVisitor):
             self.violations.append(f"{self.path.name}: non-stdlib import {name}")
 
 
-def test_embedded_sources_are_standalone():
+def test_embedded_sources_are_standalone_and_have_no_main_guard():
     """Embedded sources run via ``python -c`` and cannot import the package."""
     violations: list[str] = []
     for path in EMBEDDED_SOURCES:
@@ -242,6 +239,9 @@ def test_embedded_sources_are_standalone():
         violations.extend(visitor.violations)
 
     assert not violations, "embedded sources must use only the standard library: " + ", ".join(violations)
+
+    offenders = [path.name for path in EMBEDDED_SOURCES if _has_main_guard(path)]
+    assert not offenders, "embedded sources must not run on import: " + ", ".join(offenders)
 
 
 def _has_main_guard(path: Path) -> bool:
@@ -264,12 +264,6 @@ def _has_main_guard(path: Path) -> bool:
         ):
             return True
     return False
-
-
-def test_embedded_sources_have_no_main_guard():
-    """``client.py`` calls ``main()`` explicitly after concatenating sources."""
-    offenders = [path.name for path in EMBEDDED_SOURCES if _has_main_guard(path)]
-    assert not offenders, "embedded sources must not run on import: " + ", ".join(offenders)
 
 
 def _imported_modules(path: Path) -> set[str]:

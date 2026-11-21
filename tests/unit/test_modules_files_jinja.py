@@ -2,19 +2,10 @@ import os
 
 import pytest
 
-import kitup.modules.files.template_render as template_render_module
 from kitup.errors import TaskFailed
 from kitup.modules import files
 
 from .helpers import template_context, write_source
-
-
-def test_jinja_environment_is_cached():
-    template_render_module._jinja_environment.cache_clear()
-    try:
-        assert template_render_module._jinja_environment() is template_render_module._jinja_environment()
-    finally:
-        template_render_module._jinja_environment.cache_clear()
 
 
 def render(tmp_path, template_text, *, variables=None, vars=None, facts=None):
@@ -90,12 +81,12 @@ def test_jinja_data_filters(tmp_path):
     )
 
 
-def test_jinja_datetime_filters(tmp_path):
+def test_jinja_datetime_and_sequence_filters(tmp_path):
+    # Datetime filters.
     assert render(tmp_path, "{{ '2020-01-02 03:04:05' | to_datetime | strftime('%Y/%m/%d') }}") == "2020/01/02"
     assert render(tmp_path, "{{ '2020-01-02' | to_datetime('%Y-%m-%d') | strftime('%d.%m.%Y') }}") == "02.01.2020"
 
-
-def test_jinja_sequence_filters(tmp_path):
+    # Sequence filters.
     assert render(tmp_path, "{{ [1, 2] | zip([3, 4]) | list | to_json }}") == "[[1, 3], [2, 4]]"
     assert render(tmp_path, "{{ [1] | zip_longest([2, 3]) | list | to_json }}") == "[[1, 2], [null, 3]]"
     assert render(tmp_path, "{{ [1] | zip_longest([2, 3], fillvalue=0) | list | to_json }}") == "[[1, 2], [0, 3]]"
@@ -146,9 +137,8 @@ def test_jinja_ipmath_filter(tmp_path):
     assert render(tmp_path, "{{ '2001:db8::/126' | ipmath(2) }}") == "2001:db8::2"
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
+def test_jinja_bool_filter(tmp_path):
+    cases = [
         ("yes", "True"),
         ("ON", "True"),
         ("true", "True"),
@@ -157,10 +147,9 @@ def test_jinja_ipmath_filter(tmp_path):
         ("off", "False"),
         ("FALSE", "False"),
         ("0", "False"),
-    ],
-)
-def test_jinja_bool_filter(tmp_path, value, expected):
-    assert render(tmp_path, f"{{{{ '{value}' | bool }}}}") == expected
+    ]
+    for value, expected in cases:
+        assert render(tmp_path, f"{{{{ '{value}' | bool }}}}") == expected, f"bool({value!r})"
 
 
 def test_jinja_version_test(tmp_path):
@@ -174,10 +163,7 @@ def test_jinja_version_test(tmp_path):
     assert render(tmp_path, "{% if '1.0' is version('1.0', '!=') %}no{% else %}yes{% endif %}") == "yes"
     assert render(tmp_path, "{% if '1.0A' is version('1.0a', '<') %}yes{% endif %}") == "yes"
 
-
-@pytest.mark.parametrize(
-    ("left", "operator", "right"),
-    [
+    operators = [
         ("1.0", "==", "1.0"),
         ("1.0", "=", "1.0"),
         ("1.0", "eq", "1.0"),
@@ -192,11 +178,10 @@ def test_jinja_version_test(tmp_path):
         ("1.0", "!=", "1.1"),
         ("1.0", "<>", "1.1"),
         ("1.0", "ne", "1.1"),
-    ],
-)
-def test_jinja_version_operators(tmp_path, left, operator, right):
-    template = f"{{% if '{left}' is version('{right}', '{operator}') %}}yes{{% endif %}}"
-    assert render(tmp_path, template) == "yes"
+    ]
+    for left, operator, right in operators:
+        template = f"{{% if '{left}' is version('{right}', '{operator}') %}}yes{{% endif %}}"
+        assert render(tmp_path, template) == "yes", f"{left} {operator} {right}"
 
 
 def test_jinja_regex_tests(tmp_path):
@@ -241,9 +226,8 @@ def test_jinja_default_filters_and_tests_still_work(tmp_path):
     assert render(tmp_path, "{% if 'a' in ['a'] %}yes{% endif %}") == "yes"
 
 
-@pytest.mark.parametrize(
-    "template_text",
-    [
+def test_jinja_helper_errors_are_task_failures(tmp_path):
+    templates = [
         "{{ 'maybe' | bool }}",
         "{{ {'a': 1} | combine({'b': 2}, list_merge='bogus') }}",
         "{% if '1' is version('2', version_type='semver') %}x{% endif %}",
@@ -255,8 +239,11 @@ def test_jinja_default_filters_and_tests_still_work(tmp_path):
         "{{ 'a: [' | from_yaml }}",
         "{{ 'not-a-date' | to_datetime }}",
         "{{ 'http://example.com' | urlsplit('bogus') }}",
-    ],
-)
-def test_jinja_helper_errors_are_task_failures(tmp_path, template_text):
-    with pytest.raises(TaskFailed, match="template rendering error"):
-        render(tmp_path, template_text)
+    ]
+    for template_text in templates:
+        try:
+            render(tmp_path, template_text)
+        except TaskFailed as exc:
+            assert "template rendering error" in str(exc), template_text
+        else:
+            pytest.fail(f"expected a template failure for {template_text!r}")

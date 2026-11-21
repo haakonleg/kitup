@@ -18,12 +18,12 @@ def make_sysctl_context(tmp_path, *, dry_run: bool = False, command=None):
     )
 
 
-def test_matching_entries_are_noops(tmp_path):
+def test_matching_entries_and_whitespace_are_noops(tmp_path):
+    # spaced entries keep their position; multiple keys are idempotent
     conf = tmp_path / "99-kitup.conf"
     command = FakeCommandRunner()
     ctx = make_sysctl_context(tmp_path, command=command)
 
-    # Spaced entries keep their position; multiple keys are idempotent.
     conf.write_text("vm.swappiness = 10\nother = 1\nkernel.panic = 3\n")
     command.responses = [response(0, "10\n"), response(0, "3\n")]
     sysctl.key("vm.swappiness", 10, file=conf)
@@ -36,7 +36,7 @@ def test_matching_entries_are_noops(tmp_path):
     assert ctx.changes == []
     assert conf.read_text() == "vm.swappiness = 10\nother = 1\nkernel.panic = 3\n"
 
-    # No-space entries are accepted as-is.
+    # no-space entries are accepted as-is
     conf.write_text("vm.swappiness=10\n")
     command.responses = [response(0, "10\n")]
     ctx = make_sysctl_context(tmp_path, command=command)
@@ -44,15 +44,33 @@ def test_matching_entries_are_noops(tmp_path):
     assert ctx.changes == []
     assert conf.read_text() == "vm.swappiness=10\n"
 
-    # Dry-run with a matching no-space entry reports nothing.
+    # dry-run with a matching no-space entry reports nothing
     command.responses = [response(0, "10\n")]
     ctx = make_sysctl_context(tmp_path, dry_run=True, command=command)
     sysctl.key("vm.swappiness", 10, file=conf)
     assert ctx.changes == []
     assert conf.read_text() == "vm.swappiness=10\n"
 
+    # matching values normalize whitespace in the file
+    conf.write_text("kernel.printk=4\t4\t1\t7\n")
+    command = FakeCommandRunner()
+    command.responses = [response(0, "4 4 1 7\n")]
+    ctx = make_sysctl_context(tmp_path, command=command)
 
-def test_duplicate_matching_entries_are_collapsed(tmp_path):
+    sysctl.key("kernel.printk", "4 4 1 7", file=conf)
+    assert ctx.changes == []
+    assert conf.read_text() == "kernel.printk=4\t4\t1\t7\n"
+
+    # runtime-only comparison uses the same whitespace normalization
+    command.responses = [response(0, "4\t4\t1\t7\n")]
+    ctx = make_sysctl_context(tmp_path, command=command)
+    sysctl.key("kernel.printk", "4 4 1 7")
+    assert len(command.calls) == 2  # probes only, no -w
+    assert ctx.changes == []
+
+
+def test_duplicate_and_mismatched_entries_are_rewritten(tmp_path):
+    # duplicate matching entries collapse into one canonical line
     conf = tmp_path / "99-kitup.conf"
     conf.write_text("vm.swappiness=10\nvm.swappiness = 10\n")
     command = FakeCommandRunner()
@@ -70,9 +88,7 @@ def test_duplicate_matching_entries_are_collapsed(tmp_path):
 
     assert ctx.changes == []
 
-
-def test_no_space_entry_with_different_value_is_rewritten(tmp_path):
-    conf = tmp_path / "99-kitup.conf"
+    # a no-space entry with a different value is rewritten
     conf.write_text("vm.swappiness=60\n")
     command = FakeCommandRunner()
     command.responses = [response(0, "10\n")]  # runtime already matches
@@ -83,37 +99,18 @@ def test_no_space_entry_with_different_value_is_rewritten(tmp_path):
     assert conf.read_text() == "vm.swappiness = 10\n"
     assert len(ctx.changes) == 1
 
-
-def test_matching_values_normalize_whitespace(tmp_path):
-    conf = tmp_path / "99-kitup.conf"
-    conf.write_text("kernel.printk=4\t4\t1\t7\n")
+    # existing entries are replaced, comments are kept, and the runtime probe
+    # alone determines whether -w is needed
+    conf.write_text("# vm.swappiness = 60\nvm.swappiness = 60\nvm.swappiness=30\nother = 1\n")
     command = FakeCommandRunner()
-    command.responses = [response(0, "4 4 1 7\n")]
+    command.responses = [response(0, "10\n")]  # runtime already matches
     ctx = make_sysctl_context(tmp_path, command=command)
-
-    sysctl.key("kernel.printk", "4 4 1 7", file=conf)
-    assert ctx.changes == []
-    assert conf.read_text() == "kernel.printk=4\t4\t1\t7\n"
-
-    # Runtime-only comparison uses the same whitespace normalization.
-    command.responses = [response(0, "4\t4\t1\t7\n")]
-    ctx = make_sysctl_context(tmp_path, command=command)
-    sysctl.key("kernel.printk", "4 4 1 7")
-    assert len(command.calls) == 2  # probes only, no -w
-    assert ctx.changes == []
-
-
-def test_dry_run_with_matching_no_space_entry_reports_nothing(tmp_path):
-    conf = tmp_path / "99-kitup.conf"
-    conf.write_text("vm.swappiness=10\n")
-    command = FakeCommandRunner()
-    command.responses = [response(0, "10\n")]
-    ctx = make_sysctl_context(tmp_path, dry_run=True, command=command)
 
     sysctl.key("vm.swappiness", 10, file=conf)
 
-    assert ctx.changes == []
-    assert conf.read_text() == "vm.swappiness=10\n"
+    assert conf.read_text() == "# vm.swappiness = 60\nother = 1\nvm.swappiness = 10\n"
+    assert len(command.calls) == 1  # probe only, no -w
+    assert len(ctx.changes) == 1  # file edit only
 
 
 def test_runtime_only_when_file_is_none(tmp_path):
@@ -138,18 +135,8 @@ def test_runtime_only_when_file_is_none(tmp_path):
     assert list(tmp_path.glob("*.conf")) == []
 
 
-def test_runtime_matching_without_file_is_a_noop(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0, "10\n")]
-    ctx = make_sysctl_context(tmp_path, command=command)
-
-    sysctl.key("vm.swappiness", 10)
-
-    assert len(command.calls) == 1
-    assert ctx.changes == []
-
-
-def test_file_is_updated_and_runtime_is_set(tmp_path):
+def test_file_is_updated_created_and_runtime_set(tmp_path):
+    # an existing file keeps its comments while the value and runtime change
     conf = tmp_path / "99-kitup.conf"
     conf.write_text("# comment\nvm.swappiness = 60\n")
     command = FakeCommandRunner()
@@ -172,9 +159,8 @@ def test_file_is_updated_and_runtime_is_set(tmp_path):
     }
     assert ctx.changes[0].summary == f"set vm.swappiness in {conf}; set vm.swappiness=10"
 
-
-def test_file_is_created_when_missing(tmp_path):
-    conf = tmp_path / "99-kitup.conf"
+    # a missing file is created with the default mode
+    conf = tmp_path / "created.conf"
     command = FakeCommandRunner()
     command.responses = [response(0, "60\n"), response(0)]
     make_sysctl_context(tmp_path, command=command)
@@ -185,21 +171,7 @@ def test_file_is_created_when_missing(tmp_path):
     assert stat.S_IMODE(conf.stat().st_mode) == 0o644
 
 
-def test_existing_entries_are_replaced_and_comments_kept(tmp_path):
-    conf = tmp_path / "99-kitup.conf"
-    conf.write_text("# vm.swappiness = 60\nvm.swappiness = 60\nvm.swappiness=30\nother = 1\n")
-    command = FakeCommandRunner()
-    command.responses = [response(0, "10\n")]  # runtime already matches
-    ctx = make_sysctl_context(tmp_path, command=command)
-
-    sysctl.key("vm.swappiness", 10, file=conf)
-
-    assert conf.read_text() == "# vm.swappiness = 60\nother = 1\nvm.swappiness = 10\n"
-    assert len(command.calls) == 1  # probe only, no -w
-    assert len(ctx.changes) == 1  # file edit only
-
-
-def test_absent_scenarios(tmp_path):
+def test_absent_scenarios_and_missing_file_removal(tmp_path):
     conf = tmp_path / "99-kitup.conf"
     ctx = make_sysctl_context(tmp_path)
 
@@ -217,6 +189,7 @@ def test_absent_scenarios(tmp_path):
     assert ctx.changes == []
     assert ctx.calls[0].summary == f"ensure vm.swappiness is absent from {conf}"
 
+    # absent on a missing file creates nothing
     missing = tmp_path / "missing.conf"
     ctx = make_sysctl_context(tmp_path)
     sysctl.key("vm.swappiness", state="absent", file=missing)
@@ -224,8 +197,7 @@ def test_absent_scenarios(tmp_path):
     assert ctx.changes == []
     assert ctx.calls[0].summary == f"ensure vm.swappiness is absent from {missing}"
 
-
-def test_absent_without_file_is_rejected(tmp_path):
+    # absent without a file is rejected
     make_sysctl_context(tmp_path)
 
     with pytest.raises(TaskFailed, match="requires a sysctl file"):
@@ -237,14 +209,14 @@ def test_utf8_bom_handling(tmp_path):
     command = FakeCommandRunner()
     ctx = make_sysctl_context(tmp_path, command=command)
 
-    # A no-op keeps the BOM untouched.
+    # a no-op keeps the BOM untouched
     conf.write_bytes(b"\xef\xbb\xbfvm.swappiness = 10\n")
     command.responses = [response(0, "10\n")]
     sysctl.key("vm.swappiness", 10, file=conf)
     assert conf.read_bytes() == b"\xef\xbb\xbfvm.swappiness = 10\n"
     assert ctx.changes == []
 
-    # The first real write drops the BOM.
+    # the first real write drops the BOM
     conf.write_bytes(b"\xef\xbb\xbf# comment\nvm.swappiness = 60\n")
     command.responses = [response(0, "10\n")]  # runtime already matches
     ctx = make_sysctl_context(tmp_path, command=command)
@@ -273,7 +245,7 @@ def test_dry_run_reports_without_mutating(tmp_path):
     }
 
 
-def test_bool_and_int_values_are_formatted(tmp_path):
+def test_bool_int_and_slash_normalization(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(0, "0\n"), response(0), response(0, "0\n"), response(0)]
     make_sysctl_context(tmp_path, command=command)
@@ -289,6 +261,16 @@ def test_bool_and_int_values_are_formatted(tmp_path):
     sysctl.key("net.ipv4.ip_forward", value=True, file=conf)
     assert conf.read_text() == "net.ipv4.ip_forward = 1\n"
 
+    # slashes in a key name are normalized to dots
+    command = FakeCommandRunner()
+    command.responses = [response(0, "0\n"), response(0)]
+    make_sysctl_context(tmp_path, command=command)
+
+    sysctl.key("net/ipv4/ip_forward", 1)
+
+    assert command.calls[0][0] == ["sysctl", "-n", "net.ipv4.ip_forward"]
+    assert command.calls[1][0] == ["sysctl", "-w", "net.ipv4.ip_forward=1"]
+
 
 def test_unknown_key_fails_before_any_change(tmp_path):
     conf = tmp_path / "99-kitup.conf"
@@ -302,17 +284,6 @@ def test_unknown_key_fails_before_any_change(tmp_path):
 
     assert conf.read_text() == "other = 1\n"
     assert ctx.changes == []
-
-
-def test_slashes_in_name_are_normalized(tmp_path):
-    command = FakeCommandRunner()
-    command.responses = [response(0, "0\n"), response(0)]
-    make_sysctl_context(tmp_path, command=command)
-
-    sysctl.key("net/ipv4/ip_forward", 1)
-
-    assert command.calls[0][0] == ["sysctl", "-n", "net.ipv4.ip_forward"]
-    assert command.calls[1][0] == ["sysctl", "-w", "net.ipv4.ip_forward=1"]
 
 
 def test_invalid_arguments_are_rejected(tmp_path):

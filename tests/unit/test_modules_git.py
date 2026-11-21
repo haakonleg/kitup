@@ -31,7 +31,7 @@ def toplevel(dest):
     return response(0, f"{dest}\n")
 
 
-def test_clone_when_destination_is_missing(tmp_path):
+def test_clone_scenarios(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(128)]
     ctx = make_context(tmp_path, command=command)
@@ -53,12 +53,10 @@ def test_clone_when_destination_is_missing(tmp_path):
     assert ctx.changes[0].action == "git.repo"
     assert ctx.changes[0].summary == f"clone {URL} into {dest}"
 
-
-def test_clone_with_version_single_branch_and_depth(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1)]
     make_context(tmp_path, command=command)
-    dest = tmp_path / "repo"
+    dest = tmp_path / "repo-options"
 
     git.repo(URL, dest, version="main", single_branch=True, depth=5)
 
@@ -72,12 +70,10 @@ def test_clone_with_version_single_branch_and_depth(tmp_path):
         str(dest),
     ]
 
-
-def test_clone_with_sha_checks_out_after_cloning(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1), response(0), response(0)]
     make_context(tmp_path, command=command)
-    dest = tmp_path / "repo"
+    dest = tmp_path / "repo-sha"
 
     git.repo(URL, dest, version=SHA)
 
@@ -87,36 +83,32 @@ def test_clone_with_sha_checks_out_after_cloning(tmp_path):
         ["git", "-C", str(dest), "checkout", "--force", SHA],
     ]
 
-
-def test_clone_into_existing_empty_directory(tmp_path):
     command = FakeCommandRunner()
     command.responses = [response(1)]
     make_context(tmp_path, command=command)
-    dest = tmp_path / "repo"
-    dest.mkdir()
+    empty = tmp_path / "repo-empty"
+    empty.mkdir()
 
-    git.repo(URL, dest)
+    git.repo(URL, empty)
 
-    assert command.calls[1][0] == ["git", "clone", URL, str(dest)]
+    assert command.calls[1][0] == ["git", "clone", URL, str(empty)]
 
-
-def test_empty_directory_inside_another_repo_is_cloned(tmp_path):
     # Being inside a work tree does not make ``dest`` a checkout of its own;
     # detecting the parent would rewrite the parent's origin URL.
     parent = tmp_path / "parent"
-    dest = parent / "sub"
-    dest.mkdir(parents=True)
+    nested = parent / "sub"
+    nested.mkdir(parents=True)
     command = FakeCommandRunner()
     command.responses = [toplevel(str(parent)), response(0)]
     ctx = make_context(tmp_path, command=command)
 
-    git.repo(URL, dest)
+    git.repo(URL, nested)
 
     assert argvs(command) == [
-        is_repo(str(dest)),
-        ["git", "clone", URL, str(dest)],
+        is_repo(str(nested)),
+        ["git", "clone", URL, str(nested)],
     ]
-    assert [change.summary for change in ctx.changes] == [f"clone {URL} into {dest}"]
+    assert [change.summary for change in ctx.changes] == [f"clone {URL} into {nested}"]
 
 
 def test_existing_repo_up_to_date_is_a_noop(tmp_path):
@@ -186,7 +178,7 @@ def test_existing_repo_behind_remote_is_updated(tmp_path):
     assert ctx.changes[0].summary == f"update {dest} {OLD[:12]}..{NEW[:12]}"
 
 
-def test_version_resolves_branch_before_tag(tmp_path):
+def test_version_resolution_prefers_branches_then_tags(tmp_path):
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
     dest = tmp_path / "repo"
@@ -212,11 +204,9 @@ def test_version_resolves_branch_before_tag(tmp_path):
     ]
     assert ctx.changes == []
 
-
-def test_version_falls_back_to_tag_or_commit(tmp_path):
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
-    dest = tmp_path / "repo"
+    dest = tmp_path / "tagged"
     dest.mkdir()
     command.responses = [
         toplevel(str(dest)),
@@ -251,7 +241,7 @@ def test_unknown_version_fails(tmp_path):
         git.repo(URL, dest, version="nope")
 
 
-def test_dirty_worktree_without_force_fails(tmp_path):
+def test_dirty_worktree_handling_and_force(tmp_path):
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
     dest = tmp_path / "repo"
@@ -271,12 +261,10 @@ def test_dirty_worktree_without_force_fails(tmp_path):
     assert len(command.calls) == 6
     assert ctx.changes == []
 
-
-def test_untracked_files_do_not_block_update(tmp_path):
     # ``reset --hard`` keeps untracked files, so they must not fail the update.
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
-    dest = tmp_path / "repo"
+    dest = tmp_path / "untracked"
     dest.mkdir()
     command.responses = [
         toplevel(str(dest)),
@@ -302,15 +290,13 @@ def test_untracked_files_do_not_block_update(tmp_path):
     ]
     assert len(ctx.changes) == 1
 
-
-def test_dirty_worktree_with_force_is_updated(tmp_path):
     # force=True skips the status probe entirely (short-circuit).
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
-    dest = tmp_path / "repo"
-    dest.mkdir()
+    forced = tmp_path / "forced"
+    forced.mkdir()
     command.responses = [
-        toplevel(str(dest)),
+        toplevel(str(forced)),
         response(0, f"{URL}\n"),
         response(0),
         response(0, f"{NEW}\n"),
@@ -320,22 +306,22 @@ def test_dirty_worktree_with_force_is_updated(tmp_path):
         response(0, f"{NEW}\n"),
     ]
 
-    git.repo(URL, dest, force=True)
+    git.repo(URL, forced, force=True)
 
     assert argvs(command) == [
-        is_repo(str(dest)),
-        ["git", "-C", str(dest), "remote", "get-url", "origin"],
-        ["git", "-C", str(dest), "fetch", "origin"],
-        ["git", "-C", str(dest), "rev-parse", "--verify", "--quiet", "origin/HEAD^{commit}"],
-        ["git", "-C", str(dest), "rev-parse", "HEAD"],
-        ["git", "-C", str(dest), "checkout", "--force", "HEAD"],
-        ["git", "-C", str(dest), "reset", "--hard", NEW],
-        ["git", "-C", str(dest), "rev-parse", "HEAD"],
+        is_repo(str(forced)),
+        ["git", "-C", str(forced), "remote", "get-url", "origin"],
+        ["git", "-C", str(forced), "fetch", "origin"],
+        ["git", "-C", str(forced), "rev-parse", "--verify", "--quiet", "origin/HEAD^{commit}"],
+        ["git", "-C", str(forced), "rev-parse", "HEAD"],
+        ["git", "-C", str(forced), "checkout", "--force", "HEAD"],
+        ["git", "-C", str(forced), "reset", "--hard", NEW],
+        ["git", "-C", str(forced), "rev-parse", "HEAD"],
     ]
     assert len(ctx.changes) == 1
 
 
-def test_update_false_with_same_url_does_not_contact_remote(tmp_path):
+def test_remote_url_changes_update_fetch_and_reconcile_urls(tmp_path):
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
     dest = tmp_path / "repo"
@@ -350,14 +336,12 @@ def test_update_false_with_same_url_does_not_contact_remote(tmp_path):
     ]
     assert ctx.changes == []
 
-
-def test_url_change_triggers_fetch_and_update_even_when_update_is_false(tmp_path):
     command = FakeCommandRunner()
     ctx = make_context(tmp_path, command=command)
-    dest = tmp_path / "repo"
-    dest.mkdir()
+    changed = tmp_path / "changed"
+    changed.mkdir()
     command.responses = [
-        toplevel(str(dest)),
+        toplevel(str(changed)),
         response(0, f"{OLD_URL}\n"),
         response(0),
         response(0),
@@ -369,29 +353,73 @@ def test_url_change_triggers_fetch_and_update_even_when_update_is_false(tmp_path
         response(0, f"{NEW}\n"),
     ]
 
-    git.repo(URL, dest, update=False)
+    git.repo(URL, changed, update=False)
 
     assert argvs(command) == [
-        is_repo(str(dest)),
-        ["git", "-C", str(dest), "remote", "get-url", "origin"],
-        ["git", "-C", str(dest), "remote", "set-url", "origin", URL],
-        ["git", "-C", str(dest), "fetch", "origin"],
-        ["git", "-C", str(dest), "rev-parse", "--verify", "--quiet", "origin/HEAD^{commit}"],
-        ["git", "-C", str(dest), "rev-parse", "HEAD"],
-        ["git", "-C", str(dest), "status", "--porcelain", "--untracked-files=no"],
-        ["git", "-C", str(dest), "checkout", "--force", "HEAD"],
-        ["git", "-C", str(dest), "reset", "--hard", NEW],
-        ["git", "-C", str(dest), "rev-parse", "HEAD"],
+        is_repo(str(changed)),
+        ["git", "-C", str(changed), "remote", "get-url", "origin"],
+        ["git", "-C", str(changed), "remote", "set-url", "origin", URL],
+        ["git", "-C", str(changed), "fetch", "origin"],
+        ["git", "-C", str(changed), "rev-parse", "--verify", "--quiet", "origin/HEAD^{commit}"],
+        ["git", "-C", str(changed), "rev-parse", "HEAD"],
+        ["git", "-C", str(changed), "status", "--porcelain", "--untracked-files=no"],
+        ["git", "-C", str(changed), "checkout", "--force", "HEAD"],
+        ["git", "-C", str(changed), "reset", "--hard", NEW],
+        ["git", "-C", str(changed), "rev-parse", "HEAD"],
     ]
     assert [change.summary for change in ctx.changes] == [
-        f"set remote URL of {dest} to {URL}; update {dest} {OLD[:12]}..{NEW[:12]}",
+        f"set remote URL of {changed} to {URL}; update {changed} {OLD[:12]}..{NEW[:12]}",
     ]
     assert call_data(ctx.changes[0]) == {
         "repo": URL,
-        "dest": str(dest),
+        "dest": str(changed),
         "version": "HEAD",
         "previous_url": OLD_URL,
         "before": OLD,
+        "after": NEW,
+    }
+
+    command = FakeCommandRunner()
+    ctx = make_context(tmp_path, command=command)
+    stable = tmp_path / "stable"
+    stable.mkdir()
+    command.responses = [
+        toplevel(str(stable)),
+        response(0, f"{OLD_URL}\n"),
+        response(0),
+        response(0),
+        response(0, f"{NEW}\n"),
+        response(0, f"{NEW}\n"),
+    ]
+
+    git.repo(URL, stable, update=False)
+
+    assert command.calls[2][0] == ["git", "-C", str(stable), "remote", "set-url", "origin", URL]
+    assert len(command.calls) == 6
+    assert [change.summary for change in ctx.changes] == [f"set remote URL of {stable} to {URL}"]
+
+    command = FakeCommandRunner()
+    ctx = make_context(tmp_path, command=command)
+    missing = tmp_path / "missing-origin"
+    missing.mkdir()
+    command.responses = [
+        toplevel(str(missing)),
+        response(128),
+        response(0),
+        response(0),
+        response(0, f"{NEW}\n"),
+        response(0, f"{NEW}\n"),
+    ]
+
+    git.repo(URL, missing, update=False)
+
+    assert command.calls[2][0] == ["git", "-C", str(missing), "remote", "add", "origin", URL]
+    assert call_data(ctx.changes[0]) == {
+        "repo": URL,
+        "dest": str(missing),
+        "version": "HEAD",
+        "previous_url": None,
+        "before": NEW,
         "after": NEW,
     }
 
@@ -418,54 +446,6 @@ def test_dry_run_url_change_does_not_fetch_the_old_remote(tmp_path):
         "dest": str(dest),
         "version": "HEAD",
         "previous_url": OLD_URL,
-    }
-
-
-def test_url_change_without_drift_only_sets_the_url(tmp_path):
-    command = FakeCommandRunner()
-    ctx = make_context(tmp_path, command=command)
-    dest = tmp_path / "repo"
-    dest.mkdir()
-    command.responses = [
-        toplevel(str(dest)),
-        response(0, f"{OLD_URL}\n"),
-        response(0),
-        response(0),
-        response(0, f"{NEW}\n"),
-        response(0, f"{NEW}\n"),
-    ]
-
-    git.repo(URL, dest, update=False)
-
-    assert command.calls[2][0] == ["git", "-C", str(dest), "remote", "set-url", "origin", URL]
-    assert len(command.calls) == 6
-    assert [change.summary for change in ctx.changes] == [f"set remote URL of {dest} to {URL}"]
-
-
-def test_missing_origin_remote_is_added(tmp_path):
-    command = FakeCommandRunner()
-    ctx = make_context(tmp_path, command=command)
-    dest = tmp_path / "repo"
-    dest.mkdir()
-    command.responses = [
-        toplevel(str(dest)),
-        response(128),
-        response(0),
-        response(0),
-        response(0, f"{NEW}\n"),
-        response(0, f"{NEW}\n"),
-    ]
-
-    git.repo(URL, dest, update=False)
-
-    assert command.calls[2][0] == ["git", "-C", str(dest), "remote", "add", "origin", URL]
-    assert call_data(ctx.changes[0]) == {
-        "repo": URL,
-        "dest": str(dest),
-        "version": "HEAD",
-        "previous_url": None,
-        "before": NEW,
-        "after": NEW,
     }
 
 
