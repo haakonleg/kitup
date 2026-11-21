@@ -149,8 +149,8 @@ def test_command_creates_cwd_and_shell_expand_home(tmp_path, home):
     (home / "work").mkdir()
     (home / "work" / "marker").write_text("", encoding="utf-8")
 
-    skipped = command.run(["true"], creates="marker", cwd="~/work")
-    command.run(["true"], cwd="~/work")
+    skipped = command.run("true", creates="marker", cwd="~/work")
+    command.run("true", cwd="~/work")
     command.shell("echo hi", shell="~/bin/sh", cwd="~/work")
 
     assert skipped.changed is False

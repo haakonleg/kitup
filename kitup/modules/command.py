@@ -24,8 +24,7 @@ module("command", "Guarded one-off commands.")
 
 
 def run(
-    cmd: str | Sequence[str],
-    *,
+    *cmd: str,
     creates: str | Path | None = None,
     unless: str | Sequence[str] | None = None,
     cwd: str | Path | None = None,
@@ -38,7 +37,9 @@ def run(
 ) -> CallResult:
     """Run a command unless a guard says it is already satisfied.
 
-    With ``ignore_errors=True``, failures and start errors return a result with
+    Arguments are passed as separate positional values, so a lone string is
+    kept as a single argument and is never split or run through a shell. With
+    ``ignore_errors=True``, failures and start errors return a result with
     ``failed=True`` instead of failing the task.
     """
     ctx = current_context()
@@ -107,7 +108,7 @@ def shell(
 
 def _run(
     ctx: TaskContext,
-    cmd: str | Sequence[str],
+    cmd: Sequence[str],
     *,
     creates: str | Path | None,
     unless: str | Sequence[str] | None,
@@ -119,7 +120,6 @@ def _run(
     check: bool | None,
     ignore_errors: bool,
 ) -> CallResult:
-    cmd = normalize_strings(cmd)
     require_collection(cmd, "cmd")
     require_bool(changed, "changed")
     require_bool(sudo, "sudo")
@@ -129,17 +129,18 @@ def _run(
     if ignore_errors and check is True:
         raise TaskFailed("ignore_errors cannot be combined with check=True")
     require_timeout(timeout)
+    unless_argv = None
     if unless is not None:
-        unless = normalize_strings(unless)
-        require_collection(unless, "unless")
-        require_text(unless[0], "unless")
+        unless_argv = normalize_strings(unless)
+        require_collection(unless_argv, "unless")
+        require_text(unless_argv[0], "unless")
     if creates is not None:
         require_path(creates, "creates path")
     if cwd is not None:
         require_path(cwd, "cwd")
 
     cwd_path = expand_path(cwd, error=TaskFailed) if cwd is not None else None
-    cmd = [str(part) for part in cmd]
+    cmd = list(cmd)
     if creates is not None:
         marker = expand_path(creates, error=TaskFailed)
         if cwd_path is not None and not marker.is_absolute():
@@ -147,8 +148,8 @@ def _run(
         if os.path.lexists(marker):
             return CallResult(changed=False, summary=f"skip {' '.join(cmd)}", cmd=cmd, failed=False)
 
-    if unless is not None:
-        probe = ctx.probe(unless, cwd=cwd_path, env=env, sudo=sudo, timeout=timeout)
+    if unless_argv is not None:
+        probe = ctx.probe(*unless_argv, cwd=cwd_path, env=env, sudo=sudo, timeout=timeout)
         if probe.returncode == 0:
             return CallResult(changed=False, summary=f"skip {' '.join(cmd)}", cmd=cmd, failed=False)
 
@@ -162,7 +163,7 @@ def _run(
 
     with timed() as timing:
         process = ctx.run(
-            cmd,
+            *cmd,
             cwd=cwd_path,
             env=env,
             sudo=sudo,

@@ -86,11 +86,7 @@ def image(
         call = CallResult(changed=True, summary=summary, **data)
         if ctx.dry_run:
             return ctx.changed(call)
-        ctx.run(
-            [podman_command, "pull", *platform_args, pull_source],
-            timeout=timeout,
-            sudo=sudo,
-        )
+        ctx.run(podman_command, "pull", *platform_args, pull_source, timeout=timeout, sudo=sudo)
         if source is not None and not image_exists(ctx, podman_command, name, sudo=sudo):
             raise TaskFailed(f"image is missing after pull: {name}")
         return ctx.changed(call)
@@ -101,11 +97,7 @@ def image(
     if ctx.dry_run:
         return ctx.changed(call)
     force_args = ["--force"] if force else []
-    ctx.run(
-        [podman_command, "rmi", *force_args, name],
-        timeout=timeout,
-        sudo=sudo,
-    )
+    ctx.run(podman_command, "rmi", *force_args, name, timeout=timeout, sudo=sudo)
     if image_exists(ctx, podman_command, name, sudo=sudo):
         raise TaskFailed(f"image is still present after removal: {name}")
     return ctx.changed(call)
@@ -166,7 +158,7 @@ def build(
     call = CallResult(changed=True, summary=f"build {tag} from {context_label}", image=tag, context=str(context_path))
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(command, timeout=timeout, sudo=sudo)
+    ctx.run(*command, timeout=timeout, sudo=sudo)
     if not image_exists(ctx, podman_command, tag, sudo=sudo):
         raise TaskFailed(f"image is missing after build: {tag}")
     return ctx.changed(call)
@@ -190,5 +182,5 @@ def tag(image: str, targets: str | Iterable[str], *, sudo: bool = False) -> Call
     call = CallResult(changed=True, summary=f"tag {image} as {', '.join(changed)}", source=image, targets=changed)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run([podman_command, "tag", image, *changed], sudo=sudo)
+    ctx.run(podman_command, "tag", image, *changed, sudo=sudo)
     return ctx.changed(call)

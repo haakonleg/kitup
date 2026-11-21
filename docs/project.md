@@ -453,13 +453,13 @@ from kitup.modules import command, dnf, files
 @side_effect
 def refresh_metadata():
     """Refresh package metadata."""
-    command.run(["dnf5", "makecache"], sudo=True)
+    command.run("dnf5", "makecache", sudo=True)
 
 
 @side_effect(one_shot=False)
 def reload_nginx():
     """Reload nginx."""
-    command.run(["systemctl", "reload", "nginx"], sudo=True)
+    command.run("systemctl", "reload", "nginx", sudo=True)
 
 
 @task(tags={"packages"})

@@ -88,7 +88,7 @@ def user(
         call = CallResult(changed=True, summary=f"remove user {name}", user=name)
         if ctx.dry_run:
             return ctx.changed(call)
-        ctx.run(["userdel", name], sudo=True)
+        ctx.run("userdel", name, sudo=True)
         if _probe_user(name) is not None:
             raise TaskFailed(f"user still exists after removal: {name}")
         return ctx.changed(call)
@@ -138,7 +138,7 @@ def group(name: str, *, state: State = "present", gid: int | None = None) -> Cal
         call = CallResult(changed=True, summary=f"remove group {name}", group=name)
         if ctx.dry_run:
             return ctx.changed(call)
-        ctx.run(["groupdel", name], sudo=True)
+        ctx.run("groupdel", name, sudo=True)
         if _probe_group(name) is not None:
             raise TaskFailed(f"group still exists after removal: {name}")
         return ctx.changed(call)
@@ -151,7 +151,7 @@ def group(name: str, *, state: State = "present", gid: int | None = None) -> Cal
         call = CallResult(changed=True, summary=f"create group {name}", group=name)
         if ctx.dry_run:
             return ctx.changed(call)
-        ctx.run(command, sudo=True)
+        ctx.run(*command, sudo=True)
         created = _probe_group(name)
         if created is None:
             raise TaskFailed(f"group was not created: {name}")
@@ -190,7 +190,7 @@ def membership(user: str, group: str, *, state: State = "present") -> CallResult
         call = CallResult(changed=True, summary=f"add {user} to group {group}", user=user, group=group)
         if ctx.dry_run:
             return ctx.changed(call)
-        ctx.run(["gpasswd", "-a", user, group], sudo=True)
+        ctx.run("gpasswd", "-a", user, group, sudo=True)
         updated = _probe_group(group)
         if updated is None or user not in updated.members:
             raise TaskFailed(f"{user} is still not a member of group {group}")
@@ -201,7 +201,7 @@ def membership(user: str, group: str, *, state: State = "present") -> CallResult
     call = CallResult(changed=True, summary=f"remove {user} from group {group}", user=user, group=group)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(["gpasswd", "-d", user, group], sudo=True)
+    ctx.run("gpasswd", "-d", user, group, sudo=True)
     updated = _probe_group(group)
     if updated is None or user in updated.members:
         raise TaskFailed(f"{user} is still a member of group {group}")
@@ -238,7 +238,7 @@ def _create_user(
     call = CallResult(changed=True, summary=summary, user=name)
     if ctx.dry_run:
         return call
-    ctx.run(command, sudo=True)
+    ctx.run(*command, sudo=True)
 
     created = _probe_user(name)
     if created is None:
@@ -298,7 +298,7 @@ def _modify_user(
 
     if fields:
         command.append(current.name)
-        ctx.run(command, sudo=True)
+        ctx.run(*command, sudo=True)
         updated = _probe_user(current.name)
         if updated is None:
             raise TaskFailed(f"user disappeared after modification: {current.name}")
@@ -319,7 +319,7 @@ def _modify_user(
 def _write_password(ctx: TaskContext, name: str, password: str) -> None:
     # Keep the hash out of argv so it cannot leak through process listings or
     # command-failure output.
-    ctx.run(["chpasswd", "-e"], stdin=f"{name}:{password}\n", sudo=True)
+    ctx.run("chpasswd", "-e", stdin=f"{name}:{password}\n", sudo=True)
 
 
 def _verify_password(ctx: TaskContext, name: str, password: str) -> None:
@@ -371,7 +371,7 @@ def _group_entry(value: str | int) -> grp.struct_group:
 
 
 def _probe_shadow(ctx: TaskContext, name: str) -> str | None:
-    result = ctx.probe(["getent", "shadow", name], sudo=True)
+    result = ctx.probe("getent", "shadow", name, sudo=True)
     line = _getent_line(result, f"shadow entry for {name}")
     if line is None:
         return None

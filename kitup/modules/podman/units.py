@@ -111,7 +111,7 @@ def generate_systemd(
     command.extend(f"--after={unit}" for unit in after_units)
     command.append(name)
 
-    result = ctx.probe(command, sudo=sudo)
+    result = ctx.probe(*command, sudo=sudo)
     require_success(result, f"could not generate systemd unit for {name}")
     if not result.stdout.strip():
         raise TaskFailed(f"podman generated an empty systemd unit for {name}")

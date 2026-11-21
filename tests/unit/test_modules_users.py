@@ -1,7 +1,6 @@
 import grp
 import pwd
 import subprocess
-from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Any
 
@@ -33,8 +32,8 @@ class FakeAccounts(FakeCommandRunner):
     def add_group(self, name: str, *, gid: int, members: tuple[str, ...] = ()) -> None:
         self.groups[name] = {"gid": gid, "members": list(members)}
 
-    def run(self, argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        command = [str(part) for part in argv]
+    def run(self, *argv: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        command = list(argv)
         self.calls.append((command, kwargs))
         if command[0] in self.fail:
             raise TaskFailed("command failed", command=command, stderr=self.fail[command[0]])

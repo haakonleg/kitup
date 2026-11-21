@@ -111,7 +111,7 @@ def is_transport_reference(name: str) -> bool:
 
 def image_exists(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool) -> bool:
     """Return whether an image exists locally."""
-    result = ctx.probe([podman_command, "image", "exists", name], sudo=sudo)
+    result = ctx.probe(podman_command, "image", "exists", name, sudo=sudo)
     if result.returncode == 1:
         return False
     require_success(result, f"could not check image: {name}")
@@ -120,10 +120,7 @@ def image_exists(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool
 
 def image_id(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool) -> str:
     """Return an image ID, failing when the image cannot be inspected."""
-    result = ctx.probe(
-        [podman_command, "image", "inspect", "--format", "{{.Id}}", name],
-        sudo=sudo,
-    )
+    result = ctx.probe(podman_command, "image", "inspect", "--format", "{{.Id}}", name, sudo=sudo)
     require_success(result, f"could not inspect image: {name}")
     return result.stdout.strip()
 
@@ -137,10 +134,7 @@ def image_id_or_none(ctx: TaskContext, podman_command: str, name: str, *, sudo: 
 
 def container_status(ctx: TaskContext, podman_command: str, name: str, *, sudo: bool) -> str | None:
     """Return a container status, or ``None`` when it does not exist."""
-    result = ctx.probe(
-        [podman_command, "container", "inspect", "--format", "{{.State.Status}}", name],
-        sudo=sudo,
-    )
+    result = ctx.probe(podman_command, "container", "inspect", "--format", "{{.State.Status}}", name, sudo=sudo)
     if result.returncode != 0:
         missing = any(marker in result.stderr.lower() for marker in _CONTAINER_MISSING_MARKERS)
         if result.returncode == 125 and missing:

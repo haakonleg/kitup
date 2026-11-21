@@ -328,21 +328,21 @@ def test_run_executes_and_probe_returns_nonzero_instead_of_failing(tmp_path):
     command = FakeCommandRunner()
     context = make_context(tmp_path, command=command)
 
-    result = context.run(["dnf5", "install", "-y", "git"])
+    result = context.run("dnf5", "install", "-y", "git")
     assert result.returncode == 0
     assert command.calls[0][0] == ["dnf5", "install", "-y", "git"]
     assert context.calls == []
 
-    context.run(["probe"], check=False)
+    context.run("probe", check=False)
     assert command.calls[1][1]["check"] is False
 
-    context.run(["login"], stdin="secret\n")
+    context.run("login", stdin="secret\n")
     assert command.calls[2][1]["stdin"] == "secret\n"
 
     failing = FakeCommandRunner(returncode=1)
     context = make_context(tmp_path, command=failing)
 
-    result = context.probe(["rpm", "-q", "git"])
+    result = context.probe("rpm", "-q", "git")
     assert result.returncode == 1
     assert failing.calls[0][1]["check"] is False
 
@@ -369,7 +369,7 @@ def test_run_requests_sudo_even_in_dry_run(tmp_path):
     context = make_context(tmp_path, dry_run=True, command=command)
     context.begin_task(task_for())
 
-    context.run(["install"], sudo=True)
+    context.run("install", sudo=True)
 
     assert command.calls[0][0] == ["install"]
     assert command.calls[0][1]["sudo"] is True
@@ -385,7 +385,7 @@ def test_sudo_auth_failure_retries_runs_and_probes_but_other_failures_do_not(tmp
     context = make_context(tmp_path, command=command, sudo=sudo)
     context.begin_task(task_for("Install packages"))
 
-    result = context.run(["dnf5", "install", "-y", "git"], sudo=True)
+    result = context.run("dnf5", "install", "-y", "git", sudo=True)
 
     assert result.returncode == 0
     assert len(command.calls) == 2
@@ -399,7 +399,7 @@ def test_sudo_auth_failure_retries_runs_and_probes_but_other_failures_do_not(tmp
     ]
     context = make_context(tmp_path, command=command, sudo=FakeSudo())
 
-    result = context.probe(["systemctl", "is-enabled", "foo.service"], sudo=True)
+    result = context.probe("systemctl", "is-enabled", "foo.service", sudo=True)
 
     assert result.returncode == 0
     assert result.stdout == "enabled\n"
@@ -409,14 +409,14 @@ def test_sudo_auth_failure_retries_runs_and_probes_but_other_failures_do_not(tmp
     command.responses = [response(1, stderr="boom\n")]
     context = make_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="exit code 1"):
-        context.run(["dnf5", "install"], sudo=True)
+        context.run("dnf5", "install", sudo=True)
     assert len(command.calls) == 1
 
     command = FakeCommandRunner()
     command.responses = [response(1, stderr="sudo: a password is required\n")]
     context = make_context(tmp_path, command=command)
     with pytest.raises(TaskFailed, match="exit code 1"):
-        context.run(["false"])
+        context.run("false")
     assert len(command.calls) == 1
 
 

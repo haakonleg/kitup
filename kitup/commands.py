@@ -4,10 +4,10 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
 from ._utils.paths import expand_path
-from ._utils.validation import normalize_strings
+from ._utils.validation import require_collection
 from .errors import TaskFailed
 from .output import Output
 from .privileges import PrivilegeManager
@@ -22,8 +22,7 @@ class CommandRunner:
 
     def run(
         self,
-        argv: str | Sequence[str],
-        *,
+        *argv: str,
         cwd: str | os.PathLike[str] | None = None,
         env: Mapping[str, str] | None = None,
         sudo: bool = False,
@@ -33,14 +32,15 @@ class CommandRunner:
     ) -> subprocess.CompletedProcess[str]:
         """Run an argv-style command and return its completed process.
 
+        Arguments are passed as separate positional values, so a lone string is
+        kept as a single argument and is never split or run through a shell.
         When ``stdin`` is set, it is written to the command's standard input.
         Callers that use ``sudo=True`` must ensure credentials are valid. With
         ``check=False``, a command that cannot be started is returned with exit
         code 127 and the startup error in ``stderr``.
         """
-        command = [str(part) for part in normalize_strings(argv)]
-        if not command:
-            raise TaskFailed("empty command")
+        require_collection(argv, "command")
+        command = list(argv)
 
         if sudo:
             self.privileges.require_available()

@@ -71,7 +71,7 @@ def key(
         **data,
     )
     if runtime_changed and not ctx.dry_run:
-        ctx.run(["sysctl", "-w", f"{key_name}={desired}"], sudo=True)
+        ctx.run("sysctl", "-w", f"{key_name}={desired}", sudo=True)
     return ctx.changed(result)
 
 
@@ -105,7 +105,7 @@ def _format_value(value: str | float) -> str:
 
 
 def _read_runtime(ctx: TaskContext, name: str) -> str:
-    result = ctx.probe(["sysctl", "-n", name], sudo=False)
+    result = ctx.probe("sysctl", "-n", name, sudo=False)
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "key unavailable"
         raise TaskFailed(f"sysctl {name}: {detail}")

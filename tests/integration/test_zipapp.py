@@ -37,7 +37,7 @@ def test_zipapp_lists_and_applies_outside_the_source_tree(tmp_path: Path) -> Non
             path = {WORKER_PATH!r}
             files.file(path, content="applied\\n", mode=0o600, sudo=True)
             if not ctx.dry_run:
-                assert ctx.probe(["cat", path], sudo=True).stdout == "applied\\n"
+                assert ctx.probe("cat", path, sudo=True).stdout == "applied\\n"
                 files.file(path, state="absent", sudo=True)
 
         @task("write marker")

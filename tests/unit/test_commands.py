@@ -59,7 +59,7 @@ def test_command_captures_output_argv_and_process_group(monkeypatch):
     calls = patch_popen(monkeypatch, FakeProcess(stdout="hello"))
     runner = CommandRunner(PrivilegeManager())
 
-    result = runner.run(["tool"])
+    result = runner.run("tool")
 
     assert result.returncode == 0
     assert result.stdout == "hello"
@@ -71,12 +71,32 @@ def test_command_captures_output_argv_and_process_group(monkeypatch):
     assert calls[0][0] == ["tool --flag"]
 
 
+def test_varargs_keep_arguments_separate(monkeypatch):
+    calls = patch_popen(monkeypatch, FakeProcess())
+    runner = CommandRunner(PrivilegeManager())
+    arguments = ["--flag", "value"]
+
+    runner.run("tool", *arguments)
+
+    assert calls[0][0] == ["tool", "--flag", "value"]
+
+
+def test_empty_command_is_rejected(monkeypatch):
+    calls = patch_popen(monkeypatch, FakeProcess())
+    runner = CommandRunner(PrivilegeManager())
+
+    with pytest.raises(TaskFailed, match="command must not be empty"):
+        runner.run()
+
+    assert calls == []
+
+
 def test_nonzero_exit_raises_or_can_be_probed(monkeypatch):
     patch_popen(monkeypatch, FakeProcess(returncode=3, stderr="oops"))
     runner = CommandRunner(PrivilegeManager())
 
     with pytest.raises(TaskFailed) as exc:
-        runner.run(["tool"])
+        runner.run("tool")
 
     assert exc.value.command == ["tool"]
     assert "exit code 3" in exc.value.message
@@ -85,7 +105,7 @@ def test_nonzero_exit_raises_or_can_be_probed(monkeypatch):
     patch_popen(monkeypatch, FakeProcess(returncode=4))
     runner = CommandRunner(PrivilegeManager())
 
-    result = runner.run(["tool"], check=False)
+    result = runner.run("tool", check=False)
 
     assert result.returncode == 4
 
@@ -94,7 +114,7 @@ def test_unstartable_command_can_be_probed_or_checked(monkeypatch):
     patch_popen_raises(monkeypatch, FileNotFoundError(2, "No such file or directory", "missing"))
     runner = CommandRunner(PrivilegeManager())
 
-    result = runner.run(["missing"], check=False)
+    result = runner.run("missing", check=False)
 
     assert result.args == ["missing"]
     assert result.returncode == 127
@@ -104,7 +124,7 @@ def test_unstartable_command_can_be_probed_or_checked(monkeypatch):
     runner = CommandRunner(PrivilegeManager())
 
     with pytest.raises(TaskFailed, match="could not run missing"):
-        runner.run(["missing"])
+        runner.run("missing")
 
 
 def test_stdin_is_piped_to_the_process(monkeypatch):
@@ -118,7 +138,7 @@ def test_stdin_is_piped_to_the_process(monkeypatch):
     calls = patch_popen(monkeypatch, StdinProcess())
     runner = CommandRunner(PrivilegeManager())
 
-    runner.run(["tool"], stdin="secret\n")
+    runner.run("tool", stdin="secret\n")
 
     assert calls[0][1]["stdin"] == subprocess.PIPE
     assert received == ["secret\n"]
@@ -129,7 +149,7 @@ def test_sudo_is_wrapped_and_checks_availability(monkeypatch):
     sudo = FakeSudo()
     runner = CommandRunner(sudo)  # type: ignore[arg-type]
 
-    runner.run(["dnf5", "install"], sudo=True)
+    runner.run("dnf5", "install", sudo=True)
 
     assert sudo.refresh_count == 0
     assert sudo.require_count == 1
@@ -148,7 +168,7 @@ def test_timeout_kills_the_process_group(monkeypatch):
     runner = CommandRunner(PrivilegeManager())
 
     with pytest.raises(TaskFailed, match="timed out") as exc:
-        runner.run(["tool"], timeout=0.1)
+        runner.run("tool", timeout=0.1)
 
     assert killed == [process]
     assert exc.value.stdout == "tail out"

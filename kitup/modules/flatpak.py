@@ -52,7 +52,7 @@ def remote(
         if not gpg_verify:
             command.append("--no-gpg-verify")
         command.extend([name, url])
-        ctx.run(command, sudo=scope == "system")
+        ctx.run(*command, sudo=scope == "system")
         return ctx.changed(call)
 
     if name not in _remote_names(ctx, flag):
@@ -61,10 +61,7 @@ def remote(
     call = CallResult(changed=True, summary=f"remove remote {name}", remote=name, scope=scope)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(
-        [_flatpak(ctx), "remote-delete", flag, name],
-        sudo=scope == "system",
-    )
+    ctx.run(_flatpak(ctx), "remote-delete", flag, name, sudo=scope == "system")
     return ctx.changed(call)
 
 
@@ -108,7 +105,7 @@ def packages(
         if remote is not None:
             command.append(remote)
         command.extend(missing)
-        ctx.run(command, sudo=scope == "system")
+        ctx.run(*command, sudo=scope == "system")
         remaining_installed = _installed_refs(ctx, flag)
         remaining = [name for name in missing if not _matching_refs(name, remaining_installed)]
         if remaining:
@@ -127,10 +124,7 @@ def packages(
     call = CallResult(changed=True, summary=format_items(targets, sign="-"), removed=targets, scope=scope)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(
-        [_flatpak(ctx), "uninstall", "-y", "--noninteractive", flag, *targets],
-        sudo=scope == "system",
-    )
+    ctx.run(_flatpak(ctx), "uninstall", "-y", "--noninteractive", flag, *targets, sudo=scope == "system")
     remaining_installed = _installed_refs(ctx, flag)
     remaining = [name for name in present if _matching_refs(name, remaining_installed)]
     if remaining:
@@ -148,19 +142,13 @@ def _flatpak(ctx: TaskContext) -> str:
 
 
 def _remote_names(ctx: TaskContext, flag: str) -> list[str]:
-    result = ctx.probe(
-        [_flatpak(ctx), "remotes", flag, "--columns=name"],
-        sudo=False,
-    )
+    result = ctx.probe(_flatpak(ctx), "remotes", flag, "--columns=name", sudo=False)
     require_success(result, "could not list flatpak remotes")
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 def _installed_refs(ctx: TaskContext, flag: str) -> list[tuple[str, str]]:
-    result = ctx.probe(
-        [_flatpak(ctx), "list", flag, "--columns=application,ref"],
-        sudo=False,
-    )
+    result = ctx.probe(_flatpak(ctx), "list", flag, "--columns=application,ref", sudo=False)
     require_success(result, "could not list installed flatpak refs")
 
     installed: list[tuple[str, str]] = []

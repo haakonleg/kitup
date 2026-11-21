@@ -34,7 +34,7 @@ def ensure(path: str, *, comment: str = "") -> CallResult:
     if ctx.dry_run:
         return ctx.changed(summary=f"would generate ssh key {key}", path=str(key))
     key.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    ctx.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", str(key)])
+    ctx.run("ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", str(key))
     return ctx.changed(summary=f"generated ssh key {key}", path=str(key))
 ```
 
@@ -81,7 +81,7 @@ def port(number: int, *, protocol: str = "tcp", state: str = "present") -> CallR
         raise TaskFailed(f"invalid port: {number}")
 
     spec = f"{number}/{protocol}"
-    is_open = ctx.probe(["firewall-cmd", f"--query-port={spec}"], sudo=True).returncode == 0
+    is_open = ctx.probe("firewall-cmd", f"--query-port={spec}", sudo=True).returncode == 0
     if is_open == (state == "present"):
         summary = f"ensure port {spec} is {'open' if is_open else 'closed'}"
         return ctx.changed(changed=False, summary=summary, port=spec)
@@ -90,7 +90,7 @@ def port(number: int, *, protocol: str = "tcp", state: str = "present") -> CallR
         return ctx.changed(summary=f"would {verb} port {spec}", port=spec)
 
     flag = "--add-port" if state == "present" else "--remove-port"
-    ctx.run(["firewall-cmd", f"{flag}={spec}"], sudo=True)
+    ctx.run("firewall-cmd", f"{flag}={spec}", sudo=True)
     summary = f"{'opened' if state == 'present' else 'closed'} port {spec}"
     return ctx.changed(summary=summary, port=spec)
 ```
@@ -127,10 +127,10 @@ def configure_ssh_and_firewall():
 - Be idempotent: inspect the current state first and change only what is needed.
 - Honor `ctx.dry_run` before every mutating `ctx.run()`.
 - Request privilege with `sudo=True` on `ctx.run()` or a module helper. Never
-  embed `sudo` in the command list.
+  embed `sudo` in the command arguments.
 - Record the operation with `ctx.changed(...)` and return the resulting
   `CallResult`. Use `changed=False` when nothing changed.
-- Use `ctx.probe([...])` for read-only queries and `ctx.run([...])` for
+- Use `ctx.probe(...)` for read-only queries and `ctx.run(...)` for
   mutations. Pass `check=False` to `ctx.run()` when the exit code is part of
   the logic; commands that cannot start are reported as exit code `127`.
 

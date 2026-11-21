@@ -86,7 +86,7 @@ def timezone(zone: str) -> CallResult:
     call = CallResult(changed=True, summary=f"set time zone {zone}", timezone=zone)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(["timedatectl", "set-timezone", zone], sudo=True)
+    ctx.run("timedatectl", "set-timezone", zone, sudo=True)
     if _timedatectl_property(ctx, "Timezone") != zone:
         raise TaskFailed(f"time zone did not change to {zone!r}")
     return ctx.changed(call)
@@ -108,10 +108,7 @@ def ntp(enabled: bool) -> CallResult:  # noqa: FBT001 - positional boolean match
     call = CallResult(changed=True, summary=f"{action} network time synchronization", ntp=enabled)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(
-        ["timedatectl", "set-ntp", "true" if enabled else "false"],
-        sudo=True,
-    )
+    ctx.run("timedatectl", "set-ntp", "true" if enabled else "false", sudo=True)
     return ctx.changed(call)
 
 
@@ -128,10 +125,7 @@ def rtc_local(enabled: bool = False) -> CallResult:  # noqa: FBT001, FBT002 - po
     call = CallResult(changed=True, summary=f"set RTC to {mode}", rtc_local=enabled)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(
-        ["timedatectl", "set-local-rtc", "1" if enabled else "0", "--adjust-system-clock"],
-        sudo=True,
-    )
+    ctx.run("timedatectl", "set-local-rtc", "1" if enabled else "0", "--adjust-system-clock", sudo=True)
     if _parse_yes_no(_timedatectl_property(ctx, "LocalRTC"), "LocalRTC") != enabled:
         raise TaskFailed(f"RTC mode did not change to {mode}")
     return ctx.changed(call)
@@ -162,7 +156,7 @@ def locale(values: Mapping[str, str]) -> CallResult:
     call = CallResult(changed=True, summary=f"set locale {' '.join(assignments)}", locale=desired)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(["localectl", "set-locale", *assignments], sudo=True)
+    ctx.run("localectl", "set-locale", *assignments, sudo=True)
 
     updated = _localectl_status(ctx)
     for key, value in desired.items():
@@ -182,21 +176,21 @@ def _converge_hostname(ctx: TaskContext, kind: _HostnameKind, desired: str) -> C
     call = CallResult(changed=True, summary=summary, hostname=desired, kind=kind)
     if ctx.dry_run:
         return call
-    ctx.run(["hostnamectl", "hostname", f"--{kind}", desired], sudo=True)
+    ctx.run("hostnamectl", "hostname", f"--{kind}", desired, sudo=True)
     if _hostnamectl_get(ctx, kind) != desired:
         raise TaskFailed(f"{kind} hostname did not change to {desired!r}")
     return call
 
 
 def _hostnamectl_get(ctx: TaskContext, kind: _HostnameKind) -> str:
-    result = ctx.probe(["hostnamectl", "hostname", f"--{kind}"], sudo=False)
+    result = ctx.probe("hostnamectl", "hostname", f"--{kind}", sudo=False)
     require_success(result, f"hostnamectl hostname --{kind} failed")
     return result.stdout.strip()
 
 
 def _timedatectl_show(ctx: TaskContext, *properties: str) -> dict[str, str]:
     argv = ["timedatectl", "show", *(f"--property={property}" for property in properties)]
-    result = ctx.probe(argv, sudo=False)
+    result = ctx.probe(*argv, sudo=False)
     require_success(result, "timedatectl show failed")
 
     values: dict[str, str] = {}
@@ -216,7 +210,7 @@ def _timedatectl_property(ctx: TaskContext, property: str) -> str:
 
 
 def _localectl_status(ctx: TaskContext) -> dict[str, str]:
-    result = ctx.probe(["localectl", "status"], sudo=False, env={"LC_ALL": "C"})
+    result = ctx.probe("localectl", "status", sudo=False, env={"LC_ALL": "C"})
     require_success(result, "localectl status failed")
 
     status: dict[str, str] = {}

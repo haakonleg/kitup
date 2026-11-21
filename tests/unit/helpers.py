@@ -33,7 +33,7 @@ class FakeCommandRunner:
         self.stderr = stderr
         self.responses: list[Callable[[list[str]], int | subprocess.CompletedProcess[str]]] = []
 
-    def run(self, argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def run(self, *argv: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         command = list(argv)
         self.calls.append((command, kwargs))
         response = self.responses.pop(0)(command) if self.responses else self.returncode

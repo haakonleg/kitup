@@ -186,7 +186,7 @@ def tools(
         result = _tools_changed(wanted, state, removed)
         if ctx.dry_run:
             return ctx.changed(result)
-        ctx.run([uv, "tool", "uninstall", *removed])
+        ctx.run(uv, "tool", "uninstall", *removed)
         post = _installed_tools(ctx, tools_dir)
         remaining = [req.name for req in targets if req.normalized in post]
         if remaining:
@@ -233,9 +233,9 @@ def tools(
     versions_before = _tool_versions(ctx, uv) if state == "latest" else {}
     # `uv tool install` takes one package, but uninstall and upgrade accept multiple names.
     for name in install:
-        ctx.run([uv, "tool", "install", *python_args, *extra, name])
+        ctx.run(uv, "tool", "install", *python_args, *extra, name)
     if upgrade:
-        ctx.run([uv, "tool", "upgrade", *python_args, *extra, *upgrade])
+        ctx.run(uv, "tool", "upgrade", *python_args, *extra, *upgrade)
 
     post = _installed_tools(ctx, tools_dir)
     missing = [name for name in install if parse_requirement(name, tool=True).normalized not in post]
@@ -364,7 +364,7 @@ def _init_project(
     if ctx.dry_run:
         return True
     uv = _uv_bin(ctx)
-    ctx.run([uv, "init", "--bare", *_python_args(python), str(project_path)])
+    ctx.run(uv, "init", "--bare", *_python_args(python), str(project_path))
     if file_actions.stat(ctx, pyproject, sudo=False) is None:
         raise TaskFailed(f"uv init did not create {pyproject}")
     return True
@@ -397,8 +397,8 @@ def _project_converged(
         return False  # the project does not exist yet, so there is nothing to probe
     return (
         _project_env_exists(ctx, project_path)
-        and ctx.probe(sync_probe).returncode == 0
-        and ctx.probe(lock_probe).returncode == 0
+        and ctx.probe(*sync_probe).returncode == 0
+        and ctx.probe(*lock_probe).returncode == 0
     )
 
 
@@ -439,9 +439,9 @@ def _sync_project(
     lock_args: list[str],
 ) -> None:
     """Run ``uv sync`` and verify that both plain ``--check`` probes pass afterwards."""
-    ctx.run([*sync_base, *upgrade_args, *extra])
-    sync_check = ctx.probe(check_args)
-    lock_check = ctx.probe(lock_args)
+    ctx.run(*sync_base, *upgrade_args, *extra)
+    sync_check = ctx.probe(*check_args)
+    lock_check = ctx.probe(*lock_args)
     if sync_check.returncode != 0 or lock_check.returncode != 0:
         raise TaskFailed(
             f"project is not synchronized after uv sync: {project_path}",
@@ -461,9 +461,9 @@ def _require_uv(ctx: TaskContext, argv: list[str], *, failure: str) -> subproces
 
     A failure is re-checked with ``uv --version`` to report a broken uv clearly.
     """
-    result = ctx.probe(argv)
+    result = ctx.probe(*argv)
     if result.returncode != 0:
-        if ctx.probe([argv[0], "--version"]).returncode != 0:
+        if ctx.probe(argv[0], "--version").returncode != 0:
             raise TaskFailed("uv could not run — is uv installed and on PATH?")
         raise TaskFailed(failure, command=argv, stdout=result.stdout, stderr=result.stderr)
     return result

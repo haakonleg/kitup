@@ -152,13 +152,13 @@ def _create_container(
     arguments.append(image)
     arguments.extend(container_command(command))
 
-    ctx.run(arguments, timeout=timeout, sudo=sudo)
+    ctx.run(*arguments, timeout=timeout, sudo=sudo)
     if container_status(ctx, podman_command, name, sudo=sudo) is None:
         raise TaskFailed(f"container is missing after create: {name}")
 
 
 def _start_container(ctx: TaskContext, podman_command: str, name: str, *, timeout: float, sudo: bool) -> None:
-    ctx.run([podman_command, "start", name], timeout=timeout, sudo=sudo)
+    ctx.run(podman_command, "start", name, timeout=timeout, sudo=sudo)
     status = container_status(ctx, podman_command, name, sudo=sudo)
     if status is None:
         raise TaskFailed(f"container is missing after start: {name}")
@@ -176,16 +176,12 @@ def _stop_container(
     if stop_timeout is not None:
         arguments.append(f"--time={stop_timeout}")
     arguments.append(name)
-    ctx.run(arguments, timeout=timeout, sudo=sudo)
+    ctx.run(*arguments, timeout=timeout, sudo=sudo)
     if container_status(ctx, podman_command, name, sudo=sudo) == "running":
         raise TaskFailed(f"container did not stop: {name}")
 
 
 def _remove_container(ctx: TaskContext, podman_command: str, name: str, *, timeout: float, sudo: bool) -> None:
-    ctx.run(
-        [podman_command, "rm", "--force", name],
-        timeout=timeout,
-        sudo=sudo,
-    )
+    ctx.run(podman_command, "rm", "--force", name, timeout=timeout, sudo=sudo)
     if container_status(ctx, podman_command, name, sudo=sudo) is not None:
         raise TaskFailed(f"container is still present after removal: {name}")

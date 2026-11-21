@@ -6,7 +6,7 @@ Run guarded one-off commands.
 from kitup.modules import command
 ```
 
-## `run(cmd, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None, ignore_errors=False)`
+## `run(*cmd, *, creates=None, unless=None, cwd=None, env=None, changed=True, sudo=False, timeout=600, check=None, ignore_errors=False)`
 
 Run `cmd` unless a guard is already satisfied.
 
@@ -42,7 +42,11 @@ Run `cmd` unless a guard is already satisfied.
 
 ```python
 command.run(
-    ["install", "-m", "0644", "/dev/null", "/var/lib/example/ready"],
+    "install",
+    "-m",
+    "0644",
+    "/dev/null",
+    "/var/lib/example/ready",
     creates="/var/lib/example/ready",
 )
 ```
@@ -50,7 +54,7 @@ command.run(
 To act on an expected failure, check `failed` on the returned result:
 
 ```python
-result = command.run(["optional-tool", "--cleanup"], ignore_errors=True)
+result = command.run("optional-tool", "--cleanup", ignore_errors=True)
 if result.failed:
     ctx.note(f"optional cleanup failed with exit code {result.returncode}")
 ```

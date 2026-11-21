@@ -222,7 +222,7 @@ def _ensure_present(
     if ctx.dry_run:
         return result
 
-    ctx.run([*pip, *_pip_install_args(wanted, extra, upgrade=upgrade, report=False)], sudo=sudo)
+    ctx.run(*pip, *_pip_install_args(wanted, extra, upgrade=upgrade, report=False), sudo=sudo)
 
     remaining = _install_report(ctx, pip, wanted, extra, upgrade=upgrade, sudo=sudo)
     if remaining:
@@ -266,7 +266,7 @@ def _ensure_absent(
     if ctx.dry_run:
         return result
 
-    ctx.run([*pip, "uninstall", "-y", *extra, *targets], sudo=sudo)
+    ctx.run(*pip, "uninstall", "-y", *extra, *targets, sudo=sudo)
     installed_after = _installed_names(ctx, pip, sudo=sudo)
     remaining = [name for name in targets if normalize_dist_name(name) in installed_after]
     if remaining:
@@ -350,9 +350,9 @@ def _pip_json[T](
     that a missing pip is reported as such, not as a too-old pip.
     """
     command = [*pip, *args]
-    result = ctx.probe(command, sudo=sudo)
+    result = ctx.probe(*command, sudo=sudo)
     if result.returncode != 0:
-        if ctx.probe([*pip, "--version"], sudo=sudo).returncode != 0:
+        if ctx.probe(*pip, "--version", sudo=sudo).returncode != 0:
             raise TaskFailed(
                 f"pip could not run via '{' '.join(pip)}' — is pip installed for this Python? (pip >= 23.0 is required)"
             )
@@ -414,7 +414,7 @@ def _prepare_venv(ctx: TaskContext, venv: Path | None, python: str | None, *, st
         return "missing"
     if ctx.dry_run:
         return "would-create"
-    ctx.run([_python_bin(ctx, python), "-m", "venv", str(venv)], sudo=sudo)
+    ctx.run(_python_bin(ctx, python), "-m", "venv", str(venv), sudo=sudo)
     if not _is_venv(ctx, venv, sudo=sudo):
         raise TaskFailed(f"venv was not created: {venv}")
     return "created"

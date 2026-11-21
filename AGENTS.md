@@ -167,8 +167,8 @@ When changing packaging or the zipapp builder:
   - ``changed=False`` probes may use the command or operation as the summary.
   Join multiple steps with ``"; "``.
 - Modules MUST honor `ctx.dry_run`: report what would change without mutating;
-  check `ctx.dry_run` before every mutating `ctx.run()`. Use `ctx.probe([...])`
-  for read-only queries and `ctx.run([...])` for mutations.
+  check `ctx.dry_run` before every mutating `ctx.run()`. Use `ctx.probe(...)`
+  for read-only queries and `ctx.run(...)` for mutations.
 - Request privilege with `sudo=True` on `ctx.run` or the module helper. Never
   embed `sudo` in the command list.
 - Expensive per-run work belongs in `ctx.memo(key, loader)` or behind the

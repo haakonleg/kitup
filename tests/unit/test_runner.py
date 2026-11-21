@@ -346,7 +346,7 @@ def test_sudo_is_requested_at_first_sudo_operation(tmp_path):
 
     def install():
         ctx = current_context()
-        ctx.run(["install"], sudo=True)
+        ctx.run("install", sudo=True)
 
     add_task(bundle, install, name="Install packages")
 
@@ -664,10 +664,10 @@ def test_side_effects_run_in_dry_run_and_record_would_be_changes(tmp_path):
     bundle = Bundle("base")
 
     def reload():
-        command.run(["systemctl", "reload", "nginx"])
+        command.run("systemctl", "reload", "nginx")
 
     def refresh():
-        command.run(["dnf5", "makecache"])
+        command.run("dnf5", "makecache")
 
     immediate = side_effect("Reload", one_shot=False)(reload)
     deferred = side_effect("Refresh")(refresh)

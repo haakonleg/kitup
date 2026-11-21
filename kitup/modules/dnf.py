@@ -89,7 +89,7 @@ def swap(old: str, new: str, *, allowerasing: bool = False) -> CallResult:
     command = [_dnf_command(ctx), "swap", "-y", old, new]
     if allowerasing:
         command.append("--allowerasing")
-    ctx.run(command, sudo=True)
+    ctx.run(*command, sudo=True)
 
     if not _rpm_installed(ctx, new):
         raise TaskFailed(f"package still missing after swap: {new}")
@@ -127,7 +127,7 @@ def _ensure_absent(
         command = [_dnf_command(ctx), "group", "remove", "-y", *installed_groups]
     else:
         command = [_dnf_command(ctx), "remove", "-y", *specs]
-    ctx.run(command, sudo=True)
+    ctx.run(*command, sudo=True)
 
     remaining_groups = _installed_groups(ctx, installed_groups)
     remaining_packages = _installed_packages(ctx, installed_packages)
@@ -152,7 +152,7 @@ def autoremove() -> CallResult:
     call = CallResult(changed=True, summary=summary, removed=unneeded)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run([_dnf_command(ctx), "autoremove", "-y"], sudo=True)
+    ctx.run(_dnf_command(ctx), "autoremove", "-y", sudo=True)
     return ctx.changed(call)
 
 
@@ -177,7 +177,7 @@ def copr(project: str, *, state: State = "present") -> CallResult:
     call = CallResult(changed=True, summary=summary, repository=project)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run([_dnf_command(ctx), *command], sudo=True)
+    ctx.run(_dnf_command(ctx), *command, sudo=True)
     return ctx.changed(call)
 
 
@@ -235,7 +235,7 @@ def repository(source: str | Path | None = None, *, state: State = "present", na
 
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(command, sudo=True)
+    ctx.run(*command, sudo=True)
     return ctx.changed(call)
 
 
@@ -262,7 +262,7 @@ def rpm(sources: str | Path | Iterable[str | Path]) -> CallResult:
     call = CallResult(changed=True, summary=f"install {', '.join(labels)}", installed=missing)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run([_dnf_command(ctx), "install", "-y", *wanted], sudo=True)
+    ctx.run(_dnf_command(ctx), "install", "-y", *wanted, sudo=True)
     return ctx.changed(call)
 
 
@@ -363,7 +363,7 @@ def _ensure_present(
     )
     if ctx.dry_run:
         return result
-    ctx.run(command, sudo=True)
+    ctx.run(*command, sudo=True)
 
     remaining_groups = _missing_group_names(ctx, missing_groups)
     remaining_packages = _missing_packages(ctx, missing_packages)
@@ -394,7 +394,7 @@ def _rpm_source_names(ctx: TaskContext, sources: list[str]) -> list[str]:
 
 def _dnf_probe(ctx: TaskContext, args: list[str], message: str) -> str:
     """Run a read-only dnf query and return its stdout."""
-    result = ctx.probe([_dnf_command(ctx), *args], sudo=False)
+    result = ctx.probe(_dnf_command(ctx), *args, sudo=False)
     require_success(result, message)
     return result.stdout
 
@@ -416,7 +416,7 @@ def _repository_path(ctx: TaskContext, filename: str) -> Path:
 
 
 def _reposdir(ctx: TaskContext) -> Path:
-    result = ctx.probe([_dnf_command(ctx), "--dump-main-config"], sudo=False)
+    result = ctx.probe(_dnf_command(ctx), "--dump-main-config", sudo=False)
     if result.returncode == 0:
         for line in result.stdout.splitlines():
             key, separator, value = line.partition("=")
@@ -539,7 +539,7 @@ def _query_installed_packages(ctx: TaskContext, names: list[str]) -> set[str]:
     """Return the subset of ``names`` that is installed, using one ``rpm`` call."""
     if not names:
         return set()
-    result = ctx.probe(["rpm", "-q", "--queryformat", "%{NAME}\n", *names], sudo=False)
+    result = ctx.probe("rpm", "-q", "--queryformat", "%{NAME}\n", *names, sudo=False)
     missing: set[str] = set()
     for line in (*result.stdout.splitlines(), *result.stderr.splitlines()):
         match = _MISSING_PACKAGE.match(line.strip())

@@ -4,7 +4,7 @@ import builtins
 import subprocess
 import sys
 import traceback
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from contextvars import ContextVar, Token
 from functools import wraps
 from pathlib import Path
@@ -313,8 +313,7 @@ class TaskContext:
 
     def run(
         self,
-        argv: str | Sequence[str],
-        *,
+        *argv: str,
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
         sudo: bool = False,
@@ -324,6 +323,9 @@ class TaskContext:
     ) -> subprocess.CompletedProcess[str]:
         """Run a command and return its completed process.
 
+        Arguments are passed as separate positional values, so a lone string is
+        kept as a single argument and is never split or run through a shell.
+
         This is a pure command runner: it never records changes, evaluates
         guards, or handles dry-run. Only commands run with ``sudo=True``
         request sudo credentials; a command that fails because the credentials
@@ -332,7 +334,7 @@ class TaskContext:
 
         def execute() -> subprocess.CompletedProcess[str]:
             return self.command.run(
-                argv,
+                *argv,
                 cwd=cwd,
                 env=env,
                 sudo=sudo,
@@ -349,10 +351,10 @@ class TaskContext:
             raise_for_status(result)
         return result
 
-    def probe(self, argv: str | Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def probe(self, *argv: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         """Run a query command without failing on a nonzero exit or start error."""
         kwargs.pop("check", None)
-        return self.run(argv, check=False, **kwargs)
+        return self.run(*argv, check=False, **kwargs)
 
     def skip(self, reason: str = "") -> Never:
         """Skip the current task before making any changes."""

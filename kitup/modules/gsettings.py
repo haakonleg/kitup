@@ -40,36 +40,26 @@ def key(schema: str, key: str, value: Any = None, *, state: State = "present") -
     call = CallResult(changed=True, summary=f"set {schema} {key}={desired}", schema=schema, key=key, value=value)
     if ctx.dry_run:
         return ctx.changed(call)
-    ctx.run(
-        ["gsettings", "set", schema, key, desired],
-        sudo=False,
-    )
+    ctx.run("gsettings", "set", schema, key, desired, sudo=False)
     return ctx.changed(call)
 
 
 def _reset(ctx: TaskContext, schema: str, key: str) -> CallResult:
     # Read first so a missing schema or key fails before recording a change.
     current = _read(ctx, schema, key)
-    default = ctx.probe(
-        ["gsettings", "get", schema, key],
-        sudo=False,
-        env={"GSETTINGS_BACKEND": "memory"},
-    )
+    default = ctx.probe("gsettings", "get", schema, key, sudo=False, env={"GSETTINGS_BACKEND": "memory"})
     if default.returncode == 0 and current == _normalize(default.stdout):
         return CallResult(changed=False, summary=f"ensure {schema} {key} is reset", schema=schema, key=key)
 
     call = CallResult(changed=True, summary=f"reset {schema} {key}", schema=schema, key=key)
     if ctx.dry_run:
         return call
-    ctx.run(
-        ["gsettings", "reset", schema, key],
-        sudo=False,
-    )
+    ctx.run("gsettings", "reset", schema, key, sudo=False)
     return call
 
 
 def _read(ctx: TaskContext, schema: str, key: str) -> str:
-    result = ctx.probe(["gsettings", "get", schema, key], sudo=False)
+    result = ctx.probe("gsettings", "get", schema, key, sudo=False)
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "key unavailable"
         raise TaskFailed(f"gsettings {schema} {key}: {detail}")

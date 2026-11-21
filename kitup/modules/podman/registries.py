@@ -155,7 +155,7 @@ def login(
     if tls_verify is not None:
         command.append(f"--tls-verify={'true' if tls_verify else 'false'}")
     command.append(registry)
-    ctx.run(command, stdin=f"{password}\n", sudo=sudo)
+    ctx.run(*command, stdin=f"{password}\n", sudo=sudo)
     return ctx.changed(call)
 
 
@@ -179,7 +179,7 @@ def logout(registry: str, *, authfile: str | Path | None = None, sudo: bool = Fa
     if authfile_path is not None:
         command.append(f"--authfile={authfile_path}")
     command.append(registry)
-    ctx.run(command, sudo=sudo)
+    ctx.run(*command, sudo=sudo)
     return ctx.changed(call)
 
 
@@ -221,7 +221,7 @@ def _login_status(
     if authfile is not None:
         command.append(f"--authfile={authfile}")
     command.append(registry)
-    result = ctx.probe(command, sudo=sudo)
+    result = ctx.probe(*command, sudo=sudo)
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None

@@ -52,7 +52,7 @@ def unit(
             actions.append(action)
             summaries.append(f"{_PAST_TENSE[action]} {unit}")
             if not ctx.dry_run:
-                ctx.run([*base, action, unit], sudo=scope == "system")
+                ctx.run(*base, action, unit, sudo=scope == "system")
 
     if desired is not None:
         active = _is_active(ctx, base, unit)
@@ -61,7 +61,7 @@ def unit(
             actions.append(action)
             summaries.append(f"{_PAST_TENSE[action]} {unit}")
             if not ctx.dry_run:
-                ctx.run([*base, action, unit], sudo=scope == "system")
+                ctx.run(*base, action, unit, sudo=scope == "system")
 
     if not actions:
         wanted: list[str] = []
@@ -81,7 +81,7 @@ def daemon_reload(*, scope: str = "system") -> CallResult:
     base = _command(ctx, scope)
     if ctx.dry_run:
         return ctx.changed(summary=f"would reload systemd ({scope})", scope=scope)
-    ctx.run([*base, "daemon-reload"], sudo=scope == "system")
+    ctx.run(*base, "daemon-reload", sudo=scope == "system")
     return ctx.changed(summary=f"reload systemd ({scope})", scope=scope)
 
 
@@ -91,12 +91,12 @@ def _command(ctx: TaskContext, scope: str) -> list[str]:
 
 
 def _is_enabled(ctx: TaskContext, base: list[str], unit: str) -> bool:
-    result = ctx.probe([*base, "is-enabled", unit], sudo=False)
+    result = ctx.probe(*base, "is-enabled", unit, sudo=False)
     return result.returncode == 0 and result.stdout.strip() in _ENABLED_STATES
 
 
 def _is_active(ctx: TaskContext, base: list[str], unit: str) -> bool:
-    result = ctx.probe([*base, "is-active", unit], sudo=False)
+    result = ctx.probe(*base, "is-active", unit, sudo=False)
     return result.returncode == 0 and result.stdout.strip() == "active"
 
 

@@ -75,9 +75,9 @@ def _clone(
     result = CallResult(changed=True, summary=f"clone {url} into {path}", repo=url, dest=str(path), version=version)
     if ctx.dry_run:
         return result
-    ctx.run(command, env=_GIT_ENV)
+    ctx.run(*command, env=_GIT_ENV)
     if sha is not None:
-        ctx.run([git, "-C", str(path), "checkout", "--force", version])
+        ctx.run(git, "-C", str(path), "checkout", "--force", version)
     return result
 
 
@@ -98,7 +98,7 @@ def _reconcile(
         summaries.append(f"set remote URL of {dest} to {url}")
         if not ctx.dry_run:
             verb = "set-url" if current_url is not None else "add"
-            ctx.run([git, "-C", dest, "remote", verb, "origin", url])
+            ctx.run(git, "-C", dest, "remote", verb, "origin", url)
 
     if not update and not url_changed:
         return CallResult(changed=False, summary=f"ensure {dest} at {version}", **data)
@@ -126,8 +126,8 @@ def _reconcile(
     data["after"] = desired
     if ctx.dry_run:
         return CallResult(changed=True, summary="; ".join(summaries), **data)
-    ctx.run([git, "-C", dest, "checkout", "--force", version])
-    ctx.run([git, "-C", dest, "reset", "--hard", desired])
+    ctx.run(git, "-C", dest, "checkout", "--force", version)
+    ctx.run(git, "-C", dest, "reset", "--hard", desired)
     if _head(ctx, git, dest) != desired:
         raise TaskFailed(f"could not update {dest} to {desired}")
     return CallResult(changed=True, summary="; ".join(summaries), **data)
@@ -135,35 +135,35 @@ def _reconcile(
 
 def _is_repo(ctx: TaskContext, git: str, dest: str, path: Path) -> bool:
     """Return whether ``path`` is itself the top level of a checkout."""
-    result = ctx.probe([git, "-C", dest, "rev-parse", "--show-toplevel"])
+    result = ctx.probe(git, "-C", dest, "rev-parse", "--show-toplevel")
     if result.returncode != 0:
         return False
     return Path(result.stdout.strip()).resolve() == path.resolve()
 
 
 def _remote_url(ctx: TaskContext, git: str, dest: str) -> str | None:
-    result = ctx.probe([git, "-C", dest, "remote", "get-url", "origin"])
+    result = ctx.probe(git, "-C", dest, "remote", "get-url", "origin")
     if result.returncode != 0:
         return None
     return result.stdout.strip()
 
 
 def _fetch(ctx: TaskContext, git: str, dest: str) -> None:
-    result = ctx.probe([git, "-C", dest, "fetch", "origin"], env=_GIT_ENV)
+    result = ctx.probe(git, "-C", dest, "fetch", "origin", env=_GIT_ENV)
     require_success(result, f"could not fetch from origin in {dest}")
 
 
 def _resolve_version(ctx: TaskContext, git: str, dest: str, version: str) -> str:
     refs = ["origin/HEAD"] if version == "HEAD" else [f"origin/{version}", version]
     for ref in refs:
-        result = ctx.probe([git, "-C", dest, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
+        result = ctx.probe(git, "-C", dest, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     raise TaskFailed(f"version {version!r} not found in {dest} after fetch")
 
 
 def _head(ctx: TaskContext, git: str, dest: str) -> str:
-    result = ctx.probe([git, "-C", dest, "rev-parse", "HEAD"])
+    result = ctx.probe(git, "-C", dest, "rev-parse", "HEAD")
     require_success(result, f"could not read HEAD of {dest}")
     return result.stdout.strip()
 
@@ -174,7 +174,7 @@ def _is_dirty(ctx: TaskContext, git: str, dest: str) -> bool:
     Untracked files are ignored: they survive ``checkout --force`` and
     ``reset --hard``, so they do not make an update destructive.
     """
-    result = ctx.probe([git, "-C", dest, "status", "--porcelain", "--untracked-files=no"])
+    result = ctx.probe(git, "-C", dest, "status", "--porcelain", "--untracked-files=no")
     require_success(result, f"could not read status of {dest}")
     return bool(result.stdout.strip())
 
