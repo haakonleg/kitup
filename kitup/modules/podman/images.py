@@ -139,6 +139,7 @@ def build(
     require_timeout(timeout)
 
     context_path = ctx.resolve_source(context)
+    context_label = ctx.source_label(context)
     if not context_path.is_dir():
         raise TaskFailed(f"build context is not a directory: {context_path}")
     containerfile_path = None
@@ -162,7 +163,7 @@ def build(
         command.append("--no-cache")
     command.append(str(context_path))
 
-    call = CallResult(changed=True, summary=f"build {tag} from {context_path}", image=tag, context=str(context_path))
+    call = CallResult(changed=True, summary=f"build {tag} from {context_label}", image=tag, context=str(context_path))
     if ctx.dry_run:
         return ctx.changed(call)
     ctx.run(command, timeout=timeout, sudo=sudo)

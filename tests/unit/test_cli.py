@@ -940,7 +940,7 @@ def test_apply_uses_vars_get_and_require(tmp_path, capsys):
     assert "value=1 missing=none" in capsys.readouterr().out
 
 
-def test_project_files_overlay_bundle_files(tmp_path):
+def test_project_files_overlay_bundle_files(tmp_path, capsys):
     base_dest = tmp_path / "base.txt"
     other_dest = tmp_path / "other.txt"
 
@@ -974,6 +974,10 @@ def test_project_files_overlay_bundle_files(tmp_path):
     assert code == 0
     assert base_dest.read_text(encoding="utf-8") == "bundle-specific\n"
     assert other_dest.read_text(encoding="utf-8") == "other\n"
+
+    output = capsys.readouterr().out
+    assert output.count("copy shared.conf ->") == 2
+    assert "files/shared.conf" not in output
 
 
 def test_write_marker_task_uses_project_root(tmp_path):

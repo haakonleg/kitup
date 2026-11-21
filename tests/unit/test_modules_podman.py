@@ -315,6 +315,17 @@ def test_build_resolves_bundle_relative_paths(tmp_path):
     assert argvs(command)[10] == [PODMAN, "build", "-t", IMAGE, str(bundle_dir)]
 
 
+def test_build_reports_a_short_context_label(tmp_path):
+    command = FakeCommandRunner()
+    command.responses = [response(1), response(0), response(0)]
+    _ctx, bundle_dir = bundle_context(tmp_path, command=command)
+    (bundle_dir / "files" / "nested" / "container").mkdir(parents=True)
+
+    result = podman.build("files/nested/container", tag=IMAGE)
+
+    assert result.summary == f"build {IMAGE} from nested/container"
+
+
 def test_build_rejects_invalid_arguments(tmp_path):
     context(tmp_path)
 

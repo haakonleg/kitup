@@ -92,6 +92,11 @@ class OverlayPath(Path):
             return self._roots[0] / self._rel
         return Path(str(self))
 
+    @property
+    def relative(self) -> PurePath:
+        """Return the path within the merged view."""
+        return self._rel
+
     @override
     def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
         return self._require_backing().stat(follow_symlinks=follow_symlinks)

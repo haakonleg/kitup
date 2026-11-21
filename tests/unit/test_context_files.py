@@ -253,6 +253,20 @@ def test_resolve_source_keeps_absolute_and_expanded_paths(tmp_path, monkeypatch)
     assert ctx.resolve_source("~/config") == home / "config"
 
 
+def test_source_label_shortens_project_local_sources(tmp_path):
+    ctx, bundle_dir = project(tmp_path)
+    write(bundle_dir / "files" / "shared.conf", "bundle\n")
+    write(tmp_path / "files" / "base" / "nested" / "app.conf", "overlay\n")
+
+    assert ctx.source_label("shared.conf") == "shared.conf"
+    assert ctx.source_label("files/shared.conf") == "shared.conf"
+    assert ctx.source_label("files/nested/app.conf") == "nested/app.conf"
+    assert ctx.source_label("templates/app.conf") == "templates/app.conf"
+    assert ctx.source_label(ctx.files / "nested" / "app.conf") == "nested/app.conf"
+    assert ctx.source_label("/srv/config") == "/srv/config"
+    assert ctx.source_label("~/config") == "~/config"
+
+
 def test_copy_from_a_merged_entry(tmp_path):
     ctx, bundle_dir = project(tmp_path)
     write(bundle_dir / "files" / "sshd.conf", "bundle\n")
@@ -263,7 +277,23 @@ def test_copy_from_a_merged_entry(tmp_path):
     result = files.copy(ctx.files / "sshd.conf", destination)
 
     assert result.changed
+    assert result.summary == f"copy sshd.conf -> {destination}"
     assert destination.read_text(encoding="utf-8") == "overlay\n"
+
+
+def test_copy_reports_a_short_source_label(tmp_path):
+    _ctx, bundle_dir = project(tmp_path)
+    write(bundle_dir / "files" / "nested" / "app.conf", "bundle\n")
+    (tmp_path / "out").mkdir()
+    destination = tmp_path / "out" / "app.conf"
+
+    result = files.copy("files/nested/app.conf", destination)
+
+    assert result.summary == f"copy nested/app.conf -> {destination}"
+
+    result = files.copy("files/nested/app.conf", destination)
+
+    assert result.summary == f"ensure {destination} from nested/app.conf"
 
 
 def test_copy_from_a_merged_entry_with_sudo(tmp_path):

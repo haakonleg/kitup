@@ -234,6 +234,20 @@ def test_template_resolves_sources_relative_to_the_bundle(tmp_path):
     assert (tmp_path / "absolute.out").read_text() == "relative\n"
 
 
+def test_template_reports_a_short_source_label(tmp_path):
+    _ctx, bundle_dir = bundle_context(tmp_path)
+    write_source(bundle_dir / "files" / "nested" / "app.j2", "value\n")
+    destination = tmp_path / "out"
+
+    result = files.template("files/nested/app.j2", destination)
+
+    assert result.summary == f"render nested/app.j2 -> {destination}"
+
+    result = files.template("files/nested/app.j2", destination)
+
+    assert result.summary == f"ensure {destination} from nested/app.j2"
+
+
 def test_template_allows_bundle_context(tmp_path):
     _ctx, bundle_dir = bundle_context(
         tmp_path,

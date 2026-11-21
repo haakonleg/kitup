@@ -175,6 +175,24 @@ class TaskContext:
             return real_path(self.files / Path(*parts[1:]))
         return self._bundle_path / source
 
+    def source_label(self, source: str | Path) -> str:
+        """Return a concise CLI label for a module source argument.
+
+        Relative paths are shown as given, with a leading ``files/`` lookup
+        prefix removed. ``ctx.files`` entries keep their path within the merged
+        view, and absolute paths are returned unchanged.
+        """
+        if isinstance(source, OverlayPath):
+            relative = source.relative
+            return str(relative) if relative.parts else source.name
+        path = Path(source)
+        if path.is_absolute():
+            return str(path)
+        parts = path.parts
+        if len(parts) > 1 and parts[0] == FILES_DIR:
+            return str(Path(*parts[1:]))
+        return str(path)
+
     def begin_task(self, task: Task, *, is_side_effect: bool = False) -> None:
         """Reset task-scoped state and enter the task's bundle."""
         self._calls.clear()

@@ -748,9 +748,30 @@ def test_file_resolves_bundle_relative_sources(tmp_path):
     ctx.begin_task(bundle.tasks[0])
     dest = tmp_path / "out.txt"
 
-    decompress.file("data.txt.gz", dest)
+    result = decompress.file("data.txt.gz", dest)
 
     assert dest.read_bytes() == b"payload\n"
+    assert result.summary == f"decompress data.txt.gz -> {dest}"
+
+    result = decompress.file("data.txt.gz", dest)
+
+    assert result.summary == f"ensure {dest} from data.txt.gz"
+
+
+def test_archive_reports_a_short_source_label(tmp_path):
+    bundle_dir = tmp_path / "bundles" / "base"
+    (bundle_dir / "files").mkdir(parents=True)
+    _write_tar(bundle_dir / "files" / "app.tar")
+    bundle = Bundle("base", path=bundle_dir)
+    bundle.task("Task")(lambda: None)
+    ctx = make_context(tmp_path)
+    ctx.begin_task(bundle.tasks[0])
+    dest = tmp_path / "out"
+    dest.mkdir()
+
+    result = decompress.archive("app.tar", dest)
+
+    assert result.summary == f"extract 6 paths from app.tar -> {dest}"
 
 
 COMPRESSIONS: list[tuple[str, Callable[[bytes], bytes]]] = [

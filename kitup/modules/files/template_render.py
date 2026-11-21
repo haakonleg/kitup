@@ -54,6 +54,7 @@ def template(
     target = expand_path(dest, error=TaskFailed)
 
     source = ctx.resolve_source(src)
+    source_label = ctx.source_label(src)
     text = _read_template(ctx, source)
     rendered = _render(ctx, source, text, extra, trim_blocks=trim_blocks, lstrip_blocks=lstrip_blocks)
 
@@ -65,8 +66,8 @@ def template(
             mode=mode,
             owner=owner,
             group=group,
-            summary=f"render {source} -> {target}",
-            unchanged_summary=f"ensure {target} from {source}",
+            summary=f"render {source_label} -> {target}",
+            unchanged_summary=f"ensure {target} from {source_label}",
             data={"dest": str(target), "src": str(source)},
             sudo=sudo,
         )

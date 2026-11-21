@@ -107,6 +107,7 @@ def archive(
     excludes = _require_patterns(exclude, "exclude")
 
     source = ctx.resolve_source(src)
+    source_label = ctx.source_label(src)
     _require_source(source, "archive source")
     target = expand_path(dest, error=TaskFailed)
     target_info = file_actions.stat_local(target)
@@ -118,7 +119,9 @@ def archive(
         if not marker.is_absolute():
             marker = target / marker
         if file_actions.stat_local(marker) is not None:
-            return ctx.changed(_archive_result(source, target, changes=0, files=[], size=_directory_size(target)))
+            return ctx.changed(
+                _archive_result(source, target, source_label, changes=0, files=[], size=_directory_size(target))
+            )
 
     with closing(_open_archive(source)) as opened:
         entries = _select_entries(opened, strip_components, includes, excludes)
@@ -132,7 +135,9 @@ def archive(
             mode=mode,
         )
 
-    return ctx.changed(_archive_result(source, target, changes=changed, files=files, size=_directory_size(target)))
+    return ctx.changed(
+        _archive_result(source, target, source_label, changes=changed, files=files, size=_directory_size(target))
+    )
 
 
 def file(src: str | Path, dest: str | Path, *, mode: int | str | None = None) -> CallResult:
@@ -150,6 +155,7 @@ def file(src: str | Path, dest: str | Path, *, mode: int | str | None = None) ->
     mode = normalize_mode(mode)
 
     source = ctx.resolve_source(src)
+    source_label = ctx.source_label(src)
     _require_source(source, "compressed source")
     _reject_archive(source)
     target, info = _single_destination(source, dest)
@@ -182,12 +188,18 @@ def file(src: str | Path, dest: str | Path, *, mode: int | str | None = None) ->
             else:
                 _install_temp(temporary, target, mode=mode, default_mode=0o644)
                 changed = True
-    summary = f"decompress {source} -> {target}" if changed else f"ensure {target} from {source}"
+    summary = f"decompress {source_label} -> {target}" if changed else f"ensure {target} from {source_label}"
     return ctx.changed(CallResult(changed=changed, summary=summary, dest=str(target), src=str(source)))
 
 
-def _archive_result(source: Path, target: Path, *, changes: int, files: list[str], size: int) -> CallResult:
-    summary = f"extract {changes} paths from {source} -> {target}" if changes else f"ensure {target} from {source}"
+def _archive_result(
+    source: Path, target: Path, source_label: str, *, changes: int, files: list[str], size: int
+) -> CallResult:
+    summary = (
+        f"extract {changes} paths from {source_label} -> {target}"
+        if changes
+        else f"ensure {target} from {source_label}"
+    )
     return CallResult(
         changed=bool(changes),
         summary=summary,

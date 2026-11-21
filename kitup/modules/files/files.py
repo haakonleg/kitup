@@ -122,6 +122,7 @@ def copy(
     mode = normalize_mode(mode)
     require_bool(sudo, "copy sudo")
     source = ctx.resolve_source(src)
+    source_label = ctx.source_label(src)
     target = expand_path(dest, error=TaskFailed)
     if str(dest).endswith("/"):
         target /= source.name
@@ -142,8 +143,8 @@ def copy(
                 mode=resolved_mode,
                 owner=owner,
                 group=group,
-                summary=f"copy {source} -> {target}",
-                unchanged_summary=f"ensure {target} from {source}",
+                summary=f"copy {source_label} -> {target}",
+                unchanged_summary=f"ensure {target} from {source_label}",
                 data=data,
                 sudo=sudo,
             )
@@ -171,7 +172,7 @@ def copy(
         file_actions.apply_change(
             ctx,
             target,
-            summary=f"copy {source} -> {target}",
+            summary=f"copy {source_label} -> {target}",
             data=data,
             sudo=sudo,
             old=target_content,
