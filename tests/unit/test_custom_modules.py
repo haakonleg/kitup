@@ -249,7 +249,7 @@ def test_bundle_tasks_can_import_external_modules(tmp_path):
     external = tmp_path / "external-modules"
     write(external / "mytool.py", MYTOOL)
     root = tmp_path / "machine"
-    write(root / "bundles" / "app" / "__init__.py", 'from kitup import bundle\n\nbundle("App")\n')
+    write(root / "bundles" / "app" / "main.py", 'from kitup import bundle\n\nbundle("App")\n')
     write(root / "bundles" / "app" / "tasks.py", TASKS)
 
     project = load_project(root, modules_paths=[external])
@@ -357,7 +357,7 @@ def test_project_reloads_modules_between_roots(tmp_path):
 @pytest.fixture
 def custom_project(tmp_path: Path) -> Path:
     build_project(tmp_path, {"mytool.py": MYTOOL})
-    write(tmp_path / "bundles" / "app" / "__init__.py", 'from kitup import bundle\n\nbundle("App")\n')
+    write(tmp_path / "bundles" / "app" / "main.py", 'from kitup import bundle\n\nbundle("App")\n')
     write(tmp_path / "bundles" / "app" / "tasks.py", TASKS)
     return tmp_path
 
@@ -385,7 +385,7 @@ def test_project_task_uses_custom_module_and_is_idempotent_and_dry_run_safe(cust
     dry_root = custom_project / "dry-run"
     dry_root.mkdir()
     write(dry_root / "modules" / "mytool.py", MYTOOL)
-    write(dry_root / "bundles" / "app" / "__init__.py", 'from kitup import bundle\n\nbundle("App")\n')
+    write(dry_root / "bundles" / "app" / "main.py", 'from kitup import bundle\n\nbundle("App")\n')
     write(dry_root / "bundles" / "app" / "tasks.py", TASKS)
 
     context = run_task(dry_root, dry_run=True)

@@ -14,7 +14,16 @@ from typing import Final
 from ._utils.importer import load_package_module, project_bytecode_cache
 from ._utils.paths import expand_path
 from .errors import KitupError, PresetError, ProjectError
-from .registry import Bundle, Module, discover_task_modules, forget_module_prefix, module_of, registered_modules
+from .registry import (
+    MAIN_FILE,
+    MAIN_STEM,
+    Bundle,
+    Module,
+    discover_task_modules,
+    forget_module_prefix,
+    module_of,
+    registered_modules,
+)
 
 BUNDLES_DIR: Final = "bundles"
 FILES_DIR: Final = "files"
@@ -22,9 +31,8 @@ MODULES_DIR: Final = "modules"
 VARS_DIR: Final = "vars"
 PRESETS_DIR: Final = "presets"
 
-_PROJECT_MODULES: Final = frozenset({"bundles", "modules", "vars"})
+_PROJECT_MODULES: Final = frozenset({"modules", "vars"})
 _PROJECT_MODULE_PREFIXES: Final = (
-    "bundles.",
     "modules.",
     "vars.",
     "_kitup_bundle_",
@@ -100,7 +108,6 @@ def load_project(
         if path.suffix != ".py":
             raise ProjectError(f"var file must end in .py: {path}")
 
-    local_root = project_root / BUNDLES_DIR
     bundle_dirs = discover_bundle_dirs(project_root, extra_roots=bundle_roots)
     if bundle_dirs:
         _reject_shadowing_file(project_root, BUNDLES_DIR, label="bundles")
@@ -112,7 +119,7 @@ def load_project(
     with on_project_path(project_root):
         if module_roots:
             _install_modules_package(project_root, module_roots)
-        bundles = _load_bundles(bundle_dirs, local_root=local_root)
+        bundles = _load_bundles(bundle_dirs)
     # Stable sort: equal priorities keep discovery (prefix, then name) order.
     bundles = tuple(sorted(bundles, key=lambda bundle: bundle.priority))
     return Project(
@@ -352,26 +359,20 @@ def _discover_project_modules(project_root: Path, module_roots: Sequence[Path]) 
     return paths
 
 
-def _load_bundles(bundle_dirs: Sequence[Path], *, local_root: Path) -> tuple[Bundle, ...]:
+def _load_bundles(bundle_dirs: Sequence[Path]) -> tuple[Bundle, ...]:
     bundles: list[Bundle] = []
     for folder in bundle_dirs:
         bundle_id = _require_bundle_id(folder.name)
-        is_local = folder.parent == local_root
-        package = f"{BUNDLES_DIR}.{folder.name}" if is_local else f"_kitup_bundle_{folder.name}"
+        package = f"_kitup_bundle_{folder.name}"
+        _synthetic_package(package, (folder,))
         try:
-            module = importlib.import_module(package) if is_local else _load_external_bundle(folder, package)
+            module = _import_bundle_main(folder, package=package)
         except KitupError:
             raise
         except Exception as exc:
             raise ProjectError(f"failed to import bundle {folder.name!r}: {exc}") from exc
 
-        bundle = getattr(module, "__kitup_bundle__", None)
-        if bundle is None:
-            modules = discover_task_modules(package, folder)
-            bundle = Bundle(path=folder, modules=modules)
-        elif not isinstance(bundle, Bundle):
-            raise ProjectError(f"bundle {folder.name!r} has a non-Bundle __kitup_bundle__")
-
+        bundle = _bundle_from_main(module, folder, package=package, bundle_id=bundle_id)
         var_paths = _discover_bundle_var_paths(bundle, folder, bundle_id=bundle_id)
         bundle._finalize(
             id=bundle_id,
@@ -380,6 +381,23 @@ def _load_bundles(bundle_dirs: Sequence[Path], *, local_root: Path) -> tuple[Bun
         )
         bundles.append(bundle)
     return tuple(bundles)
+
+
+def _import_bundle_main(folder: Path, *, package: str) -> ModuleType | None:
+    """Import a bundle's optional ``main.py`` entry point."""
+    if not (folder / MAIN_FILE).is_file():
+        return None
+    return importlib.import_module(f"{package}.{MAIN_STEM}")
+
+
+def _bundle_from_main(module: ModuleType | None, folder: Path, *, package: str, bundle_id: str) -> Bundle:
+    """Return the bundle declared in ``main.py`` or synthesize one from task modules."""
+    bundle = getattr(module, "__kitup_bundle__", None) if module is not None else None
+    if bundle is not None:
+        if isinstance(bundle, Bundle):
+            return bundle
+        raise ProjectError(f"bundle {bundle_id!r} has a non-Bundle __kitup_bundle__")
+    return Bundle(path=folder, modules=discover_task_modules(package, folder))
 
 
 def _discover_bundle_var_paths(bundle: Bundle, folder: Path, *, bundle_id: str) -> tuple[Path, ...]:
@@ -399,14 +417,6 @@ def _synthetic_package(name: str, roots: Sequence[Path]) -> ModuleType:
     package.__file__ = None
     sys.modules[name] = package
     return package
-
-
-def _load_external_bundle(folder: Path, package_name: str) -> ModuleType:
-    """Load a bundle outside ``bundles/`` under a synthetic package name."""
-    init = folder / "__init__.py"
-    if init.is_file():
-        return load_package_module(init, package_name)
-    return _synthetic_package(package_name, (folder,))
 
 
 def _install_modules_package(root: Path, extra_roots: Sequence[Path]) -> None:

@@ -16,7 +16,7 @@ kitup apply my-machine -n
 my-machine/                     # project root
 ├── bundles/
 │   └── base/                   # one directory per bundle; the folder name is the bundle id
-│       ├── __init__.py         # optional; declares the bundle
+│       ├── main.py             # optional; declares the bundle
 │       ├── packages.py         # task module
 │       ├── files/              # bundle resources
 │       └── vars/               # optional; bundle-scoped variable values
@@ -45,26 +45,28 @@ sets.
 
 ## Bundles
 
-A bundle is a Python package below `bundles/`. Its folder name is the bundle id,
-must be a valid Python identifier, and is used in task ids and dependency
-references. An optional numeric prefix such as `01_setup` orders bundles and is
-stripped from the id; see [Run order](#run-order). The `__init__.py` is optional;
-when present it should stay declarative and construct the bundle:
+A bundle is a folder below `bundles/`. Its folder name is the bundle id, must be
+a valid Python identifier, and is used in task ids and dependency references. An
+optional numeric prefix such as `01_setup` orders bundles and is stripped from
+the id; see [Run order](#run-order).
+
+The optional `main.py` describes the bundle and may also define tasks. It must
+stay declarative and call `bundle(...)` before defining any tasks:
 
 ```python
-# bundles/base/__init__.py
+# bundles/base/main.py
 from kitup import bundle
 
 bundle("Base system", "Core packages and services")
 ```
 
 The first argument is the display name shown by `kitup list`; it defaults to the
-bundle id. The description is optional. The bundle id always comes from the
-folder name, so the factory has no `id` argument.
+bundle id. The description is optional. Calling `bundle()` more than once in one
+`main.py` is an error.
 
 `bundle()` returns the bundle when you need the object, but the return value can
-be discarded: calls made from a package `__init__.py` register the bundle
-automatically.
+be discarded: calls made from `main.py` register the bundle automatically. Tasks
+declared after `bundle()` in `main.py` belong to that bundle.
 
 ### Run order
 
@@ -82,7 +84,7 @@ must still be a valid, non-keyword Python identifier, and ids must be unique, so
 `01_setup` and `setup` cannot coexist.
 
 ```python
-# bundles/02_packages/__init__.py: priority beats the folder prefix
+# bundles/02_packages/main.py: priority beats the folder prefix
 from kitup import bundle
 
 bundle("Packages", priority=-10)  # runs before default-priority (0) bundles
@@ -91,13 +93,13 @@ bundle("Packages", priority=-10)  # runs before default-priority (0) bundles
 ### Task modules
 
 When `bundle(...)` omits `modules`, kitup discovers sibling `*.py` files except
-`__init__.py` and `_`-prefixed helpers. Files load in filename order, and tasks
-run in declaration order within each file. Zero-padded prefixes are an easy way
-to control order:
+`main.py` and `_`-prefixed helpers. Files load in filename order, and tasks run
+in declaration order within each file. Zero-padded prefixes are an easy way to
+control order:
 
 ```text
 bundles/base/
-├── __init__.py
+├── main.py
 ├── 01_packages.py
 ├── 02_services.py
 └── _helpers.py          # imported by task modules, never discovered
@@ -135,8 +137,9 @@ bundle(
 )
 ```
 
-A path must refer to a `.py` file other than `__init__.py`. Path-loaded modules
-can import sibling helpers with `from . import helper`.
+A path must refer to a `.py` file other than `main.py` and `__init__.py`, which
+are reserved. Path-loaded modules can import sibling helpers with
+`from . import helper`.
 
 A task module may be listed by more than one bundle. Each bundle creates its own
 tasks, so a shared module produces independent task ids such as `base.install`
@@ -147,7 +150,7 @@ and `desktop.install`.
 Depend on other bundles by id:
 
 ```python
-# bundles/workstation/__init__.py
+# bundles/workstation/main.py
 from kitup import bundle
 
 bundle("Workstation", depends_on=["base"])
@@ -185,9 +188,10 @@ def install_base_packages(): ...
 `tags` is a sequence of strings. Entries may be comma-separated, and surrounding
 whitespace is ignored.
 
-Use `@bundle.task` for tasks declared inline in `__init__.py`; it accepts the
-same forms. Task ids are `<bundle id>.<function name>` and must be unique within
-a bundle.
+Use a plain `@task` for tasks declared inline in `main.py` after `bundle()`, or
+`@bundle.task` with the bundle returned by `bundle()`. Both accept the same
+forms. Task ids are `<bundle id>.<function name>` and must be unique within a
+bundle. Declaring a task before `bundle()` in `main.py` is an error.
 
 Read variables with the `vars` proxy. Reach the rest of the task context with
 the `ctx` proxy exported from the package root:
@@ -501,5 +505,5 @@ from task modules instead.
 ## Trust
 
 Project code is trusted executable Python and runs with the same privileges as
-kitup itself. Keep bundle `__init__.py` files declarative and avoid side effects
-at import time.
+kitup itself. Keep bundle `main.py` files declarative and avoid side effects at
+import time.

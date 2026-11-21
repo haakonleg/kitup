@@ -105,7 +105,7 @@ def test_zipapp_lists_builtin_modules_and_renders_yaml_helpers(tmp_path):
     root = tmp_path / "project"
     bundle = root / "bundles" / "demo"
     bundle.mkdir(parents=True)
-    (bundle / "__init__.py").write_text("from kitup import bundle\n\nbundle()\n", encoding="utf-8")
+    (bundle / "main.py").write_text("from kitup import bundle\n\nbundle()\n", encoding="utf-8")
     rendered = tmp_path / "rendered.json"
     (bundle / "tasks.py").write_text(
         "from kitup import task\n"

@@ -136,7 +136,7 @@ def test_commands_without_bundles(tmp_path, capsys):
 def test_check_prints_the_plan_and_warns_about_empty_bundles(tmp_path, capsys):
     make_project(
         tmp_path,
-        bundles={"base": {"__init__.py": "from kitup import bundle\n\nbundle()\n"}},
+        bundles={"base": {"main.py": "from kitup import bundle\n\nbundle()\n"}},
     )
 
     code = cli.main(["check", str(tmp_path), "--no-color"])
@@ -292,7 +292,7 @@ def test_unknown_bundle_dependency_is_exit_2(tmp_path, capsys):
         tmp_path,
         bundles={
             "desktop": {
-                "__init__.py": "from kitup import bundle\n\nbundle(depends_on=['missing'])\n",
+                "main.py": "from kitup import bundle\n\nbundle(depends_on=['missing'])\n",
                 "tasks.py": task_source("run"),
             }
         },
@@ -377,7 +377,8 @@ def test_init_scaffolds_a_working_project(tmp_path, capsys):
     assert "Initialized kitup project" in out
     assert "kitup check" in out
     assert "kitup apply -n" in out
-    assert (root / "bundles" / "example" / "__init__.py").is_file()
+    assert (root / "bundles" / "example" / "main.py").is_file()
+    assert not (root / "bundles" / "example" / "__init__.py").exists()
     assert (root / "bundles" / "example" / "tasks.py").is_file()
     assert (root / "vars" / "base.py").is_file()
     assert (root / "vars" / "example.py").is_file()
@@ -770,7 +771,7 @@ def test_bundle_vars_are_scoped_and_project_values_win(tmp_path, capsys):
                 "vars/base.py": "VALUE = 'bundle'\nBASE_ONLY = 1\n",
             },
             "other": {
-                "__init__.py": "from kitup import bundle\n\nbundle(depends_on=['base'])\n",
+                "main.py": "from kitup import bundle\n\nbundle(depends_on=['base'])\n",
                 "tasks.py": """
                 from kitup import ctx, task
 

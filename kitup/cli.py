@@ -32,7 +32,7 @@ from .project import (
     load_project_modules,
     on_project_path,
 )
-from .registry import Bundle, Module
+from .registry import MAIN_FILE, Bundle, Module
 from .resolver import BundlePlan, filter_plan, resolve
 from .runner import Runner
 from .variables import Vars, filter_var_paths, load_bundle_vars, load_vars
@@ -610,7 +610,7 @@ def _init(args: Args, output: Output) -> int:
 def _init_files(root: Path) -> dict[Path, str]:
     bundle = root / BUNDLES_DIR / "example"
     return {
-        bundle / "__init__.py": textwrap.dedent(
+        bundle / MAIN_FILE: textwrap.dedent(
             """
             from kitup import bundle
 

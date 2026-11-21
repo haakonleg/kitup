@@ -17,6 +17,8 @@ from ._utils.paths import expand_path
 from ._utils.validation import split_tags
 from .errors import BundleError
 
+MAIN_STEM: Final = "main"
+MAIN_FILE: Final = f"{MAIN_STEM}.py"
 _SPECS_ATTR: Final = "__kitup_task_specs__"
 _MODULE_ATTR: Final = "__kitup_module__"
 _MODULES_SEQUENCE: Final = "bundle modules must be a sequence of task modules or task module paths"
@@ -110,13 +112,13 @@ class Bundle:
     """A bundle and the tasks it owns.
 
     A bundle is identified by its ``id``, which discovery sets from the bundle
-    folder name. Use :func:`bundle` from a package's ``__init__.py`` to create
+    folder name. Use :func:`bundle` from a bundle folder's ``main.py`` to create
     and register one; the optional ``name`` is the display name and defaults to
     the id during discovery.
 
     A directly constructed ``Bundle`` does not auto-discover task modules; pass
     ``modules`` to adopt them. :func:`bundle` auto-discovers sibling ``*.py``
-    task modules when ``modules`` is omitted inside a bundle package; pass an
+    task modules when ``modules`` is omitted inside ``main.py``; pass an
     explicit sequence to control order, or ``modules=[]`` to disable discovery.
     Entries may be module objects or filesystem paths; string and ``Path``
     values are always treated as paths, never import names. ``var_paths`` is
@@ -235,8 +237,8 @@ class Bundle:
             raise BundleError(f"task module is not a file: {path}")
         if path.suffix != ".py":
             raise BundleError(f"task module must end in .py: {path}")
-        if path.name == "__init__.py":
-            raise BundleError(f"task module must not be __init__.py: {path}")
+        if path.name in {"__init__.py", MAIN_FILE}:
+            raise BundleError(f"task module must not be {path.name}: {path}")
         return path
 
     def _adopt_modules(self, modules: tuple[ModuleType, ...]) -> None:
@@ -323,14 +325,14 @@ def bundle(
     path: str | Path | None = None,
     priority: int = 0,
 ) -> Bundle:
-    """Create a bundle and register it on the calling package.
+    """Create a bundle and register it on the calling ``main.py`` module.
 
-    Call this from a bundle package's ``__init__.py``. The return value may be
-    assigned but does not need to be: when the caller is a package
-    ``__init__.py``, the new bundle is attached to it as ``__kitup_bundle__``
-    for discovery. Outside a package it simply constructs a bundle.
+    Call this before defining any tasks in a bundle folder's ``main.py``. The
+    return value may be assigned but does not need to be: when the caller is a
+    ``main.py`` module, the new bundle is attached to it as ``__kitup_bundle__``
+    for discovery. Elsewhere it simply constructs a bundle.
 
-    When ``modules`` is omitted inside a package, sibling ``*.py`` task modules
+    When ``modules`` is omitted inside ``main.py``, sibling ``*.py`` task modules
     are discovered automatically; elsewhere the bundle starts with no tasks.
 
     ``priority`` controls run order: lower values run first, and equal values
@@ -339,18 +341,24 @@ def bundle(
     """
     caller = sys._getframe(1).f_globals
     caller_file = caller.get("__file__")
-    is_package = bool(caller_file and Path(caller_file).name == "__init__.py")
+    is_main = _is_main_file(caller_file)
+
+    existing = caller.get("__kitup_bundle__")
+    if is_main and existing is not None:
+        if not isinstance(existing, Bundle):
+            raise BundleError(f"{MAIN_FILE} has a non-Bundle __kitup_bundle__")
+        raise BundleError(f"bundle() must be called at most once in {MAIN_FILE}")
 
     if path is None:
         path = _caller_dir(caller_file)
-    if modules is None and is_package:
+    if modules is None and is_main:
         package = caller.get("__package__") or caller.get("__name__")
         if not package:
             raise BundleError("cannot auto-discover task modules outside a package")
         modules = discover_task_modules(package, Path(str(caller_file)).parent)
 
     created = Bundle(name, description, modules=modules, depends_on=depends_on, path=path, priority=priority)
-    if is_package:
+    if is_main:
         caller["__kitup_bundle__"] = created
     return created
 
@@ -430,7 +438,7 @@ def discover_task_modules(package: str, folder: Path) -> tuple[ModuleType, ...]:
     modules: list[ModuleType] = []
     for path in sorted(folder.glob("*.py"), key=lambda item: item.name):
         stem = path.stem
-        if stem == "__init__" or stem.startswith("_"):
+        if stem in {"__init__", MAIN_STEM} or stem.startswith("_"):
             continue
         module_name = f"{package}.{stem}"
         try:
@@ -460,7 +468,7 @@ def bundle_of(value: ModuleType | Bundle) -> Bundle:
         bundle = getattr(value, "__kitup_bundle__", None)
         if bundle is None:
             raise BundleError(
-                f"module {value.__name__!r} does not define a bundle; construct Bundle(...) in its __init__.py"
+                f"module {value.__name__!r} does not define a bundle; call bundle(...) in its {MAIN_FILE}"
             )
         if not isinstance(bundle, Bundle):
             raise BundleError(f"module {value.__name__!r} has a non-Bundle __kitup_bundle__")
@@ -484,13 +492,22 @@ def task(
     """Declare a task for the module's bundle.
 
     The task is recorded on the calling module and registered when the module
-    is discovered or listed in a bundle's ``modules`` argument.
+    is discovered or listed in a bundle's ``modules`` argument. In a bundle
+    folder's ``main.py``, ``bundle()`` must be called first; tasks declared
+    after it are registered on that bundle directly.
     """
     tag_values = _normalize_tags(tags)
     caller = sys._getframe(1).f_globals
+    caller_file = caller.get("__file__")
     declared_in = caller.get("__name__")
+    is_main = _is_main_file(caller_file)
 
     def register(func: TaskFunc, task_name: str | None) -> TaskFunc:
+        owner = caller.get("__kitup_bundle__")
+        if isinstance(owner, Bundle):
+            return owner._register_task(func, task_name, tag_values, description)
+        if is_main:
+            raise BundleError(f"bundle() must be called before defining tasks in {MAIN_FILE}")
         spec = _make_task_spec(func, task_name, tag_values, description, declared_in=declared_in)
         existing = getattr(func, _SPECS_ATTR, ())
         setattr(func, _SPECS_ATTR, (*existing, spec))
@@ -533,6 +550,11 @@ def side_effect(
     if name is not None:
         _validate_name(name, "side effect name")
     return lambda func: decorate(func, name)
+
+
+def _is_main_file(caller_file: str | None) -> bool:
+    """Return whether the given module ``__file__`` names a ``main.py``."""
+    return bool(caller_file and Path(caller_file).name == MAIN_FILE)
 
 
 def _caller_dir(caller_file: str | None) -> Path | None:

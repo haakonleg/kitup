@@ -43,7 +43,7 @@ A project looks like this:
 my-machine/
 ├── bundles/
 │   └── workstation/
-│       ├── __init__.py
+│       ├── main.py
 │       ├── tasks.py
 │       ├── files/
 │       │   └── sshd.conf
@@ -60,11 +60,11 @@ my-machine/
     └── laptop
 ```
 
-Bundles group related tasks. An optional `__init__.py` gives the bundle a
-display name and description:
+Bundles group related tasks. An optional `main.py` gives the bundle a display
+name and description. It must call `bundle()` before defining any tasks:
 
 ```python
-# bundles/workstation/__init__.py
+# bundles/workstation/main.py
 from kitup import bundle
 
 bundle("Workstation", "Desktop packages and security settings")

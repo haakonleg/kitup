@@ -11,6 +11,7 @@ from kitup.registry import (
     SideEffect,
     action_prefix,
     bundle_of,
+    discover_task_modules,
     forget_module_prefix,
     module,
     module_of,
@@ -23,14 +24,14 @@ from kitup.registry import bundle as define_bundle
 from ..helpers import write
 
 
-def import_package(tmp_path: Path, files: dict[str, str]) -> tuple[str, object]:
+def import_package(tmp_path: Path, files: dict[str, str], *, entry: str | None = None) -> tuple[str, object]:
     name = f"pkg_{uuid.uuid4().hex}"
     for relative, text in files.items():
         write(tmp_path / name / relative, text)
     sys.path.insert(0, str(tmp_path))
     try:
         importlib.invalidate_caches()
-        module = importlib.import_module(name)
+        module = importlib.import_module(name if entry is None else f"{name}.{entry}")
     finally:
         sys.path.remove(str(tmp_path))
     return name, module
@@ -65,11 +66,12 @@ def test_modules_auto_discovery_explicit_order_and_empty_override(tmp_path):
     _, module = import_package(
         tmp_path,
         {
-            "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
+            "main.py": "from kitup import bundle\n\nbundle('Base')\n",
             "02_second.py": "from kitup import task\n\n@task\ndef second():\n    pass\n",
             "01_first.py": "from kitup import task\n\n@task\ndef first():\n    pass\n",
             "_helper.py": "VALUE = 1\n",
         },
+        entry="main",
     )
     bundle = bundle_of(module)  # type: ignore[arg-type]
     assert [registered.func.__name__ for registered in bundle.tasks] == ["first", "second"]
@@ -77,12 +79,13 @@ def test_modules_auto_discovery_explicit_order_and_empty_override(tmp_path):
     _, module = import_package(
         tmp_path,
         {
-            "__init__.py": (
+            "main.py": (
                 "from kitup import bundle\nfrom . import first, second\nbundle('Base', modules=[second, first])\n"
             ),
             "first.py": "from kitup import task\n\n@task\ndef first():\n    pass\n",
             "second.py": "from kitup import task\n\n@task\ndef second():\n    pass\n",
         },
+        entry="main",
     )
     bundle = bundle_of(module)  # type: ignore[arg-type]
     assert [registered.func.__name__ for registered in bundle.tasks] == ["second", "first"]
@@ -90,9 +93,10 @@ def test_modules_auto_discovery_explicit_order_and_empty_override(tmp_path):
     _, module = import_package(
         tmp_path,
         {
-            "__init__.py": "from kitup import bundle\n\nbundle('Base', modules=[])\n",
+            "main.py": "from kitup import bundle\n\nbundle('Base', modules=[])\n",
             "tasks.py": "from kitup import task\n\n@task\ndef first():\n    pass\n",
         },
+        entry="main",
     )
     assert bundle_of(module).tasks == ()  # type: ignore[arg-type]
 
@@ -114,6 +118,7 @@ def test_modules_validation_and_path_requirements(tmp_path):
     (bundle_dir / "tasks.py").mkdir()
     write(bundle_dir / "notes.txt", "VALUE = 1\n")
     write(bundle_dir / "__init__.py", "")
+    write(bundle_dir / "main.py", "")
 
     with pytest.raises(BundleError, match="task module not found"):
         Bundle("Base", path=bundle_dir, modules=["missing.py"])
@@ -123,6 +128,8 @@ def test_modules_validation_and_path_requirements(tmp_path):
         Bundle("Base", path=bundle_dir, modules=["notes.txt"])
     with pytest.raises(BundleError, match=r"must not be __init__\.py"):
         Bundle("Base", path=bundle_dir, modules=["__init__.py"])
+    with pytest.raises(BundleError, match=r"must not be main\.py"):
+        Bundle("Base", path=bundle_dir, modules=["main.py"])
 
 
 def test_duplicate_task_module_paths_are_rejected(tmp_path):
@@ -160,25 +167,25 @@ def test_discovered_module_without_tasks_is_an_error(tmp_path):
         import_package(
             tmp_path,
             {
-                "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
+                "main.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "helpers.py": "VALUE = 1\n",
             },
+            entry="main",
         )
 
 
 def test_task_module_can_be_shared_between_bundles(tmp_path):
-    _, module = import_package(
+    name, _ = import_package(
         tmp_path,
         {
-            "__init__.py": "from . import tasks, one, two\n",
             "tasks.py": "from kitup import task\n\n@task\ndef shared():\n    pass\n",
-            "one/__init__.py": "from kitup import bundle\nfrom .. import tasks\n\nbundle('One', modules=[tasks])\n",
-            "two/__init__.py": "from kitup import bundle\nfrom .. import tasks\n\nbundle('Two', modules=[tasks])\n",
+            "one/main.py": "from kitup import bundle\nfrom .. import tasks\n\nbundle('One', modules=[tasks])\n",
+            "two/main.py": "from kitup import bundle\nfrom .. import tasks\n\nbundle('Two', modules=[tasks])\n",
         },
     )
 
-    one = bundle_of(module.one)  # type: ignore[attr-defined]
-    two = bundle_of(module.two)  # type: ignore[attr-defined]
+    one = bundle_of(importlib.import_module(f"{name}.one.main"))
+    two = bundle_of(importlib.import_module(f"{name}.two.main"))
 
     assert [registered.id for registered in one.tasks] == ["One.shared"]
     assert [registered.id for registered in two.tasks] == ["Two.shared"]
@@ -190,12 +197,13 @@ def test_reexported_task_is_not_claimed_by_the_importing_module(tmp_path):
     _, module = import_package(
         tmp_path,
         {
-            "__init__.py": (
+            "main.py": (
                 "from kitup import bundle\nfrom . import first, second\nbundle('Base', modules=[first, second])\n"
             ),
             "first.py": "from kitup import task\n\n@task\ndef shared():\n    pass\n",
             "second.py": ("from kitup import task\nfrom .first import shared\n\n@task\ndef other():\n    pass\n"),
         },
+        entry="main",
     )
 
     bundle = bundle_of(module)  # type: ignore[arg-type]
@@ -205,16 +213,18 @@ def test_reexported_task_is_not_claimed_by_the_importing_module(tmp_path):
 def test_depends_on_accepts_ids_and_bundle_objects(tmp_path):
     _, base_module = import_package(
         tmp_path,
-        {"__init__.py": "from kitup import bundle\n\nbundle('Base')\n"},
+        {"main.py": "from kitup import bundle\n\nbundle('Base')\n"},
+        entry="main",
     )
     _, desktop_module = import_package(
         tmp_path,
         {
-            "__init__.py": (
+            "main.py": (
                 f"from kitup import bundle, bundle_of\nimport {base_module.__name__}\n"
                 f"bundle('Desktop', depends_on=['base', bundle_of({base_module.__name__})])\n"
             )
         },
+        entry="main",
     )
 
     desktop = bundle_of(desktop_module)  # type: ignore[arg-type]
@@ -236,7 +246,7 @@ def test_task_decorator_forms_and_normalized_metadata(tmp_path):
     _, module = import_package(
         tmp_path,
         {
-            "__init__.py": "from kitup import bundle\nfrom . import tasks\n\nbundle('Base', modules=[tasks])\n",
+            "main.py": "from kitup import bundle\nfrom . import tasks\n\nbundle('Base', modules=[tasks])\n",
             "tasks.py": (
                 "from kitup import task\n"
                 "\n"
@@ -254,6 +264,7 @@ def test_task_decorator_forms_and_normalized_metadata(tmp_path):
                 "    pass\n"
             ),
         },
+        entry="main",
     )
 
     bundle = bundle_of(module)  # type: ignore[arg-type]
@@ -340,10 +351,11 @@ def test_duplicate_task_ids_across_modules_are_rejected(tmp_path):
         import_package(
             tmp_path,
             {
-                "__init__.py": "from kitup import bundle\n\nbundle('Base')\n",
+                "main.py": "from kitup import bundle\n\nbundle('Base')\n",
                 "first.py": "from kitup import task\n\n@task\ndef install():\n    pass\n",
                 "second.py": "from kitup import task\n\n@task\ndef install():\n    pass\n",
             },
+            entry="main",
         )
 
 
@@ -396,13 +408,70 @@ def test_bundle_of_requires_a_bundle(tmp_path):
     _, module = import_package(
         tmp_path,
         {
-            "__init__.py": "",
+            "main.py": "",
             "tasks.py": "from kitup import task\n\n@task\ndef deferred():\n    pass\n",
         },
+        entry="main",
     )
 
     with pytest.raises(BundleError, match="does not define a bundle"):
         bundle_of(module)  # type: ignore[arg-type]
+
+
+def test_main_registers_tasks_after_discovered_modules(tmp_path):
+    _, module = import_package(
+        tmp_path,
+        {
+            "main.py": ("from kitup import bundle, task\n\nbundle('Base')\n\n@task\ndef inline():\n    pass\n"),
+            "tasks.py": "from kitup import task\n\n@task\ndef discovered():\n    pass\n",
+        },
+        entry="main",
+    )
+
+    bundle = bundle_of(module)  # type: ignore[arg-type]
+    assert [registered.func.__name__ for registered in bundle.tasks] == ["discovered", "inline"]
+    assert [registered.id for registered in bundle.tasks] == ["Base.discovered", "Base.inline"]
+
+
+def test_task_before_bundle_in_main_is_rejected(tmp_path):
+    with pytest.raises(BundleError, match=r"bundle\(\) must be called before defining tasks"):
+        import_package(
+            tmp_path,
+            {"main.py": ("from kitup import bundle, task\n\n@task\ndef early():\n    pass\n\nbundle()\n")},
+            entry="main",
+        )
+
+
+def test_task_in_main_without_bundle_is_rejected(tmp_path):
+    with pytest.raises(BundleError, match=r"bundle\(\) must be called before defining tasks"):
+        import_package(
+            tmp_path,
+            {"main.py": "from kitup import task\n\n@task\ndef orphan():\n    pass\n"},
+            entry="main",
+        )
+
+
+def test_bundle_called_twice_in_main_is_rejected(tmp_path):
+    with pytest.raises(BundleError, match="at most once"):
+        import_package(
+            tmp_path,
+            {"main.py": "from kitup import bundle\n\nbundle()\nbundle()\n"},
+            entry="main",
+        )
+
+
+def test_main_py_is_not_discovered_as_a_task_module(tmp_path):
+    name, _ = import_package(
+        tmp_path,
+        {
+            "main.py": "raise RuntimeError('main.py must not be discovered')\n",
+            "tasks.py": "from kitup import task\n\n@task\ndef run():\n    pass\n",
+        },
+    )
+
+    modules = discover_task_modules(name, tmp_path / name)
+
+    assert [module.__name__ for module in modules] == [f"{name}.tasks"]
 
 
 def test_module_registry_lifecycle(tmp_path):
