@@ -6,6 +6,7 @@ import sys
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar, Token
+from functools import wraps
 from pathlib import Path
 from types import FrameType
 from typing import Any, Final, Never, cast, overload
@@ -24,6 +25,33 @@ from .runtime import BundleState, RunState
 from .variables import Vars
 
 _MISSING: Final = object()
+
+
+def _memoized[K, T](store: dict[K, Any], key: K, loader: Callable[[], T]) -> T:
+    """Return the cached value for ``key``, computing it with ``loader`` once."""
+    if key not in store:
+        store[key] = loader()
+    return cast(T, store[key])
+
+
+def memo[**P, T](func: Callable[P, T]) -> Callable[P, T]:
+    """Cache the result of ``func`` once per run, keyed by its arguments.
+
+    Arguments and keyword arguments must be hashable; otherwise ``TaskFailed``
+    is raised.
+    """
+
+    @wraps(func)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        ctx = current_context()
+        key: tuple[object, ...] = (func, args, tuple(sorted(kwargs.items())))
+        try:
+            hash(key)
+        except TypeError as exc:
+            raise TaskFailed("memo arguments must be hashable") from exc
+        return _memoized(ctx._memo_calls, key, lambda: func(*args, **kwargs))
+
+    return wrapper
 
 
 class TaskContext:
@@ -67,6 +95,7 @@ class TaskContext:
         self._notes: list[str] = []
         self._diffs: list[str] = []
         self._memo: dict[str, Any] = {}
+        self._memo_calls: dict[tuple[object, ...], Any] = {}
         self._run_state = RunState()
         self._task_name = ""
         self._bundle: Bundle | None = None
@@ -363,9 +392,8 @@ class TaskContext:
 
     def memo[T](self, key: str, loader: Callable[[], T]) -> T:
         """Compute a value once per run and return the cached result."""
-        if key not in self._memo:
-            self._memo[key] = loader()
-        return cast(T, self._memo[key])
+        require_text(key, "memo key")
+        return _memoized(self._memo, key, loader)
 
     def close(self) -> None:
         """Close the privileged worker, if it was started."""

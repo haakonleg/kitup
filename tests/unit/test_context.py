@@ -5,6 +5,7 @@ import pytest
 
 from kitup import ctx as ambient_ctx
 from kitup import facts as ambient_facts
+from kitup import memo
 from kitup import vars as ambient_vars
 from kitup.context import current_context, set_current_context
 from kitup.errors import TaskFailed, VarsError
@@ -127,6 +128,94 @@ def test_memo_and_input_share_a_store_across_tasks(tmp_path, monkeypatch):
     assert cleared[-1] == ("", "provided")
     assert calls == ["begin", "end", "begin", "end"]
     assert len(loads) == 2
+
+
+def test_memo_decorator_caches_by_function_and_arguments(tmp_path):
+    context = make_context(tmp_path)
+    calls = []
+
+    @memo
+    def load(name, *, mode="fast"):
+        calls.append((name, mode))
+        return f"{name}:{mode}"
+
+    assert load("a") == "a:fast"
+    assert load("a") == "a:fast"
+    assert load("a", mode="slow") == "a:slow"
+    assert load("b") == "b:fast"
+    context.begin_task(task_for())
+    assert load("a") == "a:fast"
+    assert calls == [("a", "fast"), ("a", "slow"), ("b", "fast")]
+    assert load.__name__ == "load"
+
+
+def test_memo_decorator_distinguishes_functions(tmp_path):
+    make_context(tmp_path)
+    calls = []
+
+    @memo
+    def first():
+        calls.append("first")
+        return "first value"
+
+    @memo
+    def second():
+        calls.append("second")
+        return "second value"
+
+    assert first() == "first value"
+    assert second() == "second value"
+    assert first() == "first value"
+    assert calls == ["first", "second"]
+
+
+def test_memo_decorator_does_not_cache_failures(tmp_path):
+    make_context(tmp_path)
+    attempts = []
+
+    @memo
+    def load():
+        attempts.append(1)
+        raise TaskFailed("boom")
+
+    with pytest.raises(TaskFailed, match="boom"):
+        load()
+    with pytest.raises(TaskFailed, match="boom"):
+        load()
+    assert attempts == [1, 1]
+
+
+def test_memo_decorator_rejects_unhashable_arguments(tmp_path):
+    make_context(tmp_path)
+
+    @memo
+    def load(value):
+        return value
+
+    with pytest.raises(TaskFailed, match="memo arguments must be hashable"):
+        load([1, 2])
+
+
+def test_memo_decorator_propagates_type_errors_from_the_function(tmp_path):
+    make_context(tmp_path)
+
+    @memo
+    def load():
+        raise TypeError("inner failure")
+
+    with pytest.raises(TypeError, match="inner failure"):
+        load()
+
+
+def test_memo_decorator_requires_an_active_context():
+    set_current_context(None)
+
+    @memo
+    def load():
+        return 1
+
+    with pytest.raises(TaskFailed, match="no active task context"):
+        load()
 
 
 def test_get_returns_default_and_raises_for_missing_key(tmp_path):

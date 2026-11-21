@@ -171,8 +171,9 @@ When changing packaging or the zipapp builder:
   for read-only queries and `ctx.run([...])` for mutations.
 - Request privilege with `sudo=True` on `ctx.run` or the module helper. Never
   embed `sudo` in the command list.
-- Expensive per-run work belongs in `ctx.memo(key, loader)`. Use `ctx.skip()`
-  and `ctx.fail()` for control flow, and `ctx.note()` for extra context.
+- Expensive per-run work belongs in `ctx.memo(key, loader)` or behind the
+  `@memo` decorator. Use `ctx.skip()` and `ctx.fail()` for control flow, and
+  `ctx.note()` for extra context.
 
 ### Test conventions
 
