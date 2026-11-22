@@ -61,6 +61,8 @@ The format is detected from the archive contents, not the filename:
 
 - New files use the archive mode unless `mode` is set.
 - Symlinks are replaced to match the archive.
+- When `include` or `exclude` is given and no entries are selected, the call
+  fails without creating `dest`.
 - Archive ownership is not restored; extracted files are owned by the user
   running kitup.
 - Absolute member paths, `..` components, and entries that would write outside

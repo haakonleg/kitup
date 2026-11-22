@@ -289,6 +289,25 @@ def test_archive_strips_and_filters(tmp_path):
     assert not (dest / "share/doc.txt").exists()
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize(
+    ("filters", "message"),
+    [
+        ({"include": "missing/*"}, "include=['missing/*']"),
+        ({"exclude": "*"}, "exclude=['*']"),
+    ],
+)
+def test_archive_rejects_filters_selecting_no_entries(tmp_path, tar_archive, dry_run, filters, message):
+    dest = tmp_path / "dest"
+
+    with pytest.raises(TaskFailed, match="no archive entries selected") as failure:
+        make_context(tmp_path, dry_run=dry_run)
+        decompress.archive(tar_archive, dest, **filters)
+
+    assert message in str(failure.value)
+    assert not dest.exists()
+
+
 def test_archive_creates_guard_skips_extraction(tmp_path, tar_archive):
     dest = tmp_path / "dest"
     dest.mkdir()

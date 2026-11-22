@@ -96,7 +96,8 @@ def archive(
 
     ``creates`` is a path relative to ``dest`` (or an absolute path); when it
     exists the archive is not opened. ``strip_components`` removes leading path
-    components before ``include`` and ``exclude`` patterns are matched.
+    components before ``include`` and ``exclude`` patterns are matched. Filters
+    that select no entries are rejected without creating ``dest``.
     """
     ctx = current_context()
     require_path(src, "archive source")
@@ -125,6 +126,7 @@ def archive(
 
     with closing(_open_archive(source)) as opened:
         entries = _select_entries(opened, strip_components, includes, excludes)
+        _require_selection(source_label, entries, includes, excludes)
         files = _archive_files(entries)
         changed = _reconcile(
             ctx,
@@ -477,6 +479,20 @@ def _select_entries(
         raise TaskFailed(f"could not read archive: {exc}") from exc
     _require_no_conflicts(selected)
     return selected
+
+
+def _require_selection(
+    source_label: str, entries: dict[str, _Member], include: tuple[str, ...], exclude: tuple[str, ...]
+) -> None:
+    """Reject filters that select no archive entries."""
+    if entries or not (include or exclude):
+        return
+    filters: list[str] = []
+    if include:
+        filters.append(f"include={list(include)!r}")
+    if exclude:
+        filters.append(f"exclude={list(exclude)!r}")
+    raise TaskFailed(f"no archive entries selected from {source_label} with {' and '.join(filters)}")
 
 
 def _archive_files(entries: dict[str, _Member]) -> list[str]:
