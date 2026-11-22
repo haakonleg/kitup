@@ -6,7 +6,7 @@ Manage local user accounts, groups, and group membership.
 from kitup.modules import users
 ```
 
-## `user(name, *, state="present", uid=None, group=None, home=None, shell=None, create_home=True, password=None)`
+## `user(name, *, state="present", uid=None, group=None, home=None, shell=None, create=True, create_home=True, password=None)`
 
 Ensure a local user account exists or is absent.
 
@@ -20,6 +20,9 @@ Ensure a local user account exists or is absent.
 - `home` — home directory. Must be an absolute path. On an existing user this
   changes the recorded home directory without moving files.
 - `shell` — login shell. Must be an absolute path.
+- `create` — create the user when it does not exist. With `create=False`, a
+  missing user fails instead of being created; existing users are still
+  modified. Ignored for `state="absent"`.
 - `create_home` — create the home directory when creating a user. Ignored for
   existing users.
 - `password` — pre-hashed password, for example a `$6$...` SHA-512 crypt hash.
@@ -95,7 +98,8 @@ users.membership("deploy", "docker", state="absent")
 
 ## Behavior
 
-- A missing user or group is created.
+- A missing user or group is created, unless `user(..., create=False)` is used,
+  which fails for a missing user.
 - Removing a user from their primary group fails; change the primary group with
   `user(..., group=...)` instead.
 - Password hashes are never shown in output.
@@ -108,5 +112,7 @@ users.membership("deploy", "docker", state="absent")
 - UID and GID are only applied when creating an account. Changing an existing
   UID or GID is rejected.
 - `create_home` only applies when creating a user.
+- `create=False` only prevents creation; it still applies the requested
+  attributes to an existing user.
 - Passwords must be pre-hashed. Generate one with `openssl passwd -6` or
   `mkpasswd -m sha-512`.

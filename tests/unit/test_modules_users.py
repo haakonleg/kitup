@@ -260,6 +260,41 @@ def test_create_user_with_attributes_and_options(tmp_path, monkeypatch):
     assert store.users["alice"]["gid"] == 1500
 
 
+def test_create_false_requires_an_existing_user(tmp_path, monkeypatch):
+    # a missing user fails instead of being created
+    store = FakeAccounts()
+    _ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
+    with pytest.raises(TaskFailed, match="create is False"):
+        users.user("alice", create=False)
+    assert "alice" not in store.users
+    assert not any(command[0] == "useradd" for command in argvs(store))
+
+    # the failure also applies during a dry run
+    dry, store = make_users_context(tmp_path, monkeypatch=monkeypatch, dry_run=True, accounts=store)
+    with pytest.raises(TaskFailed, match="create is False"):
+        users.user("alice", create=False)
+    assert dry.changes == []
+
+    # an existing user is still modified, and repeating the change is a no-op
+    store = FakeAccounts()
+    store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
+    ctx, store = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
+    users.user("alice", shell="/bin/zsh", create=False)
+    assert store.users["alice"]["shell"] == "/bin/zsh"
+    assert call_data(ctx.changes[0]) == {"user": "alice", "changed_attributes": ["shell"]}
+    assert argvs(store) == [["usermod", "-s", "/bin/zsh", "alice"]]
+
+    second, _ = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
+    users.user("alice", shell="/bin/zsh", create=False)
+    assert second.changes == []
+
+    # create is ignored for state="absent": removing a missing user is a no-op
+    absent, store = make_users_context(tmp_path, monkeypatch=monkeypatch, accounts=store)
+    users.user("bob", state="absent", create=False)
+    assert absent.changes == []
+    assert "bob" not in store.users
+
+
 def test_modify_user_and_uid_scenarios(tmp_path, monkeypatch):
     store = FakeAccounts()
     store.add_user("alice", uid=1001, gid=1000, home="/home/alice", shell="/bin/bash")
@@ -488,6 +523,7 @@ def test_invalid_arguments_are_rejected(tmp_path, monkeypatch):
             "password is only supported",
         ),
         (lambda: users.user("alice", create_home="yes"), "create_home must be a boolean"),
+        (lambda: users.user("alice", create="yes"), "create must be a boolean"),
         (lambda: users.user("alice", group="bad group"), "invalid primary group"),
         (lambda: users.group(""), "group name must not be empty"),
         (lambda: users.group("devs", gid=-1), "gid must be a non-negative integer"),

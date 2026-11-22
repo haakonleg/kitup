@@ -56,12 +56,14 @@ def user(
     group: str | int | None = None,
     home: str | Path | None = None,
     shell: str | Path | None = None,
+    create: bool = True,
     create_home: bool = True,
     password: str | None = None,
 ) -> CallResult:
     """Ensure a local user account exists with the requested attributes.
 
     ``state="absent"`` removes the account but leaves the home directory.
+    ``create=False`` fails when the user does not exist instead of creating it.
     ``password`` must be a pre-hashed value such as a ``$6$...`` crypt hash.
     """
     ctx = current_context()
@@ -75,6 +77,7 @@ def user(
             _require_name(group, "primary group")
     home_path = _optional_absolute_path(home, "home")
     shell_path = _optional_absolute_path(shell, "shell")
+    require_bool(create, "create")
     require_bool(create_home, "create_home")
     if password is not None:
         _require_password(password)
@@ -95,6 +98,8 @@ def user(
 
     desired_gid = _resolve_primary_gid(ctx, group) if group is not None else None
     if current is None:
+        if not create:
+            raise TaskFailed(f"user does not exist and create is False: {name}")
         return ctx.changed(
             _create_user(
                 ctx,
