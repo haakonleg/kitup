@@ -21,9 +21,13 @@ def task_source(name: str) -> str:
     return f"from kitup import task\n\n@task\ndef {name}(ctx):\n    pass\n"
 
 
-def bundle_source(priority: int = 0, *, depends_on: tuple[str, ...] = ()) -> str:
-    depends = f", depends_on={list(depends_on)!r}" if depends_on else ""
-    return f"from kitup import bundle\n\nbundle(priority={priority}{depends})\n"
+def bundle_source(order: int | None = None, *, depends_on: tuple[str, ...] = ()) -> str:
+    arguments: list[str] = []
+    if order is not None:
+        arguments.append(f"order={order}")
+    if depends_on:
+        arguments.append(f"depends_on={list(depends_on)!r}")
+    return f"from kitup import bundle\n\nbundle({', '.join(arguments)})\n"
 
 
 def test_load_project_requires_an_existing_directory(tmp_path):
@@ -216,16 +220,61 @@ def test_numbered_and_plain_folders_with_the_same_id_are_rejected(tmp_path):
         load_project(tmp_path)
 
 
-def test_priority_orders_bundles_before_folder_names(tmp_path):
+def test_folder_prefixes_run_before_order_and_lower_numbers_come_first(tmp_path):
     make_project(
         tmp_path,
         bundles={
-            "base": {"main.py": bundle_source(20), "tasks.py": task_source("b")},
-            "alpha": {"main.py": bundle_source(10), "tasks.py": task_source("a")},
+            "01_alpha": {"main.py": bundle_source(), "tasks.py": task_source("a")},
+            "02_beta": {"main.py": bundle_source(20), "tasks.py": task_source("b")},
+            "03_gamma": {"main.py": bundle_source(-5), "tasks.py": task_source("c")},
+            "04_delta": {"main.py": bundle_source(10), "tasks.py": task_source("d")},
+            "zeta": {"main.py": bundle_source(100), "tasks.py": task_source("z")},
         },
     )
 
-    assert [bundle.id for bundle in load_project(tmp_path).bundles] == ["alpha", "base"]
+    assert [bundle.id for bundle in load_project(tmp_path).bundles] == ["alpha", "beta", "gamma", "delta", "zeta"]
+
+
+def test_order_runs_higher_values_first_within_a_prefix_and_negative_values_sort_after_default(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={
+            "01_alpha": {"main.py": bundle_source(), "tasks.py": task_source("a")},
+            "01_beta": {"main.py": bundle_source(20), "tasks.py": task_source("b")},
+            "01_gamma": {"main.py": bundle_source(-5), "tasks.py": task_source("c")},
+            "01_epsilon": {"main.py": bundle_source(-10), "tasks.py": task_source("e")},
+            "02_delta": {"main.py": bundle_source(100), "tasks.py": task_source("d")},
+        },
+    )
+
+    assert [bundle.id for bundle in load_project(tmp_path).bundles] == [
+        "beta",
+        "alpha",
+        "gamma",
+        "epsilon",
+        "delta",
+    ]
+
+
+def test_order_runs_higher_values_first_for_unnumbered_bundles(tmp_path):
+    make_project(
+        tmp_path,
+        bundles={
+            "alpha": {"main.py": bundle_source(), "tasks.py": task_source("a")},
+            "beta": {"main.py": bundle_source(20), "tasks.py": task_source("b")},
+            "gamma": {"main.py": bundle_source(-5), "tasks.py": task_source("c")},
+            "delta": {"main.py": bundle_source(10), "tasks.py": task_source("d")},
+            "epsilon": {"main.py": bundle_source(-10), "tasks.py": task_source("e")},
+        },
+    )
+
+    assert [bundle.id for bundle in load_project(tmp_path).bundles] == [
+        "beta",
+        "delta",
+        "alpha",
+        "gamma",
+        "epsilon",
+    ]
 
 
 def test_bundles_py_shadowing_is_reported(tmp_path):

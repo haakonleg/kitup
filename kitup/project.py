@@ -120,8 +120,6 @@ def load_project(
         if module_roots:
             _install_modules_package(project_root, module_roots)
         bundles = _load_bundles(bundle_dirs)
-    # Stable sort: equal priorities keep discovery (prefix, then name) order.
-    bundles = tuple(sorted(bundles, key=lambda bundle: bundle.priority))
     return Project(
         root=project_root,
         bundles=bundles,
@@ -303,7 +301,11 @@ def _bundle_folders(directory: Path) -> list[Path]:
     entries = _read_entries(directory, label="bundle")
     return sorted(
         (path for path in entries if path.is_dir() and not _ignored(path.name)),
-        key=_bundle_sort_key,
+        key=lambda path: (
+            (prefix := _parse_bundle_folder(path.name)[0]) is None,
+            prefix or 0,
+            path.name,
+        ),
     )
 
 
@@ -313,12 +315,6 @@ def _parse_bundle_folder(folder_name: str) -> tuple[int | None, str]:
     if match is None:
         return None, folder_name
     return int(match.group("number")), match.group("id")
-
-
-def _bundle_sort_key(path: Path) -> tuple[bool, int, str]:
-    """Sort numbered folders first by numeric prefix, then other folders by name."""
-    prefix, _ = _parse_bundle_folder(path.name)
-    return (prefix is None, prefix or 0, path.name)
 
 
 def _require_bundle_id(folder_name: str) -> str:
@@ -360,7 +356,8 @@ def _discover_project_modules(project_root: Path, module_roots: Sequence[Path]) 
 
 
 def _load_bundles(bundle_dirs: Sequence[Path]) -> tuple[Bundle, ...]:
-    bundles: list[Bundle] = []
+    """Import and finalize bundles, returning them in run order."""
+    loaded: list[tuple[int | None, Bundle]] = []
     for folder in bundle_dirs:
         bundle_id = _require_bundle_id(folder.name)
         package = f"_kitup_bundle_{folder.name}"
@@ -379,8 +376,9 @@ def _load_bundles(bundle_dirs: Sequence[Path]) -> tuple[Bundle, ...]:
             name=bundle.name or bundle_id,
             var_paths=var_paths,
         )
-        bundles.append(bundle)
-    return tuple(bundles)
+        loaded.append((_parse_bundle_folder(folder.name)[0], bundle))
+    loaded.sort(key=lambda entry: (entry[0] is None, entry[0] or 0, -entry[1].order))
+    return tuple(bundle for _, bundle in loaded)
 
 
 def _import_bundle_main(folder: Path, *, package: str) -> ModuleType | None:

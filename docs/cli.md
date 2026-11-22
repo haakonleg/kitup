@@ -20,10 +20,9 @@ kitup init         [PROJECT_DIR] [--force] [OPTIONS]
 
 ### `apply`
 
-Load the project, select bundles and tasks, and apply the plan. Bundles run in
-dependency order, then by `priority` and numeric folder prefix, and stop at the
-first failure. By default `apply` changes the system; use `--dry-run` to preview
-the result first.
+Load the project, select bundles and tasks, and apply the plan in dependency and
+run order, stopping at the first failure. By default `apply` changes the system;
+use `--dry-run` to preview the result first.
 
 ### `list`
 

@@ -43,23 +43,24 @@ def test_bundle_defaults_factory_and_validation():
     assert bundle.name == ""
     assert bundle.id == ""
     assert bundle.tasks == ()
-    assert Bundle("Base").priority == 0
-    assert Bundle("Base", priority=5).priority == 5
+    assert Bundle("Base").order == 0
+    assert Bundle("Base", order=5).order == 5
+    assert Bundle("Base", order=-3).order == -3
 
-    created = define_bundle("Base", priority=-3)
+    created = define_bundle("Base", order=-3)
     assert created.tasks == ()
     assert created.id == "Base"
-    assert created.priority == -3
+    assert created.order == -3
     assert not hasattr(sys.modules[__name__], "__kitup_bundle__")
 
     with pytest.raises(BundleError, match="bundle name must not be empty"):
         Bundle("")
     with pytest.raises(BundleError, match="bundle name must be a string"):
         Bundle(1)  # type: ignore[arg-type]
-    with pytest.raises(BundleError, match="bundle priority must be an integer"):
-        Bundle("Base", priority="high")  # type: ignore[arg-type]
-    with pytest.raises(BundleError, match="bundle priority must be an integer"):
-        Bundle("Base", priority=True)
+    with pytest.raises(BundleError, match="bundle order must be an integer"):
+        Bundle("Base", order="high")  # type: ignore[arg-type]
+    with pytest.raises(BundleError, match="bundle order must be an integer"):
+        Bundle("Base", order=True)
 
 
 def test_modules_auto_discovery_explicit_order_and_empty_override(tmp_path):

@@ -73,10 +73,13 @@ declared after `bundle()` in `main.py` belong to that bundle.
 Bundles run in this order, from highest to lowest precedence:
 
 1. `depends_on` — dependencies always run before the bundles that need them.
-2. `priority` — lower values run first; equal values keep folder order.
-3. Numeric folder prefix — folders such as `01_setup` or `2_packages` order
-   numerically (`2_x` before `10_x`, regardless of zero-padding). Numbered
-   folders run before unnumbered ones, which stay in name order.
+2. Numeric folder prefix — folders such as `01_setup` or `2_packages` order
+   numerically, with lower numbers running first (`2_x` before `10_x`,
+   regardless of zero-padding). Numbered folders run before unnumbered ones.
+3. `order` — higher values run first among bundles with the same prefix, or
+   among unnumbered bundles; equal values keep folder/name order. An omitted
+   value uses the default `0`, so negative values run after default-order
+   bundles. `order` never moves a bundle ahead of a lower folder prefix.
 
 The prefix is not part of the id: folder `01_setup` has id `setup`, so use
 `depends_on=["setup"]`, `-b setup`, and `files/setup/`. The part after the prefix
@@ -84,10 +87,10 @@ must still be a valid, non-keyword Python identifier, and ids must be unique, so
 `01_setup` and `setup` cannot coexist.
 
 ```python
-# bundles/02_packages/main.py: priority beats the folder prefix
+# bundles/02_packages/main.py: order resolves bundles sharing the prefix
 from kitup import bundle
 
-bundle("Packages", priority=-10)  # runs before default-priority (0) bundles
+bundle("Packages", order=10)  # runs before other 02_* bundles, after all 01_* bundles
 ```
 
 ### Task modules
