@@ -3,6 +3,7 @@
 import contextlib
 import os
 import platform
+import pwd
 import re
 import shlex
 import socket
@@ -114,6 +115,19 @@ def _unescape_mount_field(value: str) -> str:
     return _MOUNT_ESCAPE.sub(lambda match: chr(int(match.group(1), 8)), value)
 
 
+def _invoking_username() -> str | None:
+    """Return the login name of the user running kitup, if it can be determined.
+
+    The process's real user ID is authoritative. Environment variables such as
+    ``SUDO_USER`` are ignored because any caller can set or inherit them;
+    running kitup through ``sudo`` therefore reports the target account.
+    """
+    try:
+        return pwd.getpwuid(os.getuid()).pw_name or None
+    except KeyError:
+        return None
+
+
 def collect_facts(os_release_path: Path = OS_RELEASE_PATH) -> Mapping[str, Any]:
     """Collect a read-only snapshot of system facts.
 
@@ -124,6 +138,9 @@ def collect_facts(os_release_path: Path = OS_RELEASE_PATH) -> Mapping[str, Any]:
 
     with contextlib.suppress(OSError):
         facts["hostname"] = socket.gethostname()
+
+    if username := _invoking_username():
+        facts["username"] = username
 
     os_release = read_os_release(os_release_path)
     if os_release:

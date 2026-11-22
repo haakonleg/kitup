@@ -6,6 +6,7 @@ shared by all tasks. Optional facts are omitted when unavailable.
 | Key | Type | Description |
 | --- | --- | --- |
 | `hostname` | `str` | Host name of the machine. |
+| `username` | `str` | Login name of the user running kitup. |
 | `os_release` | `Mapping[str, str]` | Parsed operating-system release metadata, for example `ID`, `NAME`, and `VERSION_ID`. |
 | `distro_id` | `str` | Distribution identifier from `os_release`, such as `fedora`. |
 | `version_id` | `str` | Distribution version from `os_release`, such as `44`. |
@@ -29,6 +30,10 @@ Each mount contains:
 
 - `distro_id` and `version_id` are present only when the corresponding
   `os_release` field exists.
+- `username` comes from the process's real user ID, so it names the account
+  kitup runs as. Running kitup through `sudo` therefore reports the target
+  account, typically `root`. The fact is omitted when that account cannot be
+  resolved.
 - `os_release` is omitted when the host does not provide release data.
 - `arch` and `kernel` are omitted when unavailable.
 - `mounts` is omitted when mount information is unavailable. Mounts whose

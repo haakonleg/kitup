@@ -92,6 +92,27 @@ def test_parse_mountinfo_and_collect_mounts(tmp_path):
         collected[0]["bytes_free"] = 0
 
 
+def test_collect_facts_uses_process_user(tmp_path, monkeypatch):
+    monkeypatch.setattr("kitup.host_facts.os.getuid", lambda: 1000)
+    monkeypatch.setattr("kitup.host_facts.pwd.getpwuid", lambda uid: SimpleNamespace(pw_name="alice"))
+
+    facts = collect_facts(tmp_path / "missing-os-release")
+
+    assert facts["username"] == "alice"
+    assert facts.username == "alice"
+
+
+def test_collect_facts_omits_unresolvable_username(tmp_path, monkeypatch):
+    def missing(uid):
+        raise KeyError(uid)
+
+    monkeypatch.setattr("kitup.host_facts.pwd.getpwuid", missing)
+
+    facts = collect_facts(tmp_path / "missing-os-release")
+
+    assert "username" not in facts
+
+
 def test_collect_facts_are_read_only_and_missing_sources_are_omitted(tmp_path):
     path = tmp_path / "os-release"
     path.write_text(
