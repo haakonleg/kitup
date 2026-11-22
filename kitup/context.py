@@ -161,6 +161,14 @@ class TaskContext:
         name = getattr(task, "__name__", repr(task))
         raise TaskFailed(f"no result for task: {name}")
 
+    def value(self, task: Callable[..., Any]) -> Any:
+        """Return the return value of a task that already ran in the current bundle.
+
+        Shorthand for ``result(task).value``. Returns ``None`` for a task that
+        returned nothing, including a skipped task.
+        """
+        return self.result(task).value
+
     @property
     def bundle(self) -> Bundle:
         """The bundle that owns the current task."""

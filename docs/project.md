@@ -398,6 +398,8 @@ root:
 - `ctx.changed()`, `ctx.note()`, `ctx.memo()`, `ctx.skip()`, and `ctx.fail()` —
   run controls. `ctx.memo(key, loader)` caches a value under a string key;
   skipped and failed outcomes are cached too.
+- `ctx.result(task)` and `ctx.value(task)` — read an earlier task's result or
+  return value; see [Task results](#task-results).
 - `@memo` — decorator from `kitup` (`from kitup import memo`) that caches a
   function's result once per run, keyed by the function and its arguments.
   Skipped and failed outcomes are cached and re-raised on repeat calls.
@@ -428,9 +430,26 @@ def enable_services():
 ```
 
 `ctx.result(task)` returns the result for a task function in the current bundle.
-`TaskResult` exposes `status`, `changed`, `ok`, `skipped`, `failed`, `calls`,
-`changes`, `notes`, `detail`, `duration`, `error`, and `value`. `ctx.results`
-returns a snapshot of the current bundle's results keyed by task id.
+`ctx.value(task)` is shorthand for `ctx.result(task).value` and returns the
+task's return value directly. `TaskResult` exposes `status`, `changed`, `ok`,
+`skipped`, `failed`, `calls`, `changes`, `notes`, `detail`, `duration`, `error`,
+and `value`. `ctx.results` returns a snapshot of the current bundle's results
+keyed by task id.
+
+Pass a value from one task to the next with `ctx.value()`:
+
+```python
+# bundles/shell/fzf.py
+@task
+def download_fzf():
+    asset = github_release.by_asset("junegunn/fzf", r"^.*linux_amd64.tar.gz$")
+    return download.to_file(asset.url, "/tmp/")
+
+
+@task
+def install_fzf():
+    decompress.archive(ctx.value(download_fzf).dest, "~/.local/bin", include="fzf", mode="0755")
+```
 
 Results are isolated per bundle. A task cannot inspect another bundle's results,
 even through a dependency; `depends_on` controls execution order only. Reading a

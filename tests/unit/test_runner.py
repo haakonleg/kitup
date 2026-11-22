@@ -203,6 +203,64 @@ def test_result_for_task_that_did_not_run_raises(tmp_path):
     assert "no result for task: check" in text
 
 
+def test_value_returns_the_task_return_value(tmp_path):
+    seen = []
+    bundle = Bundle("base")
+
+    def check():
+        ctx = current_context()
+        return ctx.changed(summary="+updates", dest="/tmp/fzf.tar.gz")
+
+    def apply():
+        ctx = current_context()
+        seen.append(ctx.value(check).dest)
+
+    add_task(bundle, check, name="Check")
+    add_task(bundle, apply, name="Apply")
+
+    code, _, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 0
+    assert seen == ["/tmp/fzf.tar.gz"]
+
+
+def test_value_returns_none_for_a_skipped_task(tmp_path):
+    seen = []
+    bundle = Bundle("base")
+
+    def check():
+        current_context().skip("nothing to do")
+
+    def apply():
+        seen.append(current_context().value(check))
+
+    add_task(bundle, check, name="Check")
+    add_task(bundle, apply, name="Apply")
+
+    code, _, _ = run_plan(tmp_path, [bundle])
+
+    assert code == 0
+    assert seen == [None]
+
+
+def test_value_for_task_that_did_not_run_raises(tmp_path):
+    bundle = Bundle("base")
+
+    def check():
+        pass
+
+    def apply():
+        current_context().value(check)
+
+    add_task(bundle, check, name="Check", tags={"skip"})
+    add_task(bundle, apply, name="Apply")
+
+    code, text, _ = run_plan(tmp_path, [bundle], skip_tags={"skip"})
+
+    assert code == 1
+    assert "no result for task: check" in text
+
+
 def test_task_results_are_stored_and_looked_up_per_bundle(tmp_path):
     seen = []
     one = Bundle("one")
