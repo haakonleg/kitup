@@ -106,6 +106,7 @@ class TaskContext:
 
         self._calls: list[CallResult] = []
         self._notes: list[str] = []
+        self._warnings: list[str] = []
         self._diffs: list[str] = []
         self._memo: dict[str, Any] = {}
         self._memo_calls: dict[tuple[object, ...], Any] = {}
@@ -131,6 +132,11 @@ class TaskContext:
     def notes(self) -> list[str]:
         """Return the notes recorded for the current task."""
         return list(self._notes)
+
+    @property
+    def warnings(self) -> list[str]:
+        """Return the warnings recorded for the current task."""
+        return list(self._warnings)
 
     @property
     def diffs(self) -> list[str]:
@@ -247,6 +253,7 @@ class TaskContext:
         """Reset task-scoped state and enter the task's bundle."""
         self._calls.clear()
         self._notes.clear()
+        self._warnings.clear()
         self._diffs.clear()
         self._task_name = task.name
         self._bundle = task.bundle
@@ -408,6 +415,14 @@ class TaskContext:
     def note(self, detail: str) -> None:
         """Attach an informational note to the current task line."""
         self._notes.append(detail)
+
+    def warn(self, detail: str) -> None:
+        """Display a warning for the current task without failing it.
+
+        Warnings are rendered prominently below the task line but do not affect
+        the task status.
+        """
+        self._warnings.append(detail)
 
     def add_diff(self, line: str) -> None:
         """Buffer one diff line for rendering under the current task."""

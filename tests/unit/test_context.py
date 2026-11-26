@@ -52,14 +52,17 @@ def test_changed_records_calls_notes_task_scope_and_action_inference(tmp_path):
 
     assert context.changed(result) is result
     context.note("note")
+    context.warn("warning")
     assert context.calls == [result]
     assert context.changes == [result]
     assert context.notes == ["note"]
+    assert context.warnings == ["warning"]
 
     context.begin_task(task_for())
     assert context.calls == []
     assert context.changes == []
     assert context.notes == []
+    assert context.warnings == []
 
     assert context.changed(summary="+pkg").action == "task._noop"
 

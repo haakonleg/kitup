@@ -38,6 +38,7 @@ _CYAN: Final = "\033[36m"
 _RED: Final = "\033[31m"
 _MAGENTA: Final = "\033[35m"
 _BOLD: Final = "\033[1m"
+_BOLD_YELLOW: Final = "\033[1;33m"
 _BOLD_RED: Final = "\033[1;31m"
 _DIM: Final = "\033[2m"
 _RESET: Final = "\033[0m"
@@ -310,6 +311,9 @@ class Output:
                 lines.append(f"{pad}{marker} {self._paint(call.action, _DIM)}: {call.summary}")
             else:
                 lines.append(self._paint(f"{pad}· {call.action}: {call.summary}", _DIM))
+        for warning in result.warnings:
+            label = self._paint("warning:", _BOLD_YELLOW)
+            lines.append(f"{pad}{label} {self._paint(warning, _YELLOW)}")
         lines.extend(f"{pad}{self._paint(_NOTE_MARKER, _CYAN)} {self._paint(note, _CYAN)}" for note in result.notes)
         return lines
 

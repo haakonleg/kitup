@@ -202,6 +202,7 @@ class Runner:
             status=status,
             calls=calls,
             notes=notes,
+            warnings=self.context.warnings,
             diffs=self.context.diffs,
             detail=detail,
             duration=self.output.task_elapsed,

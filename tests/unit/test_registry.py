@@ -43,7 +43,7 @@ def test_bundle_defaults_factory_and_validation():
     assert bundle.name == ""
     assert bundle.id == ""
     assert bundle.tasks == ()
-    assert Bundle("Base").order == 0
+    assert Bundle("Base").order == float("-inf")
     assert Bundle("Base", order=5).order == 5
     assert Bundle("Base", order=-3).order == -3
 

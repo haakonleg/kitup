@@ -38,6 +38,7 @@ def make_result(
     status: Status = Status.OK,
     calls: tuple[CallResult, ...] = (),
     notes: tuple[str, ...] = (),
+    warnings: tuple[str, ...] = (),
     diffs: tuple[str, ...] = (),
     detail: str = "",
     name: str = "Task",
@@ -49,6 +50,7 @@ def make_result(
         status=status,
         calls=list(calls),
         notes=list(notes),
+        warnings=list(warnings),
         diffs=list(diffs),
         detail=detail,
         duration=duration,
@@ -92,6 +94,19 @@ def test_changed_tasks_hide_unchanged_calls_unless_verbose():
     assert "    + files.file: write /a" in text
     assert "    · files.file: ensure /b" in text
     assert "probed sshd config" in text
+
+
+def test_warnings_render_prominently_below_the_task():
+    stream = StringIO()
+    output = Output(stream, no_color=True)
+    output.task(make_result(status=Status.OK, warnings=("unexpected ownership",)))
+
+    assert "    warning: unexpected ownership" in stream.getvalue()
+
+    stream = TtyStream()
+    Output(stream).task(make_result(status=Status.OK, warnings=("unexpected ownership",)))
+
+    assert "\033[1;33mwarning:\033[0m \033[33munexpected ownership\033[0m" in stream.getvalue()
 
 
 def test_dry_run_glyphs_and_color_modes():

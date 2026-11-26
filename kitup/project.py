@@ -377,6 +377,8 @@ def _load_bundles(bundle_dirs: Sequence[Path]) -> tuple[Bundle, ...]:
             var_paths=var_paths,
         )
         loaded.append((_parse_bundle_folder(folder.name)[0], bundle))
+    # Negating the order sorts higher values first; the negative-infinity
+    # default then places bundles without an order after every explicit one.
     loaded.sort(key=lambda entry: (entry[0] is None, entry[0] or 0, -entry[1].order))
     return tuple(bundle for _, bundle in loaded)
 

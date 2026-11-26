@@ -235,7 +235,7 @@ def test_folder_prefixes_run_before_order_and_lower_numbers_come_first(tmp_path)
     assert [bundle.id for bundle in load_project(tmp_path).bundles] == ["alpha", "beta", "gamma", "delta", "zeta"]
 
 
-def test_order_runs_higher_values_first_within_a_prefix_and_negative_values_sort_after_default(tmp_path):
+def test_explicit_orders_run_before_the_default_within_a_prefix(tmp_path):
     make_project(
         tmp_path,
         bundles={
@@ -249,14 +249,14 @@ def test_order_runs_higher_values_first_within_a_prefix_and_negative_values_sort
 
     assert [bundle.id for bundle in load_project(tmp_path).bundles] == [
         "beta",
-        "alpha",
         "gamma",
         "epsilon",
+        "alpha",
         "delta",
     ]
 
 
-def test_order_runs_higher_values_first_for_unnumbered_bundles(tmp_path):
+def test_explicit_orders_run_before_the_default_for_unnumbered_bundles(tmp_path):
     make_project(
         tmp_path,
         bundles={
@@ -271,9 +271,9 @@ def test_order_runs_higher_values_first_for_unnumbered_bundles(tmp_path):
     assert [bundle.id for bundle in load_project(tmp_path).bundles] == [
         "beta",
         "delta",
-        "alpha",
         "gamma",
         "epsilon",
+        "alpha",
     ]
 
 

@@ -76,10 +76,11 @@ Bundles run in this order, from highest to lowest precedence:
 2. Numeric folder prefix — folders such as `01_setup` or `2_packages` order
    numerically, with lower numbers running first (`2_x` before `10_x`,
    regardless of zero-padding). Numbered folders run before unnumbered ones.
-3. `order` — higher values run first among bundles with the same prefix, or
-   among unnumbered bundles; equal values keep folder/name order. An omitted
-   value uses the default `0`, so negative values run after default-order
-   bundles. `order` never moves a bundle ahead of a lower folder prefix.
+3. `order` — explicitly ordered bundles run before bundles without an order,
+   and higher values run first among bundles with the same prefix, or among
+   unnumbered bundles; equal values keep folder/name order. An omitted value is
+   treated as the lowest possible value, so any explicit order takes precedence.
+   `order` never moves a bundle ahead of a lower folder prefix.
 
 The prefix is not part of the id: folder `01_setup` has id `setup`, so use
 `depends_on=["setup"]`, `-b setup`, and `files/setup/`. The part after the prefix
@@ -398,9 +399,11 @@ root:
   external bundle, files, and module roots.
 - `ctx.bundle` — the bundle that owns the current task and its resources.
 - `ctx.run()` and `ctx.probe()` — command helpers.
-- `ctx.changed()`, `ctx.note()`, `ctx.memo()`, `ctx.skip()`, and `ctx.fail()` —
-  run controls. `ctx.memo(key, loader)` caches a value under a string key;
-  skipped and failed outcomes are cached too.
+- `ctx.changed()`, `ctx.note()`, `ctx.warn()`, `ctx.memo()`, `ctx.skip()`, and
+  `ctx.fail()` — run controls. `ctx.note()` attaches an informational note,
+  while `ctx.warn()` displays a prominent warning without failing the task.
+  `ctx.memo(key, loader)` caches a value under a string key; skipped and failed
+  outcomes are cached too.
 - `ctx.result(task)` and `ctx.value(task)` — read an earlier task's result or
   return value; see [Task results](#task-results).
 - `@memo` — decorator from `kitup` (`from kitup import memo`) that caches a
@@ -435,9 +438,9 @@ def enable_services():
 `ctx.result(task)` returns the result for a task function in the current bundle.
 `ctx.value(task)` is shorthand for `ctx.result(task).value` and returns the
 task's return value directly. `TaskResult` exposes `status`, `changed`, `ok`,
-`skipped`, `failed`, `calls`, `changes`, `notes`, `detail`, `duration`, `error`,
-and `value`. `ctx.results` returns a snapshot of the current bundle's results
-keyed by task id.
+`skipped`, `failed`, `calls`, `changes`, `notes`, `warnings`, `detail`,
+`duration`, `error`, and `value`. `ctx.results` returns a snapshot of the
+current bundle's results keyed by task id.
 
 Pass a value from one task to the next with `ctx.value()`:
 

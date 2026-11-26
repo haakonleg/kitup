@@ -133,6 +133,9 @@ def configure_ssh_and_firewall():
 - Use `ctx.probe(...)` for read-only queries and `ctx.run(...)` for
   mutations. Pass `check=False` to `ctx.run()` when the exit code is part of
   the logic; commands that cannot start are reported as exit code `127`.
+- Use `ctx.warn(...)` for something that looks incorrect or unintended but
+  should not fail the task. Warnings appear below the task line in yellow.
+- Use `ctx.note(...)` for lower-severity informational details.
 
 ```python
 from kitup import CallResult

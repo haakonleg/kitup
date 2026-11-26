@@ -75,6 +75,23 @@ def test_status_inference_and_summary(tmp_path):
     assert "Summary: 1 changed, 1 ok, 1 skipped" in text
 
 
+def test_warning_is_recorded_and_shown_without_failing_the_task(tmp_path):
+    bundle = Bundle("base")
+
+    def check():
+        current_context().warn("ownership looks unexpected")
+
+    add_task(bundle, check, name="Check")
+
+    code, text, context = run_plan(tmp_path, [bundle])
+
+    result = stored_result(context, bundle.tasks[0])
+    assert code == 0
+    assert result.status is Status.OK
+    assert result.warnings == ["ownership looks unexpected"]
+    assert "warning: ownership looks unexpected" in text
+
+
 def test_no_change_call_is_recorded_but_keeps_the_task_ok(tmp_path):
     bundle = Bundle("base")
 

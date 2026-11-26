@@ -23,6 +23,7 @@ _SPECS_ATTR: Final = "__kitup_task_specs__"
 _MODULE_ATTR: Final = "__kitup_module__"
 _MODULES_SEQUENCE: Final = "bundle modules must be a sequence of task modules or task module paths"
 _ORDER: Final = count()
+_LOWEST_ORDER: Final = float("-inf")
 
 type TaskFunc = Callable[[], Any]
 
@@ -129,8 +130,8 @@ class Bundle:
     numeric folder prefix, and equal orders keep discovery order. Numeric folder
     prefixes rank first, with lower numbers before higher ones and numbered
     folders before unnumbered ones; ``order`` never moves a bundle ahead of a
-    lower prefix. ``depends_on`` always wins over both. An omitted ``order``
-    uses the default ``0``, and negative values run after default-order bundles.
+    lower prefix. ``depends_on`` always wins over both. An omitted ``order`` is
+    treated as negative infinity, so any explicitly ordered bundle runs first.
     """
 
     def __init__(
@@ -141,7 +142,7 @@ class Bundle:
         modules: Sequence[ModuleType | str | Path] | None = None,
         depends_on: Sequence[str | Bundle] = (),
         path: str | Path | None = None,
-        order: int = 0,
+        order: int | None = None,
     ) -> None:
         if name is not None:
             if not isinstance(name, str):
@@ -151,7 +152,7 @@ class Bundle:
             name = name.strip()
         if not isinstance(description, str):
             raise BundleError("bundle description must be a string")
-        if not isinstance(order, int) or isinstance(order, bool):
+        if order is not None and (not isinstance(order, int) or isinstance(order, bool)):
             raise BundleError("bundle order must be an integer")
 
         self._frozen = False
@@ -160,7 +161,7 @@ class Bundle:
         self.id = name or ""
         self.name = name or ""
         self.description = description
-        self.order = order
+        self.order: int | float = _LOWEST_ORDER if order is None else order
         self.path = expand_path(Path(path), error=BundleError, resolve=True) if path is not None else None
         self.var_paths: tuple[Path, ...] = ()
         self.depends_on = self._normalize_dependencies(depends_on)
@@ -326,7 +327,7 @@ def bundle(
     modules: Sequence[ModuleType | str | Path] | None = None,
     depends_on: Sequence[str | Bundle] = (),
     path: str | Path | None = None,
-    order: int = 0,
+    order: int | None = None,
 ) -> Bundle:
     """Create a bundle and register it on the calling ``main.py`` module.
 
@@ -339,11 +340,11 @@ def bundle(
     are discovered automatically; elsewhere the bundle starts with no tasks.
 
     ``order`` controls run order within the same numeric folder prefix: higher
-    values run first, and equal values keep discovery order. An omitted value
-    uses the default ``0``, and negative values run after default-order
-    bundles. Numeric folder prefixes rank first, with lower numbers before
-    higher ones and numbered folders before unnumbered ones. ``depends_on``
-    still runs dependencies before dependents.
+    values run first, and equal values keep discovery order. An omitted value is
+    treated as the lowest possible order, so any explicitly ordered bundle runs
+    first. Numeric folder prefixes rank first, with lower numbers before higher
+    ones and numbered folders before unnumbered ones. ``depends_on`` still runs
+    dependencies before dependents.
     """
     caller = sys._getframe(1).f_globals
     caller_file = caller.get("__file__")
