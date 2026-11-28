@@ -46,6 +46,7 @@ Each module page documents its parameters, result fields, and usage examples.
 - [decompress](decompress.md) — archive extraction and single-file decompression
 - [systemd](systemd.md) — systemd units
 - [gsettings](gsettings.md) — GNOME settings
+- [dconf](dconf.md) — dconf database keys and subtrees
 - [git](git.md) — repository clones and checkouts
 - [sysctl](sysctl.md) — kernel parameters at runtime and in sysctl files
 - [host](host.md) — hostname, time zone, NTP, RTC, and locale
