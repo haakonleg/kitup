@@ -167,7 +167,7 @@ def test_timezone_dry_run_does_not_change(tmp_path: Path, capsys) -> None:
     )
 
     assert run_kitup("apply", root, "--dry-run") == 0
-    assert "1 changed" in capsys.readouterr().out
+    assert "1 would change" in capsys.readouterr().out
     assert timedatectl_show("Timezone")["Timezone"] == "UTC"
 
 
@@ -311,7 +311,7 @@ def test_locale_dry_run_does_not_change(tmp_path: Path, capsys) -> None:
     )
 
     assert run_kitup("apply", root, "--dry-run") == 0
-    assert "1 changed" in capsys.readouterr().out
+    assert "1 would change" in capsys.readouterr().out
     assert read_root_file(LOCALE_CONF) == before
 
 

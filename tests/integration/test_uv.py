@@ -160,7 +160,7 @@ def test_dependencies_dry_run_does_not_create_the_project(tmp_path: Path, capsys
     assert run_kitup("apply", root, "--dry-run") == 0
 
     assert not project.exists()
-    assert "1 changed" in capsys.readouterr().out
+    assert "1 would change" in capsys.readouterr().out
 
 
 def test_tools_install_latest_and_uninstall(tmp_path: Path, capsys) -> None:
