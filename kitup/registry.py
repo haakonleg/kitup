@@ -3,6 +3,7 @@
 import importlib
 import inspect
 import keyword
+import re
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -22,8 +23,14 @@ MAIN_FILE: Final = f"{MAIN_STEM}.py"
 _SPECS_ATTR: Final = "__kitup_task_specs__"
 _MODULE_ATTR: Final = "__kitup_module__"
 _MODULES_SEQUENCE: Final = "bundle modules must be a sequence of task modules or task module paths"
+_DEPENDS_ON_SEQUENCE: Final = "bundle depends_on must be a sequence of bundle ids, Bundle objects, or bundle modules"
+_DEPENDS_ON_ITEM: Final = "bundle depends_on must contain bundle ids, Bundle objects, or bundle modules"
 _ORDER: Final = count()
 _LOWEST_ORDER: Final = float("-inf")
+
+# A bundle folder may start with digits and an underscore, for example
+# ``01_setup``. The prefix orders bundles and is stripped from the bundle id.
+_BUNDLE_PREFIX: Final = re.compile(r"(?P<number>\d+)_(?P<id>.+)")
 
 type TaskFunc = Callable[[], Any]
 
@@ -132,6 +139,10 @@ class Bundle:
     folders before unnumbered ones; ``order`` never moves a bundle ahead of a
     lower prefix. ``depends_on`` always wins over both. An omitted ``order`` is
     treated as negative infinity, so any explicitly ordered bundle runs first.
+
+    ``depends_on`` accepts bundle ids, :class:`Bundle` objects, and bundle
+    modules or packages. A module dependency is stored as its bundle id, which
+    is derived from the bundle folder name.
     """
 
     def __init__(
@@ -140,7 +151,7 @@ class Bundle:
         description: str = "",
         *,
         modules: Sequence[ModuleType | str | Path] | None = None,
-        depends_on: Sequence[str | Bundle] = (),
+        depends_on: Sequence[str | Bundle | ModuleType] = (),
         path: str | Path | None = None,
         order: int | None = None,
     ) -> None:
@@ -267,13 +278,13 @@ class Bundle:
         self._task_ids.add(task_id)
         self.__dict__.pop("tasks", None)
 
-    def _normalize_dependencies(self, depends_on: Sequence[str | Bundle]) -> tuple[str | Bundle, ...]:
-        if isinstance(depends_on, (str, Bundle)):
-            raise BundleError("bundle depends_on must be a sequence of bundle ids or Bundle objects")
+    def _normalize_dependencies(self, depends_on: Sequence[str | Bundle | ModuleType]) -> tuple[str | Bundle, ...]:
+        if isinstance(depends_on, (str, Bundle, ModuleType)):
+            raise BundleError(_DEPENDS_ON_SEQUENCE)
         try:
             values = tuple(depends_on)
         except TypeError as exc:
-            raise BundleError("bundle depends_on must be a sequence of bundle ids or Bundle objects") from exc
+            raise BundleError(_DEPENDS_ON_SEQUENCE) from exc
 
         normalized: list[str | Bundle] = []
         for value in values:
@@ -283,10 +294,10 @@ class Bundle:
                 if not value.strip():
                     raise BundleError("bundle dependency id must not be empty")
                 normalized.append(value.strip())
+            elif isinstance(value, ModuleType):
+                normalized.append(_dependency_id(value))
             else:
-                raise BundleError(
-                    f"bundle depends_on must contain bundle ids or Bundle objects, not {type(value).__name__}"
-                )
+                raise BundleError(f"{_DEPENDS_ON_ITEM}, not {type(value).__name__}")
         return tuple(normalized)
 
     @overload
@@ -325,7 +336,7 @@ def bundle(
     description: str = "",
     *,
     modules: Sequence[ModuleType | str | Path] | None = None,
-    depends_on: Sequence[str | Bundle] = (),
+    depends_on: Sequence[str | Bundle | ModuleType] = (),
     path: str | Path | None = None,
     order: int | None = None,
 ) -> Bundle:
@@ -338,6 +349,11 @@ def bundle(
 
     When ``modules`` is omitted inside ``main.py``, sibling ``*.py`` task modules
     are discovered automatically; elsewhere the bundle starts with no tasks.
+
+    ``depends_on`` accepts bundle ids, :class:`Bundle` objects, and bundle
+    modules or packages. Pass a bundle's ``main`` module (``from bundles.fonts
+    import main as fonts``) or the package itself (``from bundles import
+    fonts``); either is stored as that bundle's id.
 
     ``order`` controls run order within the same numeric folder prefix: higher
     values run first, and equal values keep discovery order. An omitted value is
@@ -368,6 +384,14 @@ def bundle(
     if is_main:
         caller["__kitup_bundle__"] = created
     return created
+
+
+def parse_bundle_folder(folder_name: str) -> tuple[int | None, str]:
+    """Return the optional numeric prefix and bundle id for a bundle folder name."""
+    match = _BUNDLE_PREFIX.fullmatch(folder_name)
+    if match is None:
+        return None, folder_name
+    return int(match.group("number")), match.group("id")
 
 
 def module(name: str, description: str = "") -> Module:
@@ -468,19 +492,53 @@ def _module_task_specs(module: ModuleType) -> tuple[TaskSpec, ...]:
 
 
 def bundle_of(value: ModuleType | Bundle) -> Bundle:
-    """Return a module's bundle."""
+    """Return a module's bundle.
+
+    Pass a bundle module, its bundle package, or a :class:`Bundle` object. A
+    package resolves through its ``main`` submodule.
+    """
     if isinstance(value, Bundle):
         return value
     if isinstance(value, ModuleType):
-        bundle = getattr(value, "__kitup_bundle__", None)
-        if bundle is None:
-            raise BundleError(
-                f"module {value.__name__!r} does not define a bundle; call bundle(...) in its {MAIN_FILE}"
-            )
-        if not isinstance(bundle, Bundle):
-            raise BundleError(f"module {value.__name__!r} has a non-Bundle __kitup_bundle__")
-        return bundle
+        return _bundle_of_module(value)
     raise BundleError(f"expected a bundle module or Bundle object, not {type(value).__name__}")
+
+
+def _bundle_of_module(value: ModuleType) -> Bundle:
+    """Return the bundle declared by a module or its package's ``main`` module."""
+    bundle = getattr(value, "__kitup_bundle__", None)
+    if bundle is not None:
+        if isinstance(bundle, Bundle):
+            return bundle
+        raise BundleError(f"module {value.__name__!r} has a non-Bundle __kitup_bundle__")
+
+    main = _package_main_module(value)
+    if main is not None:
+        return _bundle_of_module(main)
+    raise BundleError(f"module {value.__name__!r} does not define a bundle; call bundle(...) in its {MAIN_FILE}")
+
+
+def _package_main_module(value: ModuleType) -> ModuleType | None:
+    """Return a package's ``main`` submodule when the package contains one."""
+    if not any((Path(root) / MAIN_FILE).is_file() for root in getattr(value, "__path__", None) or ()):
+        return None
+    module_name = f"{value.__name__}.{MAIN_STEM}"
+    try:
+        return importlib.import_module(module_name)
+    except Exception as exc:
+        raise BundleError(f"failed to import bundle module {module_name!r}: {exc}") from exc
+
+
+def _dependency_id(value: ModuleType) -> str:
+    """Return the bundle id a module dependency refers to."""
+    bundle = _bundle_of_module(value)
+    if bundle.path is not None:
+        _, bundle_id = parse_bundle_folder(bundle.path.name)
+    else:
+        bundle_id = bundle.id
+    if not bundle_id:
+        raise BundleError(f"cannot determine the bundle id for module {value.__name__!r}; pass a Bundle object instead")
+    return bundle_id
 
 
 @overload

@@ -151,13 +151,19 @@ and `desktop.install`.
 
 ### Dependencies
 
-Depend on other bundles by id:
+Depend on another bundle by id or as an imported module:
 
 ```python
-# bundles/workstation/main.py
 from kitup import bundle
 
 bundle("Workstation", depends_on=["base"])
+```
+
+```python
+from kitup import bundle
+from bundles import base
+
+bundle("Workstation", depends_on=[base])
 ```
 
 Dependencies run first and each bundle runs at most once. Unknown ids and

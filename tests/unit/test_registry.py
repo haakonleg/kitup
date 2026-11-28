@@ -24,8 +24,10 @@ from kitup.registry import bundle as define_bundle
 from ..helpers import write
 
 
-def import_package(tmp_path: Path, files: dict[str, str], *, entry: str | None = None) -> tuple[str, object]:
-    name = f"pkg_{uuid.uuid4().hex}"
+def import_package(
+    tmp_path: Path, files: dict[str, str], *, entry: str | None = None, name: str | None = None
+) -> tuple[str, object]:
+    name = name or f"pkg_{uuid.uuid4().hex}"
     for relative, text in files.items():
         write(tmp_path / name / relative, text)
     sys.path.insert(0, str(tmp_path))
@@ -234,10 +236,65 @@ def test_depends_on_accepts_ids_and_bundle_objects(tmp_path):
     assert bundle_of(base_module) is desktop.depends_on[1]  # type: ignore[arg-type]
 
 
+def test_depends_on_accepts_bundle_modules_and_packages(tmp_path):
+    name = f"pkg_{uuid.uuid4().hex}"
+    _, module = import_package(
+        tmp_path,
+        {
+            "fonts/main.py": "from kitup import bundle\n\nbundle('Fonts')\n",
+            "gnome/main.py": (
+                "from kitup import bundle\n"
+                f"from {name} import fonts\n"
+                f"from {name}.fonts import main as fonts_main\n"
+                "bundle('Gnome', depends_on=[fonts, fonts_main])\n"
+            ),
+        },
+        entry="gnome.main",
+        name=name,
+    )
+
+    gnome = bundle_of(module)  # type: ignore[arg-type]
+    assert gnome.depends_on == ("fonts", "fonts")
+
+    fonts = importlib.import_module(f"{name}.fonts")
+    fonts_main = importlib.import_module(f"{name}.fonts.main")
+    assert bundle_of(fonts) is bundle_of(fonts_main)
+
+
+def test_depends_on_bundle_module_strips_the_numeric_folder_prefix(tmp_path):
+    name = f"pkg_{uuid.uuid4().hex}"
+    _, module = import_package(
+        tmp_path,
+        {
+            "01_fonts/main.py": "from kitup import bundle\n\nbundle('Fonts')\n",
+            "gnome/main.py": (
+                "import importlib\n"
+                "from kitup import bundle\n"
+                f"fonts = importlib.import_module('{name}.01_fonts.main')\n"
+                "bundle('Gnome', depends_on=[fonts])\n"
+            ),
+        },
+        entry="gnome.main",
+        name=name,
+    )
+
+    gnome = bundle_of(module)  # type: ignore[arg-type]
+    assert gnome.depends_on == ("fonts",)
+
+
+def test_depends_on_rejects_a_module_without_a_bundle(tmp_path):
+    _, module = import_package(tmp_path, {"main.py": "VALUE = 1\n"}, entry="main")
+
+    with pytest.raises(BundleError, match="does not define a bundle"):
+        Bundle("base", depends_on=[module])  # type: ignore[list-item]
+
+
 def test_depends_on_rejects_a_single_string_and_invalid_values():
     with pytest.raises(BundleError, match="depends_on must be a sequence"):
         Bundle("base", depends_on="other")  # type: ignore[arg-type]
-    with pytest.raises(BundleError, match="must contain bundle ids or Bundle objects"):
+    with pytest.raises(BundleError, match="depends_on must be a sequence"):
+        Bundle("base", depends_on=sys.modules[__name__])  # type: ignore[arg-type]
+    with pytest.raises(BundleError, match="must contain bundle ids, Bundle objects, or bundle modules"):
         Bundle("base", depends_on=[object()])  # type: ignore[list-item]
     with pytest.raises(BundleError, match="dependency id must not be empty"):
         Bundle("base", depends_on=[""])

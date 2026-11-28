@@ -2,7 +2,6 @@
 
 import importlib
 import keyword
-import re
 import sys
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
@@ -22,6 +21,7 @@ from .registry import (
     discover_task_modules,
     forget_module_prefix,
     module_of,
+    parse_bundle_folder,
     registered_modules,
 )
 
@@ -39,10 +39,6 @@ _PROJECT_MODULE_PREFIXES: Final = (
     "_kitup_task_",
     "_kitup_var_",
 )
-
-# A bundle folder may start with digits and an underscore, for example
-# ``01_setup``. The prefix orders bundles and is stripped from the bundle id.
-_BUNDLE_PREFIX: Final = re.compile(r"(?P<number>\d+)_(?P<id>.+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,24 +298,16 @@ def _bundle_folders(directory: Path) -> list[Path]:
     return sorted(
         (path for path in entries if path.is_dir() and not _ignored(path.name)),
         key=lambda path: (
-            (prefix := _parse_bundle_folder(path.name)[0]) is None,
+            (prefix := parse_bundle_folder(path.name)[0]) is None,
             prefix or 0,
             path.name,
         ),
     )
 
 
-def _parse_bundle_folder(folder_name: str) -> tuple[int | None, str]:
-    """Return the optional numeric prefix and bundle id for a folder name."""
-    match = _BUNDLE_PREFIX.fullmatch(folder_name)
-    if match is None:
-        return None, folder_name
-    return int(match.group("number")), match.group("id")
-
-
 def _require_bundle_id(folder_name: str) -> str:
     """Validate a bundle folder name and return its bundle id."""
-    _, bundle_id = _parse_bundle_folder(folder_name)
+    _, bundle_id = parse_bundle_folder(folder_name)
     if not bundle_id.isidentifier() or keyword.iskeyword(bundle_id):
         raise ProjectError(
             f"invalid bundle name {folder_name!r}: must be a valid, non-keyword Python identifier, "
@@ -331,7 +319,7 @@ def _require_bundle_id(folder_name: str) -> str:
 def _reject_duplicate_bundle_ids(bundle_dirs: Sequence[Path]) -> None:
     seen: dict[str, Path] = {}
     for folder in bundle_dirs:
-        _, bundle_id = _parse_bundle_folder(folder.name)
+        _, bundle_id = parse_bundle_folder(folder.name)
         existing = seen.get(bundle_id)
         if existing is not None:
             raise ProjectError(f"duplicate bundle id {bundle_id!r}: {existing} and {folder}")
@@ -376,7 +364,7 @@ def _load_bundles(bundle_dirs: Sequence[Path]) -> tuple[Bundle, ...]:
             name=bundle.name or bundle_id,
             var_paths=var_paths,
         )
-        loaded.append((_parse_bundle_folder(folder.name)[0], bundle))
+        loaded.append((parse_bundle_folder(folder.name)[0], bundle))
     # Negating the order sorts higher values first; the negative-infinity
     # default then places bundles without an order after every explicit one.
     loaded.sort(key=lambda entry: (entry[0] is None, entry[0] or 0, -entry[1].order))

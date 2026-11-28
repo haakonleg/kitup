@@ -12,6 +12,7 @@ from kitup.project import (
     on_project_path,
     resolve_preset,
 )
+from kitup.resolver import resolve
 from kitup.variables import load_vars
 
 from ..helpers import make_project, write
@@ -83,6 +84,68 @@ def test_discovers_bundles_by_folder_id(tmp_path):
     assert workstation.name == "workstation"
     assert workstation.depends_on == ("base",)
     assert [task.name for task in base.tasks] == ["Install"]
+
+
+def test_depends_on_accepts_bundle_modules_and_packages(tmp_path):
+    root = make_project(
+        tmp_path,
+        bundles={
+            "fonts": {
+                "main.py": "from kitup import bundle\n\nbundle('Fonts')\n",
+                "tasks.py": task_source("install_fonts"),
+            },
+            "gnome": {
+                "main.py": (
+                    "from kitup import bundle\nfrom bundles import fonts\nbundle('Gnome', depends_on=[fonts])\n"
+                ),
+                "tasks.py": task_source("configure_gnome"),
+            },
+            "shell": {
+                "main.py": (
+                    "from kitup import bundle\nfrom bundles.fonts import main as fonts\n"
+                    "bundle('Shell', depends_on=[fonts])\n"
+                ),
+                "tasks.py": task_source("configure_shell"),
+            },
+        },
+    )
+
+    project = load_project(root)
+
+    by_id = {bundle.id: bundle for bundle in project.bundles}
+    assert by_id["gnome"].depends_on == ("fonts",)
+    assert by_id["shell"].depends_on == ("fonts",)
+
+    plan = resolve(project.bundles, registry=by_id)
+    assert [bundle.id for bundle in plan.bundles] == ["fonts", "gnome", "shell"]
+
+
+def test_depends_on_accepts_a_prefixed_bundle_module(tmp_path):
+    root = make_project(
+        tmp_path,
+        bundles={
+            "01_fonts": {
+                "main.py": "from kitup import bundle\n\nbundle('Fonts')\n",
+                "tasks.py": task_source("install_fonts"),
+            },
+            "gnome": {
+                "main.py": (
+                    "import importlib\nfrom kitup import bundle\n"
+                    "fonts = importlib.import_module('bundles.01_fonts.main')\n"
+                    "bundle('Gnome', depends_on=[fonts])\n"
+                ),
+                "tasks.py": task_source("configure_gnome"),
+            },
+        },
+    )
+
+    project = load_project(root)
+
+    by_id = {bundle.id: bundle for bundle in project.bundles}
+    assert by_id["gnome"].depends_on == ("fonts",)
+
+    plan = resolve(project.bundles, registry=by_id)
+    assert [bundle.id for bundle in plan.bundles] == ["fonts", "gnome"]
 
 
 def test_synthesizes_a_bundle_when_the_folder_has_no_main(tmp_path):
