@@ -17,6 +17,16 @@ FLATPAK_RUNTIME = "org.kitup.TestPlatform"
 SCHEMA = "org.kitup.IntegrationTest"
 SCHEMA_KEY = "example-string"
 SCHEMA_DEFAULT = "'default-value'"
+SCHEMA_KEYS = (
+    "example-string",
+    "example-uint",
+    "example-empty-list",
+    "example-double",
+    "example-maybe",
+    "example-variant",
+    "example-dict",
+    "example-bytes",
+)
 
 
 def sudo(*args: str) -> list[str]:

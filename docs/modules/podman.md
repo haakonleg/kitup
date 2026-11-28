@@ -235,8 +235,7 @@ Generate a systemd unit for a container.
 - `wants`, `requires`, and `after` — systemd dependency unit names.
 - `mode` — file mode. Accepts an integer or an octal string such as `"0644"`.
 
-Podman's generated header, which contains a timestamp, is omitted so repeated
-runs produce identical content.
+Podman's generated header, which contains a timestamp, is omitted.
 
 The filename follows Podman's naming rules, for example
 `container-web.service`. Parent directories must already exist.

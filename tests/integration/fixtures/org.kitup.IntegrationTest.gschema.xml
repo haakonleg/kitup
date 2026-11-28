@@ -5,5 +5,33 @@
       <default>'default-value'</default>
       <summary>Fixture value for kitup integration tests</summary>
     </key>
+    <key name="example-uint" type="u">
+      <default>1</default>
+      <summary>Fixture unsigned integer</summary>
+    </key>
+    <key name="example-empty-list" type="as">
+      <default>['default']</default>
+      <summary>Fixture string array</summary>
+    </key>
+    <key name="example-double" type="d">
+      <default>1.5</default>
+      <summary>Fixture double</summary>
+    </key>
+    <key name="example-maybe" type="ms">
+      <default>'x'</default>
+      <summary>Fixture maybe-string</summary>
+    </key>
+    <key name="example-variant" type="v">
+      <default>&lt;42&gt;</default>
+      <summary>Fixture variant</summary>
+    </key>
+    <key name="example-dict" type="a{sv}">
+      <default>{}</default>
+      <summary>Fixture variant dictionary</summary>
+    </key>
+    <key name="example-bytes" type="ay">
+      <default>[]</default>
+      <summary>Fixture byte array</summary>
+    </key>
   </schema>
 </schemalist>

@@ -103,6 +103,5 @@ Prefer `to_file()` for large files.
   through `headers` to request a different encoding, for example
   `headers={"Accept-Encoding": "identity"}`.
 - Content encodings `gzip`, `deflate`, and `zstd` are decoded automatically.
-  Other content encodings fail the task.
 - Checksum URLs, authentication, client certificates, and non-HTTP(S) URLs are
   not supported.

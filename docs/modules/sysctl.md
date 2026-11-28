@@ -40,8 +40,6 @@ sysctl.key("kernel.panic", state="absent", file="/etc/sysctl.d/99-kitup.conf")
 
 ## Behavior
 
-- `state="present"` sets the runtime value. An unknown key fails the task before
-  any change is made.
 - When `file` is set, the entry is created or updated. The parent directory
   must exist. `--dry-run` reports the change without writing, and `--diff`
   prints a unified diff for the file.

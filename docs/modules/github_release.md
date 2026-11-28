@@ -76,8 +76,8 @@ asset = github_release.by_asset(
 )
 ```
 
-The task fails when the regex is invalid, when no asset matches, or when more
-than one asset matches. The error lists the available or matching asset names.
+The task fails when no asset matches or when more than one asset matches. The
+error lists the available or matching asset names.
 
 Returns an [`Asset`](#asset) object. This method records no call.
 
@@ -175,5 +175,3 @@ known digest yourself.
 - These functions are read-only: they record no changes and still contact the
   API during `--dry-run`. This lets task logic branch on real release data.
   A subsequent `download.to_file()` dry run does not contact the asset server.
-- Failures raise `TaskFailed` for missing releases, rate limits, invalid JSON,
-  malformed responses, network errors, and timeouts.

@@ -129,7 +129,7 @@ content
 - `state="present"` creates or updates the block; `"absent"` removes it.
 - `sudo=True` edits the file as root.
 
-Malformed or duplicate markers raise a task failure.
+Markers in an existing file must be well-formed and unique.
 
 ### Result fields
 
@@ -200,7 +200,7 @@ Set or remove one key in a TOML file, table by table.
   when the file does not exist. An absent edit does not create the file.
 - `sudo=True` edits the file as root.
 
-Array-of-tables (`[[...]]`) cannot be edited and are rejected.
+Array-of-tables (`[[...]]`) cannot be edited.
 
 ### Result fields
 
@@ -358,8 +358,7 @@ Rendering behavior:
 
 Templates also expose additional filters and tests, alongside Jinja2's built-in
 filters and tests (`join`, `map`, `default`, `tojson`, `defined`, `in`,
-`boolean`, and so on). Invalid helper input fails the task as a template
-rendering error.
+`boolean`, and so on).
 
 ### Path filters
 
@@ -496,15 +495,14 @@ Both filters support IPv4 and IPv6.
 ### Type filter
 
 - `bool` — convert `yes`/`on`/`true`/`1` and `no`/`off`/`false`/`0`
-  case-insensitively. Other values raise a task failure.
+  case-insensitively.
 
 ### Tests
 
 - `version(value, version, operator="eq", *, strict=False, version_type=None)`
   and its alias `version_compare` — loose version comparison with `==`, `=`,
   `eq`, `<`, `lt`, `<=`, `le`, `>`, `gt`, `>=`, `ge`, `!=`, `<>`, or `ne`. Only
-  `version_type="loose"` is supported; `strict=True` and other version types
-  raise a task failure.
+  `version_type="loose"` is supported.
 - `search`, `match`, `regex` — regular-expression tests; `regex` accepts
   `match_type="search"` or `"match"`. All accept `ignorecase` and `multiline`.
 - `any`, `all` — truthiness over a sequence.

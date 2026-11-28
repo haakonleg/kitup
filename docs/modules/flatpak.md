@@ -20,8 +20,8 @@ Manage a Flatpak remote repository.
   Useful for unsigned local repositories.
 
 `"present"` adds the remote. An existing remote is left unchanged, including
-its URL. `"absent"` removes the remote; if installed applications still use it,
-the task fails.
+its URL. `"absent"` removes the remote, unless installed applications still use
+it.
 
 ### Result fields
 

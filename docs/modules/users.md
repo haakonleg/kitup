@@ -14,15 +14,14 @@ Ensure a local user account exists or is absent.
 
 - `name` — login name.
 - `state` — `"present"` or `"absent"`.
-- `uid` — numeric UID. Applied only when creating a user; an existing user with
-  a different UID fails.
+- `uid` — numeric UID, applied only when creating a user.
 - `group` — primary group, as a name or numeric GID.
 - `home` — home directory. Must be an absolute path. On an existing user this
   changes the recorded home directory without moving files.
 - `shell` — login shell. Must be an absolute path.
 - `create` — create the user when it does not exist. With `create=False`, a
-  missing user fails instead of being created; existing users are still
-  modified. Ignored for `state="absent"`.
+  missing user is left uncreated; existing users are still modified. Ignored
+  for `state="absent"`.
 - `create_home` — create the home directory when creating a user. Ignored for
   existing users.
 - `password` — pre-hashed password, for example a `$6$...` SHA-512 crypt hash.
@@ -62,8 +61,7 @@ Ensure a local group exists or is absent.
 
 - `name` — group name.
 - `state` — `"present"` or `"absent"`.
-- `gid` — numeric GID. Applied only when creating a group; an existing group
-  with a different GID fails.
+- `gid` — numeric GID, applied only when creating a group.
 
 ### Result fields
 
@@ -99,9 +97,9 @@ users.membership("deploy", "docker", state="absent")
 ## Behavior
 
 - A missing user or group is created, unless `user(..., create=False)` is used,
-  which fails for a missing user.
-- Removing a user from their primary group fails; change the primary group with
-  `user(..., group=...)` instead.
+  which does not create a missing user.
+- A user cannot be removed from their primary group; change the primary group
+  with `user(..., group=...)` instead.
 - Password hashes are never shown in output.
 - All mutating operations request sudo automatically. `--dry-run` reports what
   would change without modifying the system.
@@ -109,8 +107,6 @@ users.membership("deploy", "docker", state="absent")
 ## Notes
 
 - Requires the standard `shadow-utils` account tools.
-- UID and GID are only applied when creating an account. Changing an existing
-  UID or GID is rejected.
 - `create_home` only applies when creating a user.
 - `create=False` only prevents creation; it still applies the requested
   attributes to an existing user.

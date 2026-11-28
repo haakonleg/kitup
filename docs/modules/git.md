@@ -16,8 +16,7 @@ Ensure the repository `url` is checked out at `dest`.
 - `url` — repository address: an HTTPS URL, an SSH address such as
   `git@host:owner/repo.git`, or a local path.
 - `dest` — checkout directory. A missing or empty directory is cloned into.
-  A non-empty directory must itself be the top level of a git repository,
-  otherwise the task fails.
+  A non-empty directory must itself be the top level of a git repository.
 - `version` — branch, tag, commit, or `"HEAD"` (the remote's default branch).
   At clone time a branch or tag is passed as `--branch`; a full commit SHA is
   checked out after cloning.
@@ -32,8 +31,8 @@ Ensure the repository `url` is checked out at `dest`.
   with `update=False` makes no network requests, and a URL change is reported
   without fetching the old remote.
 - `force` — discard local modifications to tracked files when updating.
-  Without it, a modified worktree fails the task. Untracked files are never
-  removed and do not block an update.
+  Without it, local modifications to tracked files block an update. Untracked
+  files are never removed and do not block an update.
 
 ### Result fields
 
